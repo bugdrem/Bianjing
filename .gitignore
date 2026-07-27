@@ -1,3 +1,21 @@
 # Godot 4+ specific ignores
 .godot/
 /android/
+
+# Visual Studio / Rider
+.vs/
+.idea/
+*.suo
+*.user
+
+# Build output
+bin/
+obj/
+
+# Godot
+.godot/
+*.import
+
+# OS
+Thumbs.db
+.DS_Store
