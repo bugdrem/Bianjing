@@ -3,7 +3,7 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>HUD 根：顶栏 + 底部建造菜单 + 政策面板 + 右下角格子信息 + 帧率显示(Ctrl+F)。</summary>
+/// <summary>HUD 根：顶栏 + 底部建造菜单 + 政策/财政/点选详情面板 + 右下角格子信息 + 帧率显示(Ctrl+F)。</summary>
 public partial class Hud : CanvasLayer
 {
     private readonly BuildController _build;
@@ -14,6 +14,9 @@ public partial class Hud : CanvasLayer
     private Label _cellInfo;
     private Label _fps;
     private float _infoTimer;
+
+    private InspectPanel _inspect;
+    private FinancePanel _finance;
 
     public Hud(BuildController build, GameClock clock, Action onSave, Action onLoad)
     {
@@ -26,9 +29,13 @@ public partial class Hud : CanvasLayer
     public override void _Ready()
     {
         var policy = new PolicyPanel();
-        AddChild(new TopBar(_clock, _onSave, _onLoad, policy.Toggle));
+        _finance = new FinancePanel();
+        _inspect = new InspectPanel();
+        AddChild(new TopBar(_clock, _onSave, _onLoad, policy.Toggle, _finance.Toggle));
         AddChild(new BuildMenu(_build));
         AddChild(policy);
+        AddChild(_finance);
+        AddChild(_inspect);
 
         _cellInfo = new Label
         {
@@ -58,6 +65,12 @@ public partial class Hud : CanvasLayer
         _cellInfo.Text = text;
         _infoTimer = 6f;
     }
+
+    public void ShowCitizen(Citizen c) => _inspect.ShowCitizen(c);
+
+    public void ShowBuilding(BuildingInstance b) => _inspect.ShowBuilding(b);
+
+    public void CloseInspect() => _inspect.Close();
 
     public override void _Process(double delta)
     {

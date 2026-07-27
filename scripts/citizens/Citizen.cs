@@ -17,7 +17,7 @@ public enum JobKind
     Repairer,
 }
 
-/// <summary>居民当前活动（表现层状态机驱动，随存档保存）。</summary>
+/// <summary>居民当前活动（表现层状态机驱动，随存档保存；新值只能尾部追加，防老档枚举错位）。</summary>
 public enum ActivityType
 {
     RestHome,
@@ -30,6 +30,8 @@ public enum ActivityType
     Hunting,
     Trading,
     Repairing,
+    /// <summary>把携带的货物搬回自家入库。</summary>
+    Hauling,
 }
 
 /// <summary>
@@ -78,11 +80,15 @@ public class Citizen
     public float PosZ;
     public bool PosValid;
 
-    /// <summary>携带的山货（wood/fruit/game，待去市集交易；空串表示空手）。</summary>
+    /// <summary>携带的货物（grain/wood/fruit/game，一担；待搬回家或去市集交易；空串表示空手）。</summary>
     public string Carrying = "";
 
     /// <summary>无家可归的持续月数，过久则迁出。</summary>
     public int HomelessMonths;
+
+    /// <summary>连续缺粮/缺柴天数（家中无存货且买不到，需求面板展示）。</summary>
+    public int FoodShortDays;
+    public int FuelShortDays;
 
     /// <summary>mod / 未来系统扩展字段。</summary>
     public Dictionary<string, string> Extra = new();

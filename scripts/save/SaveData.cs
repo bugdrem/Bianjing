@@ -8,6 +8,11 @@ public class SaveMeta
     public int Version;
     public int Year;
     public int Month;
+
+    /// <summary>v3 起：日/小时（老档为 0，读档时回退默认）。</summary>
+    public int Day;
+    public int Hour;
+
     public long SavedAtUnix;
     public string CityName = "";
     public string SaveName = "";
@@ -37,6 +42,10 @@ public class WorldSave
 
     /// <summary>税收政策：税种 Id -&gt; 档位。</summary>
     public Dictionary<string, int> TaxLevels = new();
+
+    /// <summary>v3 起：官库账本（本月/上月分类流水）。</summary>
+    public Dictionary<string, double> LedgerCur = new();
+    public Dictionary<string, double> LedgerPrev = new();
 }
 
 /// <summary>地图数据：各类地表格用一维索引（y*Size+x）紧凑存储。</summary>
@@ -61,4 +70,10 @@ public class BuildingSave
     public int Y;
     public int Level;
     public float Condition;
+
+    /// <summary>v3 起：建造日期（老档为 0 显示「不详」）、专营货品与库存。</summary>
+    public int BuiltYear;
+    public int BuiltMonth;
+    public string Specialty = "";
+    public Dictionary<string, double> Storage = new();
 }

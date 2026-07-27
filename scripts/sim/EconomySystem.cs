@@ -2,12 +2,12 @@ using System;
 
 namespace Bianjing;
 
-/// <summary>经济系统：每月扣建筑维护费；粮田产粮、人口耗粮。税收由 TaxSystem 按政策结算。</summary>
+/// <summary>经济系统（每日结算）：按月值的 1/30 扣建筑维护费并记账；粮田产粮、人口耗粮。税收由 TaxSystem 按政策结算。</summary>
 public class EconomySystem
 {
     private const double FoodPerCapita = 0.2;
 
-    public void Tick(GameState gs)
+    public void TickDay(GameState gs)
     {
         double upkeep = 0;
         double foodNet = -gs.Population * FoodPerCapita;
@@ -18,8 +18,10 @@ public class EconomySystem
             foodNet += b.Def.FoodOutput;
         }
 
+        upkeep /= GameClock.DaysPerMonth;
         gs.Money -= upkeep;
-        gs.Food = Math.Max(0, gs.Food + foodNet);
+        gs.Ledger.Add("建筑维护", -upkeep);
+        gs.Food = Math.Max(0, gs.Food + foodNet / GameClock.DaysPerMonth);
 
         EventBus.RaiseStatsChanged();
     }

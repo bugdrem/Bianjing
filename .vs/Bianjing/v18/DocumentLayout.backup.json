@@ -3,6 +3,10 @@
   "WorkspaceRootPath": "D:\\Godot\\Bianjing\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\map\\gridrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\map\\gridrenderer.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\map\\cell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\map\\cell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
     },
@@ -46,30 +50,43 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 28,
+          "SelectedChildIndex": 0,
           "Children": [
             {
               "$type": "Document",
-              "DocumentIndex": 3,
+              "DocumentIndex": 0,
+              "Title": "GridRenderer.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\map\\GridRenderer.cs",
+              "RelativeDocumentMoniker": "scripts\\map\\GridRenderer.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\map\\GridRenderer.cs",
+              "RelativeToolTip": "scripts\\map\\GridRenderer.cs",
+              "ViewState": "AgIAABsBAAAAAAAAAAAkwDQBAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T08:03:46.797Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
               "Title": "BuildingDef.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\build\\BuildingDef.cs",
               "RelativeDocumentMoniker": "scripts\\build\\BuildingDef.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\build\\BuildingDef.cs",
               "RelativeToolTip": "scripts\\build\\BuildingDef.cs",
-              "ViewState": "AgIAADAAAAAAAAAAAAAjwEIAAAAyAAAAAAAAAA==",
+              "ViewState": "AgIAADAAAAAAAAAAAAAjwEUAAAAyAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-07-27T06:52:11.553Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 4,
+              "DocumentIndex": 5,
               "Title": "BuildController.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\build\\BuildController.cs",
               "RelativeDocumentMoniker": "scripts\\build\\BuildController.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\build\\BuildController.cs",
               "RelativeToolTip": "scripts\\build\\BuildController.cs",
-              "ViewState": "AgIAAEkBAAAAAAAAAAAQwAAAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAHsBAAAAAAAAAAAQwAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-07-27T06:51:56.526Z",
               "EditorCaption": ""
@@ -160,7 +177,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 2,
               "Title": "SaveService.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\save\\SaveService.cs",
               "RelativeDocumentMoniker": "scripts\\save\\SaveService.cs",
@@ -173,46 +190,46 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 6,
+              "DocumentIndex": 7,
               "Title": "SaveData.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\save\\SaveData.cs",
               "RelativeDocumentMoniker": "scripts\\save\\SaveData.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\save\\SaveData.cs",
               "RelativeToolTip": "scripts\\save\\SaveData.cs",
-              "ViewState": "AgIAAAgAAAAAAAAAAAAIwB0AAAAYAAAAAAAAAA==",
+              "ViewState": "AgIAAAgAAAAAAAAAAAAIwCIAAAAYAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-07-27T06:37:50.464Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 7,
+              "DocumentIndex": 8,
               "Title": "ZoneGrowthSystem.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\zone\\ZoneGrowthSystem.cs",
               "RelativeDocumentMoniker": "scripts\\zone\\ZoneGrowthSystem.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\zone\\ZoneGrowthSystem.cs",
               "RelativeToolTip": "scripts\\zone\\ZoneGrowthSystem.cs",
-              "ViewState": "AgIAAEkAAAAAAAAAAAAiwAEAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAEwAAAAAAAAAAAAiwAEAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-07-27T06:37:18.889Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 2,
+              "DocumentIndex": 3,
               "Title": "Main.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\Main.cs",
               "RelativeDocumentMoniker": "scripts\\Main.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\Main.cs",
               "RelativeToolTip": "scripts\\Main.cs",
-              "ViewState": "AgIAABMAAAAAAAAAAAAIwEEAAAA6AAAAAAAAAA==",
+              "ViewState": "AgIAABQAAAAAAAAAAAAIwEYAAAA6AAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-07-27T06:36:50.308Z",
               "EditorCaption": ""
             },
             {
               "$type": "Document",
-              "DocumentIndex": 8,
+              "DocumentIndex": 9,
               "Title": ".editorconfig",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\.editorconfig",
               "RelativeDocumentMoniker": ".editorconfig",
@@ -225,7 +242,7 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 1,
               "Title": "Cell.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\map\\Cell.cs",
               "RelativeDocumentMoniker": "scripts\\map\\Cell.cs",
@@ -238,13 +255,13 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 5,
+              "DocumentIndex": 6,
               "Title": "AgentManager.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\agents\\AgentManager.cs",
               "RelativeDocumentMoniker": "scripts\\agents\\AgentManager.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\agents\\AgentManager.cs",
               "RelativeToolTip": "scripts\\agents\\AgentManager.cs",
-              "ViewState": "AgIAAHAAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAHMAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
               "WhenOpened": "2026-07-27T05:54:03.947Z",
               "EditorCaption": ""

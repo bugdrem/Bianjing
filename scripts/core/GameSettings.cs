@@ -2,10 +2,10 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>用户设置持久化（user://settings.cfg）：全屏/垂直同步/自动保存间隔。</summary>
+/// <summary>用户设置持久化（游戏根目录/settings.cfg）：全屏/垂直同步/自动保存间隔。</summary>
 public static class GameSettings
 {
-    private const string CfgPath = "user://settings.cfg";
+    private static string CfgPath => GamePaths.SettingsFile;
 
     /// <summary>自动保存间隔（分钟），0 为关闭。</summary>
     public static int AutoSaveMinutes = 5;

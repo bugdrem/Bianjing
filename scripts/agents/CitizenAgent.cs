@@ -27,8 +27,15 @@ public partial class CitizenAgent : Node3D
     private readonly AgentManager _manager;
     private readonly Random _rng = new();
 
-    private MeshInstance3D _mesh;
-    private StandardMaterial3D _mat;
+    private MeshInstance3D _lower, _upper, _head, _hat;
+    private StandardMaterial3D _lowerMat, _upperMat, _headMat, _hatMat;
+
+    // 宋人占位模型：头/上身/下身 + 冠发，共享网格资源省内存，材质各自持有
+    private static readonly BoxMesh SharedBox = new() { Size = Vector3.One };
+    private static readonly SphereMesh SharedSphere = new() { Radius = 0.5f, Height = 1f };
+
+    private Node3D _body;
+    private bool _spawnPending;
 
     private List<Vector3> _path;
     private int _pathIndex;
@@ -47,13 +54,12 @@ public partial class CitizenAgent : Node3D
 
     public override void _Ready()
     {
-        _mat = new StandardMaterial3D();
-        _mesh = new MeshInstance3D
-        {
-            Mesh = new CapsuleMesh { Radius = 0.45f, Height = 1.7f },
-            MaterialOverride = _mat,
-        };
-        AddChild(_mesh);
+        _body = new Node3D();
+        AddChild(_body);
+        _lower = AddPart(SharedBox, _lowerMat = new StandardMaterial3D());
+        _upper = AddPart(SharedBox, _upperMat = new StandardMaterial3D());
+        _head = AddPart(SharedSphere, _headMat = new StandardMaterial3D());
+        _hat = AddPart(SharedBox, _hatMat = new StandardMaterial3D());
         ApplyLook();
 
         _laneJitter = new Vector3(
@@ -69,13 +75,29 @@ public partial class CitizenAgent : Node3D
         }
         else
         {
+            // 迁入者从住所/工商建筑门前出现；HomeId 在同次月结算稍后才指定，首帧再校正一次
             Position = HomePosition();
+            _spawnPending = true;
             _dwell = (float)_rng.NextDouble() * 3f;
         }
     }
 
+    private MeshInstance3D AddPart(Mesh mesh, StandardMaterial3D mat)
+    {
+        var mi = new MeshInstance3D { Mesh = mesh, MaterialOverride = mat };
+        _body.AddChild(mi);
+        return mi;
+    }
+
     public override void _Process(double delta)
     {
+        if (_spawnPending)
+        {
+            // 出生/迁入时住所在代理创建之后才分配，首帧从住所建筑重新定位
+            _spawnPending = false;
+            Position = HomePosition();
+        }
+
         if (_clock.Speed <= 0)
             return;
         float dt = (float)delta * _clock.Speed;
@@ -115,10 +137,13 @@ public partial class CitizenAgent : Node3D
         if (C.AgeYears != _lookAgeYears)
             ApplyLook();
 
-        // 背着山货（柴/野果/猎物）：先去市集卖掉
+        // 背着山货（粮/柴/野果/猎物）：家里放得下先搬回家，否则挑去专营铺子卖掉
         if (C.Carrying != "")
         {
-            StartActivity(ActivityType.Trading, ShoppingAnchor(gs), 2.5f);
+            if (gs.Buildings.TryGetValue(C.HomeId, out var home) && home.StorageFree >= 1)
+                StartActivity(ActivityType.Hauling, HomeAnchor(), 2f);
+            else
+                StartActivity(ActivityType.Trading, TradeAnchor(gs), 2.5f);
             return;
         }
 
@@ -276,7 +301,7 @@ public partial class CitizenAgent : Node3D
         StartWorkAt(target, ActivityType.Repairing);
     }
 
-    /// <summary>驻留结束时的活动结算（砍树/采摘/打猎/卖货）。</summary>
+    /// <summary>驻留结束时的活动结算（砍树/采摘/打猎/卖货/下工工钱）：钱与货品一律按动作完成即时结算。</summary>
     private void CompleteActivity()
     {
         switch (C.Activity)
@@ -298,29 +323,81 @@ public partial class CitizenAgent : Node3D
             case ActivityType.Trading:
                 if (C.Carrying != "")
                 {
-                    C.Money += TradeIncome(C.Carrying);
+                    SellCarrying(GameState.I);
                     C.Carrying = "";
                 }
+                break;
+            case ActivityType.Hauling:
+                // 搬回家入库；家里已装不下整担则下次决策转去市集
+                if (C.Carrying != "" && GameState.I.Buildings.TryGetValue(C.HomeId, out var home)
+                    && home.StoreGoods(C.Carrying, Goods.LoadUnits) > 0)
+                    C.Carrying = "";
+                break;
+            case ActivityType.Working:
+                // 下工即结：当班工钱（月俸/30）入账；农夫另将当班产粮入田仓，田仓有存就挑一担带走
+                if (GameState.I.Buildings.TryGetValue(C.WorkplaceId, out var work))
+                {
+                    C.Money += work.Def.Salary / GameClock.DaysPerMonth;
+                    if (work.Def.Id == "farm")
+                    {
+                        work.StoreGoods(Goods.Grain, GoodsSystem.GrainPerWorkerShift);
+                        if (C.Carrying == "" && work.TakeGoods(Goods.Grain, Goods.LoadUnits) > 0)
+                            C.Carrying = Goods.Grain;
+                    }
+                }
+                break;
+            case ActivityType.Repairing:
+                // 修缮匠下工即结：官库发当班俸禄并记账
+                double pay = JobSystem.RepairerIncome / GameClock.DaysPerMonth;
+                C.Money += pay;
+                GameState.I.Money -= pay;
+                GameState.I.Ledger.Add("修缮匠俸禄", -pay);
                 break;
         }
         _activityCell = null;
         _activityAnimalId = -1;
     }
 
-    /// <summary>山货市集售价（月薪另由 JobSystem 结算）。</summary>
-    private static double TradeIncome(string goods) => goods switch
+    /// <summary>把肩上一担货卖进专营铺面：入库多少收多少钱；铺面全满则按基价散卖给行商。</summary>
+    private void SellCarrying(GameState gs)
     {
-        "wood" => 1.0,
-        "fruit" => 0.6,
-        "game" => 1.6,
-        _ => 0,
-    };
+        var shop = FindTradeShop(gs, C.Carrying, needFree: true);
+        double sold = shop?.StoreGoods(C.Carrying, Goods.LoadUnits) ?? 0;
+        if (sold <= 0)
+            sold = Goods.LoadUnits; // 散卖：货物离场，不入任何库
+        C.Money += Goods.PriceOf(C.Carrying) * sold;
+    }
+
+    /// <summary>找专营该货品的商铺/工坊（needFree 时要求还有库容），取余仓最大者。</summary>
+    private static BuildingInstance FindTradeShop(GameState gs, string goodsId, bool needFree)
+    {
+        BuildingInstance best = null;
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Specialty != goodsId)
+                continue;
+            if (needFree && b.StorageFree < 1)
+                continue;
+            if (best == null || b.StorageFree > best.StorageFree)
+                best = b;
+        }
+        return best;
+    }
+
+    /// <summary>交易目的地：优先有库容的专营铺，其次任意专营铺，再退化到随机商铺。</summary>
+    private Vector2I? TradeAnchor(GameState gs)
+    {
+        var shop = FindTradeShop(gs, C.Carrying, needFree: true)
+                   ?? FindTradeShop(gs, C.Carrying, needFree: false);
+        return shop != null ? BuildingAnchor(shop) ?? shop.Origin : ShoppingAnchor(gs);
+    }
 
     // ---- 寻路与移动 ----
 
     /// <summary>
     /// 混合寻路：就近上路 → 路网 AStar → 末段脱路直线接近目标。
-    /// 找不到路网可达时全程直线慢行（脱路惩罚），不再瞬移。
+    /// 脱路段若直线会蹚水，先用网格 BFS 找旱路绕行（岸上/桥/路可走）；
+    /// 只有真正无旱路可绕时才允许直线过河，不再瞬移。
     /// </summary>
     private void BuildPathTo(Vector3 targetWorld)
     {
@@ -335,15 +412,91 @@ public partial class CitizenAgent : Node3D
         if (entry != null && exit != null && entry.Value != exit.Value)
         {
             var cells = gs.Roads.FindPath(entry.Value, exit.Value);
+            if (cells.Count > 0)
+                AppendDrySegment(points, Position, MapGrid.CellToWorld(cells[0])); // 上路前的脱路段也不蹚水
             foreach (var c in cells)
                 points.Add(MapGrid.CellToWorld(c) + Vector3.Up * 0.2f + _laneJitter); // 车道偏移：各走各道
         }
 
-        // 末段：脱路直线走向目标（也覆盖无路可走的情形）
-        points.Add(new Vector3(targetWorld.X, 0.2f, targetWorld.Z));
+        // 末段：脱路走向目标（先绕开水面，无旱路才直线过河）
+        var dest = new Vector3(targetWorld.X, 0.2f, targetWorld.Z);
+        AppendDrySegment(points, points.Count > 0 ? points[^1] : Position, dest);
+        points.Add(dest);
 
         _path = points;
         _pathIndex = 0;
+    }
+
+    /// <summary>脱路段避水：直线会蹚水时插入 BFS 旱路绕行点；找不到旱路则保持直线（无路可走才过河）。</summary>
+    private static void AppendDrySegment(List<Vector3> points, Vector3 from, Vector3 to)
+    {
+        if (!LineCrossesWater(from, to))
+            return;
+        var detour = FindDryDetour(MapGrid.WorldToCell(from), MapGrid.WorldToCell(to));
+        if (detour == null)
+            return;
+        for (int i = 1; i < detour.Count; i++) // 跳过脚下第一格，免得原地折返
+            points.Add(MapGrid.CellToWorld(detour[i]) + Vector3.Up * 0.2f);
+    }
+
+    /// <summary>直线途经是否会蹚水（桥面/路面上的水不算），沿线每 2m 采样一次。</summary>
+    private static bool LineCrossesWater(Vector3 from, Vector3 to)
+    {
+        float dist = new Vector2(to.X - from.X, to.Z - from.Z).Length();
+        int steps = Mathf.CeilToInt(dist / 2f);
+        for (int i = 1; i <= steps; i++)
+        {
+            var c = MapGrid.WorldToCell(from.Lerp(to, i / (float)steps));
+            if (MapGrid.InBounds(c) && !IsDryCell(c))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>旱路格：岸上、桥面或路面。</summary>
+    private static bool IsDryCell(Vector2I c)
+    {
+        var cell = GameState.I.Map.CellAt(c);
+        return !cell.HasWater || cell.HasBridge || cell.HasRoad;
+    }
+
+    /// <summary>四向 BFS 找旱路（含起终格）；搜索量封顶防卡帧，找不到返回 null。</summary>
+    private static List<Vector2I> FindDryDetour(Vector2I from, Vector2I to)
+    {
+        if (!MapGrid.InBounds(from) || !MapGrid.InBounds(to) || !IsDryCell(to))
+            return null;
+
+        var prev = new Dictionary<Vector2I, Vector2I> { [from] = from };
+        var queue = new Queue<Vector2I>();
+        queue.Enqueue(from);
+        Vector2I[] dirs = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
+
+        while (queue.Count > 0 && prev.Count < 2000)
+        {
+            var cur = queue.Dequeue();
+            if (cur == to)
+            {
+                var path = new List<Vector2I>();
+                for (var c = to; ; c = prev[c])
+                {
+                    path.Add(c);
+                    if (c == from)
+                        break;
+                }
+                path.Reverse();
+                return path;
+            }
+            foreach (var d in dirs)
+            {
+                var n = cur + d;
+                if (!prev.ContainsKey(n) && MapGrid.InBounds(n) && IsDryCell(n))
+                {
+                    prev[n] = cur;
+                    queue.Enqueue(n);
+                }
+            }
+        }
+        return null;
     }
 
     private void MoveAlongPath(float dt)
@@ -413,6 +566,9 @@ public partial class CitizenAgent : Node3D
                 C.Fatigue += 0.5f * dt;
                 C.Fun += 1f * dt;
                 break;
+            case ActivityType.Hauling:
+                C.Fatigue += 1f * dt; // 挑担回家：略耗体力
+                break;
         }
         C.Fatigue = Mathf.Clamp(C.Fatigue, 0f, 100f);
         C.Fun = Mathf.Clamp(C.Fun, 0f, 100f);
@@ -446,8 +602,13 @@ public partial class CitizenAgent : Node3D
 
     private Vector3 HomePosition()
     {
-        if (GameState.I.Buildings.TryGetValue(C.HomeId, out var home))
+        var gs = GameState.I;
+        if (gs.Buildings.TryGetValue(C.HomeId, out var home))
             return MapGrid.CellToWorld(home.Origin) + Vector3.Up * 0.2f;
+        // 无住所也从住宅/工商建筑出现，不在地图上凭空刷新
+        foreach (var b in gs.Buildings.Values)
+            if (b.Def.Category == "grown")
+                return MapGrid.CellToWorld(b.Origin) + Vector3.Up * 0.2f;
         var road = _manager.RandomRoadCell(_rng);
         return road != null ? MapGrid.CellToWorld(road.Value) + Vector3.Up * 0.2f : Vector3.Up * 0.2f;
     }
@@ -478,21 +639,56 @@ public partial class CitizenAgent : Node3D
         return target != null ? BuildingAnchor(target) : _manager.RandomRoadCell(_rng);
     }
 
-    /// <summary>外观：体型随年龄、颜色随性别/年龄。</summary>
+    /// <summary>外观：宋人三段式（头/上身/下身）+ 冠发。体型随年龄，配色分男女，老人白发。</summary>
     private void ApplyLook()
     {
         _lookAgeYears = C.AgeYears;
         float bodyScale = C.IsChild ? 0.45f + 0.35f * (C.AgeYears / 16f) : 1f;
-        _mesh.Scale = Vector3.One * bodyScale;
-        _mesh.Position = Vector3.Up * (0.85f * bodyScale);
+        _body.Scale = Vector3.One * bodyScale;
 
-        Color color;
-        if (C.IsElder)
-            color = new Color(0.75f, 0.75f, 0.72f);
-        else if (C.IsChild)
-            color = new Color(0.95f, 0.85f, 0.45f);
+        bool female = C.Gender == Gender.Female;
+
+        // 下身：男着裤褌收窄，女着长裙放宽
+        _lower.Scale = female ? new Vector3(0.6f, 0.8f, 0.42f) : new Vector3(0.48f, 0.75f, 0.32f);
+        _lower.Position = Vector3.Up * (_lower.Scale.Y / 2f);
+        float waist = _lower.Scale.Y;
+
+        // 上身：男肩宽、女肩窄
+        _upper.Scale = new Vector3(female ? 0.5f : 0.56f, 0.55f, 0.34f);
+        _upper.Position = Vector3.Up * (waist + 0.275f);
+        float neck = waist + 0.55f;
+
+        // 头 + 冠发（男戴幞头、女绾发髻，老人白发）
+        _head.Scale = Vector3.One * 0.34f;
+        _head.Position = Vector3.Up * (neck + 0.19f);
+        _hat.Scale = female ? new Vector3(0.18f, 0.14f, 0.18f) : new Vector3(0.3f, 0.1f, 0.3f);
+        _hat.Position = Vector3.Up * (neck + 0.38f);
+
+        _headMat.AlbedoColor = new Color(0.91f, 0.76f, 0.62f); // 肤色
+        _hatMat.AlbedoColor = C.IsElder ? new Color(0.92f, 0.92f, 0.9f) : new Color(0.09f, 0.08f, 0.08f);
+
+        Color upperCol, lowerCol;
+        if (C.IsChild)
+        {
+            upperCol = new Color(0.95f, 0.85f, 0.45f);
+            lowerCol = new Color(0.75f, 0.55f, 0.35f);
+        }
+        else if (C.IsElder)
+        {
+            upperCol = new Color(0.62f, 0.62f, 0.58f);
+            lowerCol = new Color(0.46f, 0.46f, 0.43f);
+        }
+        else if (female)
+        {
+            upperCol = new Color(0.76f, 0.42f, 0.47f); // 粉色襦衫
+            lowerCol = new Color(0.5f, 0.62f, 0.5f);   // 青绿罗裙
+        }
         else
-            color = C.Gender == Gender.Male ? new Color(0.35f, 0.45f, 0.6f) : new Color(0.75f, 0.4f, 0.45f);
-        _mat.AlbedoColor = color;
+        {
+            upperCol = new Color(0.34f, 0.4f, 0.5f);   // 青灰襕衫
+            lowerCol = new Color(0.26f, 0.3f, 0.36f);
+        }
+        _upperMat.AlbedoColor = upperCol;
+        _lowerMat.AlbedoColor = lowerCol;
     }
 }

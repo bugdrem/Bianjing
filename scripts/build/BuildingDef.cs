@@ -52,6 +52,9 @@ public class BuildingDef
     /// <summary>雇工每月工资。</summary>
     public double Salary { get; set; }
 
+    /// <summary>储存上限（份）：住宅存家用物资，商铺/工坊存专营货品，农田存待运粮食。</summary>
+    public int StorageCapacity { get; set; }
+
     [JsonIgnore]
     public Godot.Color GodotColor => new(Color);
 
@@ -88,6 +91,55 @@ public class BuildingInstance : Obj
 
     /// <summary>完好度 0-100：人造建筑逐月老化，修缮恢复，归零坍塌。</summary>
     public float Condition = 100f;
+
+    /// <summary>建造日期（游戏年/月；老存档为 0 表示不详）。</summary>
+    public int BuiltYear;
+    public int BuiltMonth;
+
+    /// <summary>专营货品（商铺/工坊倾向单一货品交易；空串表示不经营）。</summary>
+    public string Specialty = "";
+
+    /// <summary>库存：货品 id → 份数。</summary>
+    public Dictionary<string, double> Storage = new();
+
+    /// <summary>库存总量（份）。</summary>
+    public double StorageTotal
+    {
+        get
+        {
+            double sum = 0;
+            foreach (var v in Storage.Values)
+                sum += v;
+            return sum;
+        }
+    }
+
+    /// <summary>剩余库容（份）。</summary>
+    public double StorageFree => System.Math.Max(0, Def.StorageCapacity - StorageTotal);
+
+    /// <summary>入库（受容量限制），返回实际入库份数。</summary>
+    public double StoreGoods(string goodsId, double amount)
+    {
+        double accepted = System.Math.Min(amount, StorageFree);
+        if (accepted <= 0)
+            return 0;
+        Storage[goodsId] = Storage.GetValueOrDefault(goodsId) + accepted;
+        return accepted;
+    }
+
+    /// <summary>出库，返回实际取出份数。</summary>
+    public double TakeGoods(string goodsId, double amount)
+    {
+        double have = Storage.GetValueOrDefault(goodsId);
+        double taken = System.Math.Min(have, amount);
+        if (taken <= 0)
+            return 0;
+        if (have - taken <= 0.0001)
+            Storage.Remove(goodsId);
+        else
+            Storage[goodsId] = have - taken;
+        return taken;
+    }
 
     public Godot.Vector2I Origin
     {

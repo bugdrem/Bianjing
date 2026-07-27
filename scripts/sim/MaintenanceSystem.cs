@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace Bianjing;
 
 /// <summary>
-/// 建筑老化与修缮系统（每月结算）：
-/// 人造建筑逐月老化，天然建筑固定不变；
+/// 建筑老化与修缮系统（每日结算，各量按月值 1/30）：
+/// 人造建筑逐日老化，天然建筑固定不变；
 /// 公共设施由修缮匠维护（官府出料钱）；住宅/工商建筑由居住者按人头集资修缮（以税养屋）；
 /// 完好度归零则坍塌拆除。
 /// </summary>
@@ -21,18 +21,20 @@ public class MaintenanceSystem
     /// <summary>每位居住者每月修缮摊派。</summary>
     private const double RepairFeePerResident = 0.15;
 
-    public void Tick(GameState gs)
+    private const int Days = GameClock.DaysPerMonth;
+
+    public void TickDay(GameState gs)
     {
         foreach (var b in gs.Buildings.Values)
             if (!b.Def.Natural)
-                b.Condition = Math.Max(0f, b.Condition - AgingPerMonth);
+                b.Condition = Math.Max(0f, b.Condition - AgingPerMonth / Days);
 
         RepairOfficial(gs);
         RepairPrivate(gs);
         Collapse(gs);
     }
 
-    /// <summary>公共设施：修缮匠逐座抢修最破的官方建筑，直到当月工量用尽。</summary>
+    /// <summary>公共设施：修缮匠逐座抢修最破的官方建筑，直到当日工量用尽（料钱记账）。</summary>
     private static void RepairOfficial(GameState gs)
     {
         int repairers = 0;
@@ -42,9 +44,11 @@ public class MaintenanceSystem
         if (repairers == 0)
             return;
 
-        gs.Money -= repairers * RepairWorkerCost;
+        double cost = repairers * RepairWorkerCost / Days;
+        gs.Money -= cost;
+        gs.Ledger.Add("修缮料钱", -cost);
 
-        float budget = repairers * RepairPerWorker;
+        float budget = repairers * RepairPerWorker / Days;
         while (budget > 0f)
         {
             BuildingInstance worst = null;
@@ -82,8 +86,8 @@ public class MaintenanceSystem
                 continue;
 
             foreach (var c in list)
-                c.Money = Math.Max(0, c.Money - RepairFeePerResident);
-            b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount);
+                c.Money = Math.Max(0, c.Money - RepairFeePerResident / Days);
+            b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount / Days);
         }
     }
 

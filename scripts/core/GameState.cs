@@ -31,6 +31,13 @@ public class GameState
     public double Money = 5000;
     public double Food = 500;
 
+    /// <summary>官库收支账本（本月/上月分类流水，随存档保存）。</summary>
+    public Ledger Ledger = new();
+
+    /// <summary>当前游戏日期（由 Main 随时钟同步，供建造盖戳等数据层使用）。</summary>
+    public int CurYear = 1;
+    public int CurMonth = 1;
+
     /// <summary>税收政策（四大税种档位，随存档保存）。</summary>
     public TaxPolicy Taxes = new();
 
@@ -60,6 +67,7 @@ public class GameState
         cell.Zone = ZoneType.None;
         Roads.SetRoad(c, true);
         Money -= RoadCost;
+        Ledger.Add("营造道路", -RoadCost);
         EventBus.RaiseMapChanged();
         EventBus.RaiseStatsChanged();
     }
@@ -72,6 +80,7 @@ public class GameState
         cell.HasRoad = true;
         Roads.SetRoad(c, true);
         Money -= BridgeCost;
+        Ledger.Add("营造桥梁", -BridgeCost);
         EventBus.RaiseMapChanged();
         EventBus.RaiseStatsChanged();
     }
@@ -79,7 +88,15 @@ public class GameState
     /// <summary>放置建筑（已通过合法性校验）。official 扣钱，grown 免费。</summary>
     public BuildingInstance PlaceBuilding(BuildingDef def, Vector2I origin)
     {
-        var b = new BuildingInstance { Id = NextBuildingId++, Def = def, Origin = origin };
+        var b = new BuildingInstance
+        {
+            Id = NextBuildingId++,
+            Def = def,
+            Origin = origin,
+            BuiltYear = CurYear,
+            BuiltMonth = CurMonth,
+            Specialty = DefaultSpecialty(def),
+        };
         Buildings[b.Id] = b;
 
         for (int x = origin.X; x < origin.X + def.SizeX; x++)
@@ -95,12 +112,23 @@ public class GameState
         }
 
         if (def.Category == "official")
+        {
             Money -= def.Cost;
+            Ledger.Add("营造建筑", -def.Cost);
+        }
 
         EventBus.RaiseMapChanged();
         EventBus.RaiseStatsChanged();
         return b;
     }
+
+    /// <summary>工商建筑的默认专营货品：商铺随机专营一种山货/粮食，工坊专营柴薪。</summary>
+    private static string DefaultSpecialty(BuildingDef def) => def.Id switch
+    {
+        "shop" => Goods.ShopSpecialties[Random.Shared.Next(Goods.ShopSpecialties.Length)],
+        "workshop" => Goods.Wood,
+        _ => "",
+    };
 
     /// <summary>拆除：桥梁 > 道路 > 建筑 > 坊区 > 树木，逐层清理；河水不可拆。</summary>
     public void DemolishAt(Vector2I c)

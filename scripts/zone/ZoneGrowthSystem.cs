@@ -3,16 +3,21 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>坊区生长系统：每月结算，居民在坊区内「临路 + 吸引力达标」的空格上自动建房/开店/设工坊；
+/// <summary>坊区生长系统（每日结算，频率按月值 1/30 摊到日）：居民在坊区内「临路 + 吸引力达标」的空格上自动建房/开店/设工坊；
 /// 吸引力充足且维护完好的建筑逐级升格（容量随等级提升）。</summary>
 public class ZoneGrowthSystem
 {
-    /// <summary>每月最多新增民居数。</summary>
+    /// <summary>每月最多新增民居数（摊为每日概率）。</summary>
     private const int MaxHousesPerMonth = 2;
+
+    /// <summary>建筑每月升级概率。</summary>
+    private const float LevelUpChance = 0.15f;
+
+    private const int Days = GameClock.DaysPerMonth;
 
     private readonly Random _rng = new();
 
-    public void Tick(GameState gs)
+    public void TickDay(GameState gs)
     {
         // 财政破产则停止一切生长
         if (gs.Money <= 0)
@@ -22,19 +27,17 @@ public class ZoneGrowthSystem
         int capacity = 0;
         foreach (var b in gs.Buildings.Values)
             capacity += b.HousingCapacity;
-        if (gs.Population >= capacity - 2)
-        {
-            for (int i = 0; i < MaxHousesPerMonth; i++)
-                if (!TryGrow(gs, ZoneType.Residential, "house"))
-                    break;
-        }
+        if (gs.Population >= capacity - 2 && _rng.NextDouble() < (double)MaxHousesPerMonth / Days)
+            TryGrow(gs, ZoneType.Residential, "house");
 
         // 商铺：人口每 20 人支撑一间
-        if (gs.CountByDef("shop") < gs.Population / 20 + (gs.Population > 0 ? 1 : 0))
+        if (gs.CountByDef("shop") < gs.Population / 20 + (gs.Population > 0 ? 1 : 0)
+            && _rng.NextDouble() < 1.0 / Days)
             TryGrow(gs, ZoneType.Market, "shop");
 
         // 工坊：人口每 25 人支撑一间
-        if (gs.CountByDef("workshop") < gs.Population / 25 + (gs.Population > 10 ? 1 : 0))
+        if (gs.CountByDef("workshop") < gs.Population / 25 + (gs.Population > 10 ? 1 : 0)
+            && _rng.NextDouble() < 1.0 / Days)
             TryGrow(gs, ZoneType.Workshop, "workshop");
 
         LevelUps(gs);
@@ -50,7 +53,7 @@ public class ZoneGrowthSystem
                 continue;
             if (gs.Map.CellAt(b.Origin).Desirability < 1.2f * b.Level)
                 continue;
-            if (_rng.NextDouble() < 0.15)
+            if (_rng.NextDouble() < LevelUpChance / Days)
             {
                 b.Level++;
                 changed = true;

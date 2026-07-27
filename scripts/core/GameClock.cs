@@ -3,22 +3,40 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏时钟：暂停/1x/2x/3x，按「月」为最小结算单位。</summary>
+/// <summary>游戏时钟：暂停/1x/2x/3x。1x 下 1 现实分钟 = 1 游戏时辰（一天 12 时辰 = 12 现实分钟）；
+/// 一天 24 小时、一月 30 天、一年 12 月。日常事务按「日」结算，人口老化等大事按「月」结算；
+/// 金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
 public partial class GameClock : Node
 {
-    /// <summary>1x 速度下一个游戏月对应的真实秒数。</summary>
-    public const float SecondsPerMonth = 5f;
+    /// <summary>1x 速度下一个游戏小时对应的真实秒数（1 时辰 = 2 小时 = 60 真实秒）。</summary>
+    public const float SecondsPerHour = 30f;
+
+    public const int HoursPerDay = 24;
+    public const int DaysPerMonth = 30;
 
     /// <summary>0=暂停, 1/2/3=倍速。</summary>
     public int Speed { get; set; } = 1;
 
     public int Year { get; private set; } = 1;
     public int Month { get; private set; } = 1;
+    public int Day { get; private set; } = 1;
+    public int Hour { get; private set; } = 6;
 
+    /// <summary>每过一游戏日触发（日常结算：生长/求职/税赋/物品等）。</summary>
+    public event Action DayPassed;
+
+    /// <summary>每过一游戏月触发（大事结算：老化/生死/动物繁育等）。</summary>
     public event Action MonthPassed;
 
     private float _acc;
     private int _resumeSpeed = 1;
+
+    /// <summary>十二时辰名，Hour 23-1 点为子时。</summary>
+    private static readonly string[] ShichenNames =
+        { "子", "丑", "寅", "卯", "辰", "巳", "午", "未", "申", "酉", "戌", "亥" };
+
+    /// <summary>当前时辰名（如「午时」）。</summary>
+    public string Shichen => ShichenNames[(Hour + 1) / 2 % 12] + "时";
 
     public override void _Process(double delta)
     {
@@ -26,24 +44,45 @@ public partial class GameClock : Node
             return;
 
         _acc += (float)delta * Speed;
-        while (_acc >= SecondsPerMonth)
+        while (_acc >= SecondsPerHour)
         {
-            _acc -= SecondsPerMonth;
+            _acc -= SecondsPerHour;
+            AdvanceHour();
+        }
+    }
+
+    private void AdvanceHour()
+    {
+        Hour++;
+        if (Hour < HoursPerDay)
+            return;
+
+        Hour = 0;
+        Day++;
+        bool monthTurn = Day > DaysPerMonth;
+        if (monthTurn)
+        {
+            Day = 1;
             Month++;
             if (Month > 12)
             {
                 Month = 1;
                 Year++;
             }
-            MonthPassed?.Invoke();
         }
+
+        DayPassed?.Invoke();
+        if (monthTurn)
+            MonthPassed?.Invoke();
     }
 
-    /// <summary>读档时恢复日期。</summary>
-    public void SetDate(int year, int month)
+    /// <summary>读档/新开局时恢复日期。</summary>
+    public void SetDate(int year, int month, int day = 1, int hour = 6)
     {
         Year = year;
         Month = month;
+        Day = Math.Clamp(day, 1, DaysPerMonth);
+        Hour = Math.Clamp(hour, 0, HoursPerDay - 1);
         _acc = 0f;
     }
 

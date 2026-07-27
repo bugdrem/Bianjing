@@ -1,10 +1,10 @@
 [
-  { "id": "palace",   "name": "宫殿", "category": "official", "sizeX": 4, "sizeY": 4, "cost": 2000, "upkeep": 20, "color": "#b03a48", "height": 6,   "desirabilityBonus": 3, "desirabilityRadius": 8,  "jobSlots": 5, "salary": 4, "capacity": 8 },
-  { "id": "yamen",    "name": "衙门", "category": "official", "sizeX": 2, "sizeY": 2, "cost": 500,  "upkeep": 10, "color": "#3f5aa6", "height": 4,   "desirabilityBonus": 2, "desirabilityRadius": 10, "jobSlots": 3, "salary": 4, "capacity": 4 },
-  { "id": "barracks", "name": "军营", "category": "official", "sizeX": 3, "sizeY": 3, "cost": 800,  "upkeep": 15, "color": "#6b4f2a", "height": 3.5, "desirabilityBonus": 1, "desirabilityRadius": 8,  "jobSlots": 4, "salary": 3, "capacity": 10 },
+  { "id": "palace",   "name": "宫殿", "category": "official", "sizeX": 4, "sizeY": 4, "cost": 2000, "upkeep": 20, "color": "#b03a48", "height": 6,   "desirabilityBonus": 3, "desirabilityRadius": 8,  "jobSlots": 5, "salary": 4 },
+  { "id": "yamen",    "name": "衙门", "category": "official", "sizeX": 2, "sizeY": 2, "cost": 500,  "upkeep": 10, "color": "#3f5aa6", "height": 4,   "desirabilityBonus": 2, "desirabilityRadius": 10, "jobSlots": 3, "salary": 4 },
+  { "id": "barracks", "name": "军营", "category": "official", "sizeX": 3, "sizeY": 3, "cost": 800,  "upkeep": 15, "color": "#6b4f2a", "height": 3.5, "desirabilityBonus": 1, "desirabilityRadius": 8,  "jobSlots": 4, "salary": 3 },
   { "id": "well",     "name": "水井", "category": "official", "sizeX": 1, "sizeY": 1, "cost": 50,   "upkeep": 1,  "color": "#4fa3a5", "height": 1.5, "desirabilityBonus": 2, "desirabilityRadius": 6 },
-  { "id": "farm",     "name": "粮田", "category": "official", "sizeX": 2, "sizeY": 2, "cost": 100,  "upkeep": 2,  "color": "#8fae4e", "height": 0.5, "foodOutput": 10, "jobSlots": 2, "salary": 2, "capacity": 3 },
-  { "id": "house",    "name": "民居", "category": "grown",    "sizeX": 1, "sizeY": 1, "cost": 0,    "upkeep": 0,  "color": "#c8b48c", "height": 1.8, "capacity": 4,  "capacityMax": 10, "maxLevel": 3 },
-  { "id": "shop",     "name": "商铺", "category": "grown",    "sizeX": 1, "sizeY": 1, "cost": 0,    "upkeep": 0,  "color": "#5a8bbf", "height": 2.2, "capacity": 5,  "capacityMax": 15, "maxLevel": 3, "taxBonus": 2, "jobSlots": 2, "salary": 3 },
-  { "id": "workshop", "name": "工坊", "category": "grown",    "sizeX": 1, "sizeY": 1, "cost": 0,    "upkeep": 0,  "color": "#8a6d3b", "height": 2.6, "capacity": 7,  "capacityMax": 20, "maxLevel": 3, "taxBonus": 3, "pollution": 2, "pollutionRadius": 4, "jobSlots": 3, "salary": 3 }
+  { "id": "farm",     "name": "粮田", "category": "official", "sizeX": 2, "sizeY": 2, "cost": 100,  "upkeep": 2,  "color": "#8fae4e", "height": 0.5, "foodOutput": 10, "jobSlots": 2, "salary": 2, "storageCapacity": 40 },
+  { "id": "house",    "name": "民居", "category": "grown",    "sizeX": 1, "sizeY": 1, "cost": 0,    "upkeep": 0,  "color": "#c8b48c", "height": 1.8, "capacity": 4,  "capacityMax": 10, "maxLevel": 3, "storageCapacity": 20 },
+  { "id": "shop",     "name": "商铺", "category": "grown",    "sizeX": 1, "sizeY": 1, "cost": 0,    "upkeep": 0,  "color": "#5a8bbf", "height": 2.2, "capacity": 5,  "capacityMax": 15, "maxLevel": 3, "taxBonus": 2, "jobSlots": 2, "salary": 3, "storageCapacity": 60 },
+  { "id": "workshop", "name": "工坊", "category": "grown",    "sizeX": 1, "sizeY": 1, "cost": 0,    "upkeep": 0,  "color": "#8a6d3b", "height": 2.6, "capacity": 7,  "capacityMax": 20, "maxLevel": 3, "taxBonus": 3, "pollution": 2, "pollutionRadius": 4, "jobSlots": 3, "salary": 3, "storageCapacity": 60 }
 ]

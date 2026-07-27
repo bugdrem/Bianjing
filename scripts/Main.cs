@@ -3,7 +3,7 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏入口：装配全部系统与场景节点，按序驱动每月结算。</summary>
+/// <summary>游戏入口：装配全部系统与场景节点，按序驱动每日/每月结算。</summary>
 public partial class Main : Node3D
 {
     private GameClock _clock;
@@ -14,6 +14,7 @@ public partial class Main : Node3D
     private TaxSystem _taxes;
     private EconomySystem _economy;
     private MaintenanceSystem _maintenance;
+    private GoodsSystem _goods;
     private PlantGrowthSystem _plants;
     private WildlifeSystem _wildlife;
     private Hud _hud;
@@ -41,6 +42,7 @@ public partial class Main : Node3D
 
         _clock = new GameClock();
         AddChild(_clock);
+        _clock.DayPassed += OnDayPassed;
         _clock.MonthPassed += OnMonthPassed;
 
         _desirability = new DesirabilitySystem();
@@ -50,13 +52,16 @@ public partial class Main : Node3D
         _taxes = new TaxSystem();
         _economy = new EconomySystem();
         _maintenance = new MaintenanceSystem();
+        _goods = new GoodsSystem();
         _plants = new PlantGrowthSystem();
         _wildlife = new WildlifeSystem();
 
         var build = new BuildController(cameraRig, renderer);
         AddChild(build);
 
-        AddChild(new AgentManager(_clock));
+        var agents = new AgentManager(_clock);
+        AddChild(agents);
+        build.Agents = agents;
 
         _hud = new Hud(build, _clock, SaveGame, LoadGame);
         AddChild(_hud);
@@ -67,18 +72,33 @@ public partial class Main : Node3D
         AddChild(_menu);
     }
 
+    /// <summary>每日结算：日常事务（生长/民生/财政/物产/动物游走）。</summary>
+    private void OnDayPassed()
+    {
+        var gs = GameState.I;
+        gs.CurYear = _clock.Year;
+        gs.CurMonth = _clock.Month;
+
+        _desirability.EnsureUpdated(gs);
+        _growth.TickDay(gs);
+        _lifecycle.TickDay(gs);
+        _jobs.TickDay(gs);
+        _taxes.TickDay(gs);
+        _economy.TickDay(gs);
+        _maintenance.TickDay(gs);
+        _goods.TickDay(gs);
+        _wildlife.TickDay(gs);
+    }
+
+    /// <summary>每月结算：大事（老化生死/重税民怨/植物生长/动物繁育）与账本轮转。</summary>
     private void OnMonthPassed()
     {
         var gs = GameState.I;
-        _desirability.EnsureUpdated(gs);
-        _growth.Tick(gs);
-        _lifecycle.Tick(gs);
-        _jobs.Tick(gs);
-        _taxes.Tick(gs);
-        _economy.Tick(gs);
-        _maintenance.Tick(gs);
+        _lifecycle.TickMonth(gs);
+        _taxes.TickMonth(gs);
         _plants.Tick(gs);
-        _wildlife.Tick(gs);
+        _wildlife.TickMonth(gs);
+        gs.Ledger.Rotate();
     }
 
     public override void _Process(double delta)
@@ -112,6 +132,9 @@ public partial class Main : Node3D
         SeedWorld();
         _clock.SetDate(1, 1);
         _autoSaveTimer = 0f;
+
+        GameState.I.CurYear = 1;
+        GameState.I.CurMonth = 1;
 
         EventBus.RaiseMapChanged();
         EventBus.RaiseZonesChanged();

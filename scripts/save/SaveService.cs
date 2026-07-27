@@ -9,14 +9,14 @@ using LightningDB;
 namespace Bianjing;
 
 /// <summary>
-/// LMDB 存档服务：一份存档一个库（user://saves/&lt;slot&gt; 目录一个环境），
+/// LMDB 存档服务：一份存档一个库（游戏根目录/saves/&lt;slot&gt; 目录一个环境），
 /// 保存时在单个写事务内写入全部 key 后提交——要么全部落盘要么全部回滚，天然原子。
 /// key 划分（meta/world/map/buildings/citizens/families/plants/animals）便于未来 mod 追加自己的数据段。
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v2：新增河流/桥梁/建筑等级完好度/植物实体/动物实体；兼容读 v1。</summary>
-    public const int FormatVersion = 2;
+    /// <summary>v3：新增日/时辰、官库账本、建筑建造日期/专营/库存；兼容读 v1/v2。</summary>
+    public const int FormatVersion = 3;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -27,7 +27,7 @@ public static class SaveService
     /// <summary>Citizen/Family 用公共字段承载数据，序列化必须开 IncludeFields。</summary>
     private static readonly JsonSerializerOptions JsonOpts = new() { IncludeFields = true };
 
-    private static string SavesRoot => ProjectSettings.GlobalizePath("user://saves");
+    private static string SavesRoot => GamePaths.SavesDir;
 
     private static string SlotDir(string slot) => Path.Combine(SavesRoot, slot);
 
@@ -96,6 +96,8 @@ public static class SaveService
             Version = FormatVersion,
             Year = clock.Year,
             Month = clock.Month,
+            Day = clock.Day,
+            Hour = clock.Hour,
             SavedAtUnix = DateTimeOffset.UtcNow.ToUnixTimeSeconds(),
             CityName = gs.CityName,
             SaveName = saveName,
@@ -111,6 +113,8 @@ public static class SaveService
             NextPlantId = gs.NextPlantId,
             NextAnimalId = gs.NextAnimalId,
             TaxLevels = new Dictionary<string, int>(gs.Taxes.Levels),
+            LedgerCur = new Dictionary<string, double>(gs.Ledger.Current),
+            LedgerPrev = new Dictionary<string, double>(gs.Ledger.Previous),
         };
 
         var map = new MapSave();
@@ -140,6 +144,8 @@ public static class SaveService
             {
                 Id = b.Id, DefId = b.Def.Id, X = b.Origin.X, Y = b.Origin.Y,
                 Level = b.Level, Condition = b.Condition,
+                BuiltYear = b.BuiltYear, BuiltMonth = b.BuiltMonth,
+                Specialty = b.Specialty, Storage = new Dictionary<string, double>(b.Storage),
             });
 
         var citizens = new List<Citizen>(gs.Citizens.Values);
@@ -212,6 +218,13 @@ public static class SaveService
             NextAnimalId = world.NextAnimalId,
             Taxes = new TaxPolicy { Levels = world.TaxLevels ?? new Dictionary<string, int>() },
             CityName = string.IsNullOrEmpty(meta.CityName) ? "汴京" : meta.CityName,
+            Ledger = new Ledger
+            {
+                Current = world.LedgerCur ?? new Dictionary<string, double>(),
+                Previous = world.LedgerPrev ?? new Dictionary<string, double>(),
+            },
+            CurYear = meta.Year,
+            CurMonth = meta.Month,
         };
 
         foreach (int index in map.RoadCells)
@@ -265,6 +278,11 @@ public static class SaveService
                 // v1 老档无等级/完好度字段，修正为 1 级 100%
                 Level = Math.Max(1, bs.Level),
                 Condition = bs.Condition <= 0f ? 100f : bs.Condition,
+                // v2 老档无建造日期（保留 0 显示「不详」）与专营/库存，专营按定义补齐
+                BuiltYear = bs.BuiltYear,
+                BuiltMonth = bs.BuiltMonth,
+                Specialty = string.IsNullOrEmpty(bs.Specialty) ? DefaultSpecialtyFor(def) : bs.Specialty,
+                Storage = bs.Storage ?? new Dictionary<string, double>(),
             };
             gs.Buildings[b.Id] = b;
             for (int x = bs.X; x < bs.X + def.SizeX; x++)
@@ -278,7 +296,9 @@ public static class SaveService
             gs.Families[f.Id] = f;
 
         GameState.I = gs;
-        clock.SetDate(meta.Year, meta.Month);
+        // v2 老档无日/时（Day 为 0）：回退到 1 日晨六时
+        bool oldClock = meta.Day <= 0;
+        clock.SetDate(meta.Year, meta.Month, oldClock ? 1 : meta.Day, oldClock ? 6 : meta.Hour);
 
         EventBus.RaiseMapChanged();
         EventBus.RaiseZonesChanged();
@@ -288,6 +308,14 @@ public static class SaveService
     }
 
     // ---- LMDB 工具 ----
+
+    /// <summary>v2 老档专营补齐：商铺随机专营一种、工坊专营柴薪。</summary>
+    private static string DefaultSpecialtyFor(BuildingDef def) => def.Id switch
+    {
+        "shop" => Goods.ShopSpecialties[Random.Shared.Next(Goods.ShopSpecialties.Length)],
+        "workshop" => Goods.Wood,
+        _ => "",
+    };
 
     private static LightningEnvironment OpenEnv(string dir)
     {

@@ -25,6 +25,9 @@ public partial class BuildController : Node
 
     public Hud Hud { get; set; }
 
+    /// <summary>居民代理管理器（点选拾取 NPC 用）。</summary>
+    public AgentManager Agents { get; set; }
+
     public BuildMode Mode { get; private set; } = BuildMode.None;
 
     private BuildingDef _def;
@@ -121,7 +124,7 @@ public partial class BuildController : Node
         switch (Mode)
         {
             case BuildMode.None:
-                ShowCellInfo(_hover);
+                InspectAt(_hover);
                 break;
             case BuildMode.Road:
                 _dragging = true;
@@ -310,6 +313,53 @@ public partial class BuildController : Node
     }
 
     // ---- 查看格子信息 ----
+
+    /// <summary>无模式左键点选：优先拾取居民 → 建筑详情 → 退化为格子信息。</summary>
+    private void InspectAt(Vector2I c)
+    {
+        var citizen = PickCitizen();
+        if (citizen != null)
+        {
+            Hud?.ShowCitizen(citizen);
+            return;
+        }
+
+        var gs = GameState.I;
+        int bid = gs.Map.CellAt(c).BuildingId;
+        if (bid >= 0 && gs.Buildings.TryGetValue(bid, out var b))
+        {
+            Hud?.ShowBuilding(b);
+            return;
+        }
+
+        Hud?.CloseInspect();
+        ShowCellInfo(c);
+    }
+
+    /// <summary>把在场代理投影到屏幕，取鼠标 24px 内最近的一位。</summary>
+    private Citizen PickCitizen()
+    {
+        if (Agents == null)
+            return null;
+
+        var cam = _rig.Cam;
+        var mouse = GetViewport().GetMousePosition();
+        Citizen best = null;
+        float bestDist = 24f;
+        foreach (var agent in Agents.Agents)
+        {
+            var world = agent.Position + Vector3.Up * 1f; // 瞄准身躯而非脚底
+            if (cam.IsPositionBehind(world))
+                continue;
+            float d = cam.UnprojectPosition(world).DistanceTo(mouse);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = agent.C;
+            }
+        }
+        return best;
+    }
 
     private void ShowCellInfo(Vector2I c)
     {

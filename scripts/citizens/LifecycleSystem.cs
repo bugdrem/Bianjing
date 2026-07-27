@@ -5,8 +5,9 @@ using System.Linq;
 namespace Bianjing;
 
 /// <summary>
-/// 居民生命周期系统（每月结算）：
-/// 老化 → 死亡 → 无家处理/迁出 → 迁入（夫妻户为主，兼有单身）→ 适龄婚配 → 生育 → 交友。
+/// 居民生命周期系统：
+/// 每日——迁入（夫妻户为主，兼有单身）→ 适龄婚配 → 生育 → 交友（概率按月值 1/30）；
+/// 每月——老化 → 死亡 → 无家处理/迁出。
 /// 只操作数据层，不涉及任何表现节点。
 /// </summary>
 public class LifecycleSystem
@@ -15,20 +16,29 @@ public class LifecycleSystem
     private const float SingleImmigrantChance = 0.4f;
     private const float MarriageChance = 0.10f;
     private const float BirthChance = 0.05f;
+    private const float FriendChance = 0.05f;
     private const int EmigrateAfterHomelessMonths = 6;
     private const double CoupleStartingAssets = 60;
 
+    private const int Days = GameClock.DaysPerMonth;
+
     private readonly Random _rng = new();
 
-    public void Tick(GameState gs)
+    /// <summary>每日：迁入/婚配/生育/交友（月概率摊到日）。</summary>
+    public void TickDay(GameState gs)
     {
-        Age(gs);
-        Deaths(gs);
-        HandleHomeless(gs);
         Immigration(gs);
         Marriages(gs);
         Births(gs);
         MakeFriends(gs);
+    }
+
+    /// <summary>每月：老化/死亡/无家处理。</summary>
+    public void TickMonth(GameState gs)
+    {
+        Age(gs);
+        Deaths(gs);
+        HandleHomeless(gs);
     }
 
     private static void Age(GameState gs)
@@ -87,20 +97,19 @@ public class LifecycleSystem
             gs.RemoveCitizen(c.Id);
     }
 
-    /// <summary>迁入：优先两人小家庭（夫妻），偶有单身流民。</summary>
+    /// <summary>迁入：优先两人小家庭（夫妻），偶有单身流民（月频摊到日）。</summary>
     private void Immigration(GameState gs)
     {
         var occupancy = gs.BuildHomeOccupancy();
 
-        for (int i = 0; i < MaxCouplesPerMonth; i++)
+        if (_rng.NextDouble() < (double)MaxCouplesPerMonth / Days)
         {
             var house = FindVacantHouse(gs, occupancy, 2);
-            if (house == null)
-                break;
-            SpawnCouple(gs, house, occupancy);
+            if (house != null)
+                SpawnCouple(gs, house, occupancy);
         }
 
-        if (_rng.NextDouble() < SingleImmigrantChance)
+        if (_rng.NextDouble() < SingleImmigrantChance / Days)
         {
             var house = FindVacantHouse(gs, occupancy, 1);
             if (house != null)
@@ -161,7 +170,7 @@ public class LifecycleSystem
         {
             if (singleWomen.Count == 0)
                 break;
-            if (_rng.NextDouble() >= MarriageChance)
+            if (_rng.NextDouble() >= MarriageChance / Days)
                 continue;
 
             var woman = singleWomen[_rng.Next(singleWomen.Count)];
@@ -220,7 +229,7 @@ public class LifecycleSystem
 
         foreach (var mother in mothers)
         {
-            if (_rng.NextDouble() >= BirthChance)
+            if (_rng.NextDouble() >= BirthChance / Days)
                 continue;
             if (!gs.Buildings.TryGetValue(mother.HomeId, out var house) || gs.HouseVacancy(house, occupancy) < 1)
                 continue;
@@ -255,7 +264,7 @@ public class LifecycleSystem
 
         foreach (var c in adults)
         {
-            if (_rng.NextDouble() >= 0.05)
+            if (_rng.NextDouble() >= FriendChance / Days)
                 continue;
             var other = adults[_rng.Next(adults.Count)];
             if (other.Id == c.Id || c.FriendIds.Contains(other.Id))

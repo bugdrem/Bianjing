@@ -5,17 +5,15 @@ using System.Linq;
 namespace Bianjing;
 
 /// <summary>
-/// 就业系统（每月结算）：
-/// 岗位失效清理 → 退休（家产充裕的老人才退）→ 适龄求职（无岗位则伐木自谋生路）→ 发工资 → 家庭开销。
+/// 就业系统（每日结算）：
+/// 岗位失效清理 → 退休（家产充裕的老人才退）→ 适龄求职（无岗位则伐木自谋生路）→ 家庭开销；
+/// 工钱不在此处发放——由表现层 CitizenAgent 在每班下工时按动作即时结算（月俸/30 一班）。
 /// 工商业「一直营业只退休」，作息疲劳由表现层 CitizenAgent 实时驱动。
 /// </summary>
 public class JobSystem
 {
-    /// <summary>伐木等自谋生路的月收入。</summary>
-    private const double LoggerIncome = 1.5;
-
-    /// <summary>修缮匠月俸（官府出资，专职修缮公共设施）。</summary>
-    private const double RepairerIncome = 2.0;
+    /// <summary>修缮匠月俸（官府出资，专职修缮公共设施；每班按 1/30 由下工动作结算）。</summary>
+    public const double RepairerIncome = 2.0;
 
     /// <summary>家产超过此数的老人选择退休颐养。</summary>
     private const double ElderRetireAssets = 200;
@@ -25,12 +23,11 @@ public class JobSystem
 
     private readonly Random _rng = new();
 
-    public void Tick(GameState gs)
+    public void TickDay(GameState gs)
     {
         CleanInvalidJobs(gs);
         Retirement(gs);
         SeekJobs(gs);
-        PayWages(gs);
         HouseholdSpending(gs);
     }
 
@@ -137,33 +134,12 @@ public class JobSystem
         return null;
     }
 
-    private static void PayWages(GameState gs)
-    {
-        foreach (var c in gs.Citizens.Values)
-        {
-            switch (c.JobKind)
-            {
-                case JobKind.Employed when gs.Buildings.TryGetValue(c.WorkplaceId, out var b):
-                    c.Money += b.Def.Salary;
-                    break;
-                case JobKind.Logger:
-                    c.Money += LoggerIncome;
-                    break;
-                case JobKind.Repairer:
-                    // 官府发俸
-                    c.Money += RepairerIncome;
-                    gs.Money -= RepairerIncome;
-                    break;
-            }
-        }
-    }
-
-    /// <summary>家庭生活开销：先扣公产，不足再由成员分摊。</summary>
+    /// <summary>家庭生活开销（月值 1/30 逐日扣）：先扣公产，不足再由成员分摊。</summary>
     private static void HouseholdSpending(GameState gs)
     {
         foreach (var family in gs.Families.Values)
         {
-            double cost = family.MemberIds.Count * LivingCostPerCapita;
+            double cost = family.MemberIds.Count * LivingCostPerCapita / GameClock.DaysPerMonth;
             if (family.SharedAssets >= cost)
             {
                 family.SharedAssets -= cost;

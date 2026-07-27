@@ -24,6 +24,9 @@ public partial class AgentManager : Node
 
     private List<Vector2I> _roadCells;
 
+    /// <summary>全部在场代理（点选拾取用）。</summary>
+    public IEnumerable<CitizenAgent> Agents => _agents.Values;
+
     public AgentManager(GameClock clock)
     {
         _clock = clock;
