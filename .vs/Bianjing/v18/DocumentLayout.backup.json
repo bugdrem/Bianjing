@@ -3,8 +3,40 @@
   "WorkspaceRootPath": "D:\\Godot\\Bianjing\\",
   "Documents": [
     {
-      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\newscript.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
-      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:newscript.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\map\\cell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\map\\cell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\save\\saveservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\save\\saveservice.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\main.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\main.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\build\\buildingdef.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\build\\buildingdef.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\build\\buildcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\build\\buildcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\agents\\agentmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\agents\\agentmanager.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\save\\savedata.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\save\\savedata.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\zone\\zonegrowthsystem.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\zone\\zonegrowthsystem.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\.editorconfig||{3B902123-F8A7-4915-9F01-361F908088D0}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:.editorconfig||{3B902123-F8A7-4915-9F01-361F908088D0}"
     }
   ],
   "DocumentGroupContainers": [
@@ -14,8 +46,34 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 21,
+          "SelectedChildIndex": 28,
           "Children": [
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
+              "Title": "BuildingDef.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\build\\BuildingDef.cs",
+              "RelativeDocumentMoniker": "scripts\\build\\BuildingDef.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\build\\BuildingDef.cs",
+              "RelativeToolTip": "scripts\\build\\BuildingDef.cs",
+              "ViewState": "AgIAADAAAAAAAAAAAAAjwEIAAAAyAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T06:52:11.553Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 4,
+              "Title": "BuildController.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\build\\BuildController.cs",
+              "RelativeDocumentMoniker": "scripts\\build\\BuildController.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\build\\BuildController.cs",
+              "RelativeToolTip": "scripts\\build\\BuildController.cs",
+              "ViewState": "AgIAAEkBAAAAAAAAAAAQwAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T06:51:56.526Z",
+              "EditorCaption": ""
+            },
             {
               "$type": "Bookmark",
               "Name": "ST:137:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
@@ -102,15 +160,93 @@
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "NewScript.cs",
-              "DocumentMoniker": "D:\\Godot\\Bianjing\\NewScript.cs",
-              "RelativeDocumentMoniker": "NewScript.cs",
-              "ToolTip": "D:\\Godot\\Bianjing\\NewScript.cs",
-              "RelativeToolTip": "NewScript.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "DocumentIndex": 1,
+              "Title": "SaveService.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\save\\SaveService.cs",
+              "RelativeDocumentMoniker": "scripts\\save\\SaveService.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\save\\SaveService.cs",
+              "RelativeToolTip": "scripts\\save\\SaveService.cs",
+              "ViewState": "AgIAAA4AAAAAAAAAAAAgwBoAAABJAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-27T02:13:58.282Z",
+              "WhenOpened": "2026-07-27T06:37:51.168Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 6,
+              "Title": "SaveData.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\save\\SaveData.cs",
+              "RelativeDocumentMoniker": "scripts\\save\\SaveData.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\save\\SaveData.cs",
+              "RelativeToolTip": "scripts\\save\\SaveData.cs",
+              "ViewState": "AgIAAAgAAAAAAAAAAAAIwB0AAAAYAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T06:37:50.464Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 7,
+              "Title": "ZoneGrowthSystem.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\zone\\ZoneGrowthSystem.cs",
+              "RelativeDocumentMoniker": "scripts\\zone\\ZoneGrowthSystem.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\zone\\ZoneGrowthSystem.cs",
+              "RelativeToolTip": "scripts\\zone\\ZoneGrowthSystem.cs",
+              "ViewState": "AgIAAEkAAAAAAAAAAAAiwAEAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T06:37:18.889Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "Main.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\Main.cs",
+              "RelativeDocumentMoniker": "scripts\\Main.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\Main.cs",
+              "RelativeToolTip": "scripts\\Main.cs",
+              "ViewState": "AgIAABMAAAAAAAAAAAAIwEEAAAA6AAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T06:36:50.308Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 8,
+              "Title": ".editorconfig",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\.editorconfig",
+              "RelativeDocumentMoniker": ".editorconfig",
+              "ToolTip": "D:\\Godot\\Bianjing\\.editorconfig",
+              "RelativeToolTip": ".editorconfig",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.001001|",
+              "WhenOpened": "2026-07-27T06:36:48.986Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "Cell.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\map\\Cell.cs",
+              "RelativeDocumentMoniker": "scripts\\map\\Cell.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\map\\Cell.cs",
+              "RelativeToolTip": "scripts\\map\\Cell.cs",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAswAUAAAAJAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T06:36:42.321Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 5,
+              "Title": "AgentManager.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\agents\\AgentManager.cs",
+              "RelativeDocumentMoniker": "scripts\\agents\\AgentManager.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\agents\\AgentManager.cs",
+              "RelativeToolTip": "scripts\\agents\\AgentManager.cs",
+              "ViewState": "AgIAAHAAAAAAAAAAAADwvwAAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-27T05:54:03.947Z",
               "EditorCaption": ""
             }
           ]

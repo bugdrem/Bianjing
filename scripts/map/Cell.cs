@@ -1,0 +1,35 @@
+namespace Bianjing;
+
+/// <summary>坊区类型：住宅坊 / 市坊（商业）/ 工坊（工业）。</summary>
+public enum ZoneType
+{
+    None,
+    Residential,
+    Market,
+    Workshop,
+}
+
+/// <summary>单个地图格子的逻辑数据。</summary>
+public struct Cell
+{
+    public bool HasRoad;
+
+    /// <summary>是否有河水（不可建造，架桥除外）。</summary>
+    public bool HasWater;
+
+    /// <summary>是否有桥（架在水上，等效道路可通行）。</summary>
+    public bool HasBridge;
+
+    /// <summary>是否有树木（实体数据见 GameState.Plants，此处为快速查询缓存；铺路/建房时自动砍伐）。</summary>
+    public bool HasTree;
+
+    /// <summary>占用该格的建筑实例 Id，-1 表示无建筑。</summary>
+    public int BuildingId;
+
+    public ZoneType Zone;
+
+    /// <summary>吸引力缓存，由 DesirabilitySystem 重算。</summary>
+    public float Desirability;
+
+    public readonly bool IsEmpty => !HasRoad && !HasWater && BuildingId < 0;
+}
