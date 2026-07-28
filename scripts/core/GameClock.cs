@@ -3,18 +3,22 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏时钟：暂停/1x/2x/3x。1x 下 1 现实分钟 = 1 游戏时辰（一天 12 时辰 = 12 现实分钟）；
+/// <summary>游戏时钟：暂停/1x/2x/4x。1x 下约 2 现实小时 = 1 游戏年（一年 = 12月×30日×24时 = 8640 游戏小时，均摊 7200 真实秒）；
 /// 一天 24 小时、一月 30 天、一年 12 月。日常事务按「日」结算，人口老化等大事按「月」结算；
 /// 金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
 public partial class GameClock : Node
 {
-    /// <summary>1x 速度下一个游戏小时对应的真实秒数（1 时辰 = 2 小时 = 60 真实秒）。</summary>
-    public const float SecondsPerHour = 30f;
-
     public const int HoursPerDay = 24;
     public const int DaysPerMonth = 30;
+    public const int MonthsPerYear = 12;
 
-    /// <summary>0=暂停, 1/2/3=倍速。</summary>
+    /// <summary>1x 下一游戏年对应的真实秒数（2 现实小时）。</summary>
+    private const float RealSecondsPerYear = 7200f;
+
+    /// <summary>1x 速度下一个游戏小时对应的真实秒数：一年 8640 游戏小时均摊 7200 秒 ≈ 0.83 秒/时。</summary>
+    public const float SecondsPerHour = RealSecondsPerYear / (HoursPerDay * DaysPerMonth * MonthsPerYear);
+
+    /// <summary>0=暂停，1/2/4=倍速。</summary>
     public int Speed { get; set; } = 1;
 
     public int Year { get; private set; } = 1;
@@ -64,7 +68,7 @@ public partial class GameClock : Node
         {
             Day = 1;
             Month++;
-            if (Month > 12)
+            if (Month > MonthsPerYear)
             {
                 Month = 1;
                 Year++;
@@ -109,7 +113,7 @@ public partial class GameClock : Node
             case Key.Space: TogglePause(); break;
             case Key.Key1: Speed = 1; break;
             case Key.Key2: Speed = 2; break;
-            case Key.Key3: Speed = 3; break;
+            case Key.Key3: Speed = 4; break;
         }
     }
 }

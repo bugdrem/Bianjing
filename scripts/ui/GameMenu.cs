@@ -33,6 +33,8 @@ public partial class GameMenu : CanvasLayer
     private List<SaveInfo> _saveInfos = new();
     private List<SaveInfo> _loadInfos = new();
     private Label _loadHint;
+    /// <summary>待确认删除的存档序号：首次点「删除所选」记下，再次点同一项才真删，防误触。</summary>
+    private int _pendingDeleteIndex = -1;
 
     private bool _inGame;
     private string _lastSaveName = "";
@@ -212,6 +214,27 @@ public partial class GameMenu : CanvasLayer
                 _loadHint.Text = "读取失败：存档不完整";
             }
         });
+        AddButton(_loadBox, "删除所选", () =>
+        {
+            var selected = _loadList.GetSelectedItems();
+            if (selected.Length == 0)
+            {
+                _loadHint.Text = "请先选择一个存档";
+                return;
+            }
+            int index = selected[0];
+            // 两次点击确认：首次只提示，再次点击同一项才执行删除
+            if (_pendingDeleteIndex != index)
+            {
+                _pendingDeleteIndex = index;
+                _loadHint.Text = $"再次点击「删除所选」确认删除：{_loadInfos[index].SaveName}";
+                return;
+            }
+            var info = _loadInfos[index];
+            bool ok = SaveService.DeleteSave(info.Slot);
+            RefreshLoadList();
+            _loadHint.Text = ok ? $"已删除存档：{info.SaveName}" : "删除失败：存档目录无法移除";
+        });
         AddButton(_loadBox, "返回", () => ShowBox(_backTarget ?? _titleBox));
         return _loadBox;
     }
@@ -224,10 +247,37 @@ public partial class GameMenu : CanvasLayer
         title.AddThemeFontSizeOverride("font_size", 24);
         _settingsBox.AddChild(title);
 
+        // 分辨率下拉（仅窗口模式生效，全屏时置灰）
+        var resRow = new HBoxContainer();
+        resRow.AddChild(new Label { Text = "分辨率：" });
+        var resOpt = new OptionButton();
+        Vector2I[] resolutions =
+        {
+            new(1280, 720), new(1366, 768), new(1600, 900), new(1920, 1080), new(2560, 1440),
+        };
+        for (int i = 0; i < resolutions.Length; i++)
+        {
+            resOpt.AddItem($"{resolutions[i].X} × {resolutions[i].Y}", i);
+            if (resolutions[i].X == GameSettings.WindowWidth && resolutions[i].Y == GameSettings.WindowHeight)
+                resOpt.Select(i);
+        }
+        resOpt.Disabled = GameSettings.Fullscreen; // 全屏下分辨率不可选
+        resOpt.ItemSelected += i =>
+        {
+            var r = resolutions[i];
+            GameSettings.WindowWidth = r.X;
+            GameSettings.WindowHeight = r.Y;
+            GameSettings.Apply();
+            GameSettings.Save();
+        };
+        resRow.AddChild(resOpt);
+        _settingsBox.AddChild(resRow);
+
         var fullscreen = new CheckButton { Text = "全屏显示", ButtonPressed = GameSettings.Fullscreen };
         fullscreen.Toggled += on =>
         {
             GameSettings.Fullscreen = on;
+            resOpt.Disabled = on; // 切全屏时禁用分辨率下拉，退回窗口再开放
             GameSettings.Apply();
             GameSettings.Save();
         };
@@ -241,6 +291,14 @@ public partial class GameMenu : CanvasLayer
             GameSettings.Save();
         };
         _settingsBox.AddChild(vsync);
+
+        var infMoney = new CheckButton { Text = "无限钱（可负债建造）", ButtonPressed = GameSettings.InfiniteMoney };
+        infMoney.Toggled += on =>
+        {
+            GameSettings.InfiniteMoney = on;
+            GameSettings.Save();
+        };
+        _settingsBox.AddChild(infMoney);
 
         var autoRow = new HBoxContainer();
         autoRow.AddChild(new Label { Text = "自动保存：" });
@@ -322,13 +380,20 @@ public partial class GameMenu : CanvasLayer
     {
         _backTarget = back;
         _loadHint.Text = "";
+        RefreshLoadList();
+        if (_loadInfos.Count == 0)
+            _loadHint.Text = "暂无历史存档";
+        ShowBox(_loadBox);
+    }
+
+    /// <summary>重拉存档列表并重置删除确认状态（列表变动后旧序号失效）。</summary>
+    private void RefreshLoadList()
+    {
+        _pendingDeleteIndex = -1;
         _loadInfos = SaveService.ListSaves();
         _loadList.Clear();
         foreach (var info in _loadInfos)
             _loadList.AddItem(FormatSave(info));
-        if (_loadInfos.Count == 0)
-            _loadHint.Text = "暂无历史存档";
-        ShowBox(_loadBox);
     }
 
     private void OpenSaveBox()

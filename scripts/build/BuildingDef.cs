@@ -1,4 +1,6 @@
 using System.Collections.Generic;
+using System.IO;
+using System.Linq;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
@@ -55,6 +57,27 @@ public class BuildingDef
     /// <summary>储存上限（份）：住宅存家用物资，商铺/工坊存专营货品，农田存待运粮食。</summary>
     public int StorageCapacity { get; set; }
 
+    /// <summary>收获周期（月）：>0 表示按时间结算的农田类建筑（默认 1 月一收，数据驱动可配）。</summary>
+    public int HarvestMonths { get; set; }
+
+    /// <summary>每名在岗工人每次收获的产量（份），收成散落在占地格上待拾运。</summary>
+    public double YieldPerWorker { get; set; }
+
+    /// <summary>按时间结算建筑的产出货品 id（空串默认产粮；采矿场产矿石、制盐厂产盐）。</summary>
+    public string ProduceGoods { get; set; } = "";
+
+    /// <summary>税所：每名在岗吏员对全城税收的加成比例（如 0.1 = +10%）。</summary>
+    public double TaxBoostPerWorker { get; set; }
+
+    /// <summary>铸币局：每名在岗工匠每日铸钱入官库（贯）。</summary>
+    public double MintPerWorkerDay { get; set; }
+
+    /// <summary>建造菜单排序权重：&gt;0 才在菜单中显示（组内升序排列）；0 表不上架（grown 建筑由居民自建）。mod 可自定序号插入新建筑。</summary>
+    public int MenuOrder { get; set; }
+
+    /// <summary>建造菜单所属分组：infrastructure(基础设施)/public(公共设施)/official(官府设施)；空串默认归官府设施。mod 可填自定义组名（未知组自动追加在末尾）。</summary>
+    public string MenuGroup { get; set; } = "";
+
     [JsonIgnore]
     public Godot.Color GodotColor => new(Color);
 
@@ -69,15 +92,53 @@ public class BuildingDef
 
     public static Dictionary<string, BuildingDef> LoadAll()
     {
-        using var f = Godot.FileAccess.Open("res://data/buildings.json", Godot.FileAccess.ModeFlags.Read);
-        string text = f.GetAsText();
-        var list = JsonSerializer.Deserialize<List<BuildingDef>>(text,
-            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
-
         var dict = new Dictionary<string, BuildingDef>();
+
+        // 1) 基础定义：随游戏发行，位于 res://data/buildings.json
+        using (var f = Godot.FileAccess.Open("res://data/buildings.json", Godot.FileAccess.ModeFlags.Read))
+            MergeInto(dict, f.GetAsText());
+
+        // 2) 建筑 mod：游戏根目录 mods/<模组名>/buildings.json，按目录名升序加载，
+        //    同 id 覆盖基础定义、新 id 直接追加——玩家放入文件夹即生效，无需改代码。
+        LoadMods(dict);
+
+        return dict;
+    }
+
+    /// <summary>扫描 mods 目录，把各模组的建筑定义并入字典（后加载者覆盖同 id）。</summary>
+    private static void LoadMods(Dictionary<string, BuildingDef> dict)
+    {
+        string modsDir = GamePaths.ModsDir;
+        if (!Directory.Exists(modsDir))
+            return;
+
+        foreach (string dir in Directory.GetDirectories(modsDir).OrderBy(d => d))
+        {
+            string file = Path.Combine(dir, "buildings.json");
+            if (!File.Exists(file))
+                continue;
+            try
+            {
+                int before = dict.Count;
+                MergeInto(dict, File.ReadAllText(file));
+                Godot.GD.Print($"[mod] 载入建筑定义 {Path.GetFileName(dir)}（现共 {dict.Count} 种，原 {before} 种）");
+            }
+            catch (System.Exception e)
+            {
+                Godot.GD.PushWarning($"[mod] 解析 {file} 失败：{e.Message}");
+            }
+        }
+    }
+
+    /// <summary>把一段 JSON 数组文本解析为建筑定义并按 id 并入字典（覆盖同 id）。</summary>
+    private static void MergeInto(Dictionary<string, BuildingDef> dict, string json)
+    {
+        var list = JsonSerializer.Deserialize<List<BuildingDef>>(json,
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true });
+        if (list == null)
+            return;
         foreach (var def in list)
             dict[def.Id] = def;
-        return dict;
     }
 }
 
@@ -91,6 +152,9 @@ public class BuildingInstance : Obj
 
     /// <summary>完好度 0-100：人造建筑逐月老化，修缮恢复，归零坍塌。</summary>
     public float Condition = 100f;
+    
+    /// <summary>废弃标志：grown 建筑无人居住时置位，可供新居民重建入住，并为后期邻居合并扩建预留钩子。</summary>
+    public bool Abandoned;
 
     /// <summary>建造日期（游戏年/月；老存档为 0 表示不详）。</summary>
     public int BuiltYear;
@@ -99,47 +163,34 @@ public class BuildingInstance : Obj
     /// <summary>专营货品（商铺/工坊倾向单一货品交易；空串表示不经营）。</summary>
     public string Specialty = "";
 
-    /// <summary>库存：货品 id → 份数。</summary>
-    public Dictionary<string, double> Storage = new();
+    /// <summary>距上次收获的月数（仅农田类建筑使用，到期清零）。</summary>
+    public int MonthsSinceHarvest;
+
+    /// <summary>建筑内库存（统一仓储接口，典型案例一）；容量由定义 StorageCapacity 驱动。</summary>
+    public Inventory Inv = new();
 
     /// <summary>库存总量（份）。</summary>
-    public double StorageTotal
+    public double StorageTotal => Inv.Total;
+
+    /// <summary>剩余库容（份）。</summary>
+    public double StorageFree
     {
         get
         {
-            double sum = 0;
-            foreach (var v in Storage.Values)
-                sum += v;
-            return sum;
+            Inv.Capacity = Def.StorageCapacity; // 容量随定义同步（mod 改定义即时生效）
+            return Inv.Free;
         }
     }
-
-    /// <summary>剩余库容（份）。</summary>
-    public double StorageFree => System.Math.Max(0, Def.StorageCapacity - StorageTotal);
 
     /// <summary>入库（受容量限制），返回实际入库份数。</summary>
     public double StoreGoods(string goodsId, double amount)
     {
-        double accepted = System.Math.Min(amount, StorageFree);
-        if (accepted <= 0)
-            return 0;
-        Storage[goodsId] = Storage.GetValueOrDefault(goodsId) + accepted;
-        return accepted;
+        Inv.Capacity = Def.StorageCapacity;
+        return Inv.Store(goodsId, amount);
     }
 
     /// <summary>出库，返回实际取出份数。</summary>
-    public double TakeGoods(string goodsId, double amount)
-    {
-        double have = Storage.GetValueOrDefault(goodsId);
-        double taken = System.Math.Min(have, amount);
-        if (taken <= 0)
-            return 0;
-        if (have - taken <= 0.0001)
-            Storage.Remove(goodsId);
-        else
-            Storage[goodsId] = have - taken;
-        return taken;
-    }
+    public double TakeGoods(string goodsId, double amount) => Inv.Take(goodsId, amount);
 
     public Godot.Vector2I Origin
     {

@@ -40,8 +40,8 @@ public static class TaxDefs
         {
             Id = "monopoly",
             Name = "专卖税（盐/茶/酒）",
-            Description = "资源垄断层：按工坊产出的榷货专卖征收",
-            MonthlyBase = gs => SumTaxBonus(gs, "workshop"),
+            Description = "资源垄断层：按工坊与矿盐官产的榷货专卖征收",
+            MonthlyBase = gs => SumTaxBonus(gs, "workshop") + SumTaxBonus(gs, "saltworks") + SumTaxBonus(gs, "mine"),
         },
         new TaxDef
         {

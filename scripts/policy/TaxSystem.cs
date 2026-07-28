@@ -11,18 +11,29 @@ public class TaxSystem
     /// <summary>每项重税每月造成的民怨（成人兴趣值扣减）。</summary>
     private const float HeavyTaxFunPenalty = 2f;
 
-    /// <summary>每日征税：月基数 ÷ 30，逐税种记入账本。</summary>
+    /// <summary>每日征税：月基数 ÷ 30，逐税种记入账本；税所在岗吏员提供全局加成。</summary>
     public void TickDay(GameState gs)
     {
+        double boost = TaxBoost(gs);
         foreach (var def in TaxDefs.All)
         {
             int level = gs.Taxes.LevelOf(def.Id);
-            double amount = def.MonthlyBase(gs) * TaxPolicy.RateOf(level) / GameClock.DaysPerMonth;
+            double amount = def.MonthlyBase(gs) * TaxPolicy.RateOf(level) * boost / GameClock.DaysPerMonth;
             if (amount <= 0)
                 continue;
             gs.Money += amount;
             gs.Ledger.Add(def.Name, amount);
         }
+    }
+
+    /// <summary>税收加成倍率 = 1 + Σ(税所类建筑在岗吏员 × 每人加成)，数据驱动自 buildings.json。</summary>
+    public static double TaxBoost(GameState gs)
+    {
+        double boost = 1.0;
+        foreach (var c in gs.Citizens.Values)
+            if (c.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(c.WorkplaceId, out var wp))
+                boost += wp.Def.TaxBoostPerWorker;
+        return boost;
     }
 
     /// <summary>每月结算：重税民怨。</summary>

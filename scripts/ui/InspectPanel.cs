@@ -118,18 +118,17 @@ public partial class InspectPanel : PanelContainer
         sb.AppendLine($"住所：{BuildingName(gs, c.HomeId, "无家可归")}");
         sb.AppendLine($"生计：{JobLine(gs, c)}");
         sb.AppendLine($"积蓄：{c.Money:F1} 钱");
-        sb.AppendLine($"正在：{ActivityName(c.Activity)}" +
-            (c.Carrying != "" ? $"（携 {Goods.NameOf(c.Carrying)} 一担）" : ""));
+        sb.AppendLine($"正在：{ActivityName(c.Activity)}{PackLine(c)}");
         sb.AppendLine($"疲劳 {c.Fatigue:F0} / 兴致 {c.Fun:F0}");
 
         // 需求
         sb.AppendLine("—— 需求 ——");
         if (gs.Buildings.TryGetValue(c.HomeId, out var home))
         {
-            double food = home.Storage.GetValueOrDefault(Goods.Grain)
-                + home.Storage.GetValueOrDefault(Goods.Fruit)
-                + home.Storage.GetValueOrDefault(Goods.Game);
-            double fuel = home.Storage.GetValueOrDefault(Goods.Wood);
+            double food = home.Inv.AmountOf(Goods.Grain)
+                + home.Inv.AmountOf(Goods.Fruit)
+                + home.Inv.AmountOf(Goods.Game);
+            double fuel = home.Inv.AmountOf(Goods.Wood);
             sb.AppendLine($"家中存粮 {food:F1} 份 / 存柴 {fuel:F1} 份");
         }
         else
@@ -155,9 +154,17 @@ public partial class InspectPanel : PanelContainer
     {
         JobKind.Employed => $"受雇于{BuildingName(gs, c.WorkplaceId, "（工作地已失）")}",
         JobKind.Logger => "进山伐木采猎",
-        JobKind.Repairer => "修缮公共屋舍",
         _ => c.IsChild ? "尚幼" : c.IsElder ? "颐养" : "无业",
     };
+
+    /// <summary>背包携带明细（空背包返回空串）。</summary>
+    private static string PackLine(Citizen c)
+    {
+        if (c.Pack.IsEmpty)
+            return "";
+        var parts = c.Pack.Stacks.Select(s => $"{Goods.NameOf(s.GoodsId)} {s.Amount:F1}份");
+        return $"（背 {string.Join("、", parts)}）";
+    }
 
     private static string BuildingName(GameState gs, int id, string fallback) =>
         gs.Buildings.TryGetValue(id, out var b) ? $"{b.Def.Name}（{b.X},{b.Y}）" : fallback;
@@ -174,7 +181,8 @@ public partial class InspectPanel : PanelContainer
         ActivityType.Hunting => "打猎",
         ActivityType.Trading => "市集交易",
         ActivityType.Repairing => "修缮",
-        ActivityType.Hauling => "挑担回家",
+        ActivityType.Hauling => "挑担入库",
+        ActivityType.PickingUp => "拾取物资",
         _ => "不明",
     };
 
@@ -189,6 +197,8 @@ public partial class InspectPanel : PanelContainer
         sb.AppendLine($"建于：{(b.BuiltYear > 0 ? $"第{b.BuiltYear}年 {b.BuiltMonth}月" : "不详")}");
         if (b.Specialty != "")
             sb.AppendLine($"专营：{Goods.NameOf(b.Specialty)}");
+        if (b.Def.HarvestMonths > 0)
+            sb.AppendLine($"农时：{b.Def.HarvestMonths - b.MonthsSinceHarvest} 月后收获");
 
         // 人员
         var residents = new List<string>();
@@ -211,15 +221,15 @@ public partial class InspectPanel : PanelContainer
             sb.AppendLine(workers.Count > 0 ? string.Join("、", workers) : "（暂无雇工）");
         }
 
-        // 储存
+        // 储存（逐堆列出，入库天数为后期变质系统铺垫）
         if (b.Def.StorageCapacity > 0)
         {
             sb.AppendLine($"—— 储存 {b.StorageTotal:F1}/{b.Def.StorageCapacity} 份 ——");
-            if (b.Storage.Count == 0)
+            if (b.Inv.IsEmpty)
                 sb.AppendLine("（空仓）");
             else
-                foreach (var (id, amt) in b.Storage)
-                    sb.AppendLine($"{Goods.NameOf(id)}  {amt:F1} 份");
+                foreach (var s in b.Inv.Stacks)
+                    sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日）");
         }
 
         _body.Text = sb.ToString().TrimEnd();

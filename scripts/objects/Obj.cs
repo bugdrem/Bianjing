@@ -19,14 +19,20 @@ public abstract class Obj
     public Dictionary<string, string> Extra = new();
 }
 
-/// <summary>植物实体：固定生长，成熟后向周围散播幼体（PlantGrowthSystem 驱动）。</summary>
+/// <summary>植物实体：固定生长，成熟后向周围散播幼体；成树逐日挂果，过熟掉落成地面果堆（PlantGrowthSystem 驱动）。</summary>
 public class PlantObj : Obj
 {
     /// <summary>长成大树所需月数。</summary>
     public const int MatureMonths = 12;
 
+    /// <summary>挂果上限（份）：树上未掉落的果实也是一类仓储（典型案例四）。</summary>
+    public const double FruitCap = 3;
+
     /// <summary>生长月龄（每月 +1，达到 MatureMonths 即成熟）。</summary>
     public int GrowthMonths;
+
+    /// <summary>树上挂果存量（份）：成树逐日增长，采摘消耗，挂满过熟概率掉落地面。</summary>
+    public double FruitStock;
 
     public bool Mature => GrowthMonths >= MatureMonths;
 
@@ -38,4 +44,18 @@ public class PlantObj : Obj
 public class AnimalObj : Obj
 {
     public int AgeMonths;
+}
+
+/// <summary>
+/// 地面物资堆：散落在地图上的货品（典型案例三）——
+/// 农作物收获、猎物倒地、过熟落果等均以此形式落地，等待居民（后期载具）拾取搬运。
+/// 一格至多一堆（GameState.Piles 以格索引为键），拾空即消。
+/// </summary>
+public class ItemPileObj : Obj
+{
+    /// <summary>单堆容量（份）：满堆后多余收成烂在地里。</summary>
+    public const double PileCapacity = 40;
+
+    /// <summary>堆内货品（统一仓储接口，随存档序列化）。</summary>
+    public Inventory Inv = new() { Capacity = PileCapacity };
 }

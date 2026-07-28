@@ -34,12 +34,13 @@ public class MaintenanceSystem
         Collapse(gs);
     }
 
-    /// <summary>公共设施：修缮匠逐座抢修最破的官方建筑，直到当日工量用尽（料钱记账）。</summary>
+    /// <summary>公共设施：修缮匠（受雇于修缮房）逐座抢修最破的官方建筑，直到当日工量用尽（料钱记账）。</summary>
     private static void RepairOfficial(GameState gs)
     {
         int repairers = 0;
         foreach (var c in gs.Citizens.Values)
-            if (c.JobKind == JobKind.Repairer)
+            if (c.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(c.WorkplaceId, out var wp)
+                && wp.Def.Id == "repairhouse")
                 repairers++;
         if (repairers == 0)
             return;

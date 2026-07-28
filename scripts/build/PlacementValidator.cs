@@ -10,7 +10,7 @@ public static class PlacementValidator
         if (!MapGrid.InBounds(c))
             return false;
         ref var cell = ref gs.Map.CellAt(c);
-        return cell.IsEmpty && gs.Money >= GameState.RoadCost;
+        return cell.IsEmpty && (GameSettings.InfiniteMoney || gs.Money >= GameState.RoadCost);
     }
 
     /// <summary>桥梁：只能架在没有桥的水面上。</summary>
@@ -19,7 +19,7 @@ public static class PlacementValidator
         if (!MapGrid.InBounds(c))
             return false;
         ref var cell = ref gs.Map.CellAt(c);
-        return cell.HasWater && !cell.HasBridge && gs.Money >= GameState.BridgeCost;
+        return cell.HasWater && !cell.HasBridge && (GameSettings.InfiniteMoney || gs.Money >= GameState.BridgeCost);
     }
 
     /// <summary>建筑：占地全部为空格、在界内、至少一边临路（连通性）、钱够。</summary>
@@ -38,7 +38,7 @@ public static class PlacementValidator
         if (gs.Map.FindAdjacentRoad(origin, def.SizeX, def.SizeY) == null)
             return false;
 
-        if (checkCost && def.Category == "official" && gs.Money < def.Cost)
+        if (checkCost && !GameSettings.InfiniteMoney && def.Category == "official" && gs.Money < def.Cost)
             return false;
 
         return true;

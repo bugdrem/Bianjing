@@ -6,22 +6,33 @@ namespace Bianjing;
 
 /// <summary>
 /// 野生动物系统：每日小范围游走（倾向树林、远离人口区，避免同格堆叠）；
-/// 每月树林边随机刷新 → 繁育 → 自然减员。
+/// 每月在没有动物的树林边按比例随机刷新 → 繁育 → 自然减员。
+/// 动物无性别：只要全图在世两只以上即可繁育；种群总数上限与周围树林量成正比。
 /// 只操作数据层 AnimalObj，渲染由 AnimalRenderer 负责，捕猎由居民代理触发。
 /// </summary>
 public class WildlifeSystem
 {
-    private const int MaxAnimals = 40;
-    private const int InitialAnimals = 12;
-    private const float BreedChance = 0.08f;
+    /// <summary>每多少格树林支撑一只动物（总数与林地成正比）。</summary>
+    private const int TreesPerAnimal = 15;
+    /// <summary>种群硬上限（防极端密林爆量）。</summary>
+    private const int HardCap = 60;
+    /// <summary>每月补充新个体的触发比例（“一定比例的树林会刷新”）。</summary>
+    private const float SpawnChancePerMonth = 0.5f;
+    /// <summary>刷新点该半径内无动物才算“此处动物少于一”。</summary>
+    private const int LonelyRadius = 6;
+    private const float BreedChance = 0.12f;
     private const float NaturalDeathChance = 0.01f;
 
     private readonly Random _rng = new();
 
-    /// <summary>新地图初始撒动物。</summary>
+    /// <summary>种群上限：随当前树林总量（Plants 即树木）按比例推算，封顶硬上限。</summary>
+    private static int MaxAnimals(GameState gs) => Math.Min(HardCap, gs.Plants.Count / TreesPerAnimal);
+
+    /// <summary>新地图初始撒动物（约半数上限，至少一只以便后续繁育）。</summary>
     public void SeedInitial(GameState gs)
     {
-        for (int i = 0; i < InitialAnimals; i++)
+        int target = Math.Max(1, MaxAnimals(gs) / 2);
+        for (int i = 0; i < target; i++)
             SpawnNearForest(gs);
         EventBus.RaiseWildlifeChanged();
     }
@@ -52,24 +63,27 @@ public class WildlifeSystem
             EventBus.RaiseWildlifeChanged();
     }
 
-    /// <summary>每月大事：刷新补充 → 增龄 → 繁育 → 自然减员。</summary>
+    /// <summary>每月大事：无动物的树林边按比例刷新 → 增龄 → 繁育（≥两只、无性别）→ 自然减员；总数不超林地上限。</summary>
     public void TickMonth(GameState gs)
     {
         bool changed = false;
+        int max = MaxAnimals(gs);
 
-        // 随机刷新：种群未满时树林边缘补充新个体
-        if (gs.Animals.Count < MaxAnimals && _rng.NextDouble() < 0.6)
+        // 随机刷新：种群未满时，在“附近没有动物”的树林边缘按比例补充新个体
+        if (gs.Animals.Count < max && _rng.NextDouble() < SpawnChancePerMonth)
             changed |= SpawnNearForest(gs);
 
         var occupied = BuildOccupied(gs);
         var deaths = new List<int>();
         var newborns = new List<Vector2I>();
+        bool canBreed = gs.Animals.Count >= 2; // 两只以上才可繁育（无性别）
+
         foreach (var a in gs.Animals.Values)
         {
             a.AgeMonths++;
 
-            // 繁育：成年个体在种群未满时就近产仔
-            if (a.AgeMonths >= 6 && gs.Animals.Count + newborns.Count < MaxAnimals
+            // 繁育：总数未到林地上限时就近产仔（不依赖个体性别/性状）
+            if (canBreed && gs.Animals.Count + newborns.Count < max
                 && _rng.NextDouble() < BreedChance)
             {
                 var spot = BestNearbyCell(gs, new Vector2I(a.X, a.Y), 1, occupied);
@@ -107,18 +121,29 @@ public class WildlifeSystem
 
     private bool SpawnNearForest(GameState gs)
     {
-        for (int attempt = 0; attempt < 20; attempt++)
+        for (int attempt = 0; attempt < 24; attempt++)
         {
             var c = new Vector2I(_rng.Next(MapGrid.Size), _rng.Next(MapGrid.Size));
             ref var cell = ref gs.Map.CellAt(c);
             if (!cell.IsEmpty || cell.HasTree)
                 continue;
-            // 栖息地约束：2 格内有树林，且避开人口区刷新
+            // 栖息地约束：2 格内有树林、避开人口区，且此处附近暂无动物（动物数 <1）
             if (gs.Map.FindNearestTree(c, 2) == null || CrowdScore(gs, c, 4) > 0)
+                continue;
+            if (HasAnimalNear(gs, c, LonelyRadius))
                 continue;
             gs.AddAnimal(c);
             return true;
         }
+        return false;
+    }
+
+    /// <summary>该格该半径内是否已有动物（判定“此处动物<1”）。</summary>
+    private static bool HasAnimalNear(GameState gs, Vector2I c, int radius)
+    {
+        foreach (var a in gs.Animals.Values)
+            if (Math.Max(Math.Abs(a.X - c.X), Math.Abs(a.Y - c.Y)) <= radius)
+                return true;
         return false;
     }
 

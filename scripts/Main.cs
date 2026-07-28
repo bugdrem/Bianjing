@@ -36,6 +36,7 @@ public partial class Main : Node3D
         var renderer = new GridRenderer();
         AddChild(renderer);
         AddChild(new AnimalRenderer());
+        AddChild(new PileRenderer()); // 地面物资堆（收成/猎物/落果）
 
         var cameraRig = new RtsCameraRig();
         AddChild(cameraRig);
@@ -87,6 +88,7 @@ public partial class Main : Node3D
         _economy.TickDay(gs);
         _maintenance.TickDay(gs);
         _goods.TickDay(gs);
+        _plants.TickDay(gs); // 挂果生长与落果
         _wildlife.TickDay(gs);
     }
 
@@ -96,7 +98,8 @@ public partial class Main : Node3D
         var gs = GameState.I;
         _lifecycle.TickMonth(gs);
         _taxes.TickMonth(gs);
-        _plants.Tick(gs);
+        _goods.TickMonth(gs); // 农田到期收获，收成散落田格
+        _plants.TickMonth(gs);
         _wildlife.TickMonth(gs);
         gs.Ledger.Rotate();
     }

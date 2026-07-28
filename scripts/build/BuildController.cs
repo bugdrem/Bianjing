@@ -378,15 +378,20 @@ public partial class BuildController : Node
         else if (cell.HasTree)
             what = "树林";
         else if (cell.Zone != ZoneType.None)
-            what = cell.Zone switch
-            {
-                ZoneType.Residential => "住宅坊（空地）",
-                ZoneType.Market => "市坊（空地）",
-                _ => "工坊区（空地）",
-            };
+            what = "可建设区（空地）";
         else
             what = "荒地";
 
-        Hud?.ShowCellInfo($"({c.X},{c.Y})  {what}  吸引力 {cell.Desirability:F1}");
+        // 格上有地面物资堆：附带列出堆内货品明细
+        string pileInfo = "";
+        if (gs.Piles.TryGetValue(GameState.CellIndex(c), out var pile))
+        {
+            var parts = new System.Collections.Generic.List<string>();
+            foreach (var s in pile.Inv.Stacks)
+                parts.Add($"{Goods.NameOf(s.GoodsId)} {s.Amount:F1}份");
+            pileInfo = $"  【落地物资：{string.Join("、", parts)}】";
+        }
+
+        Hud?.ShowCellInfo($"({c.X},{c.Y})  {what}  吸引力 {cell.Desirability:F1}{pileInfo}");
     }
 }

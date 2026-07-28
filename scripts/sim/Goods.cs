@@ -9,6 +9,8 @@ public static class Goods
     public const string Wood = "wood";
     public const string Fruit = "fruit";
     public const string Game = "game";
+    public const string Ore = "ore";
+    public const string Salt = "salt";
 
     /// <summary>一担 = 5 份（居民单次搬运量）。</summary>
     public const double LoadUnits = 5;
@@ -23,6 +25,8 @@ public static class Goods
         [Wood] = 0.2,
         [Fruit] = 0.12,
         [Game] = 0.32,
+        [Ore] = 0.5,
+        [Salt] = 0.6,
     };
 
     /// <summary>买入价倍率（去商铺购买比自产贵）。</summary>
@@ -34,6 +38,8 @@ public static class Goods
         [Wood] = "柴薪",
         [Fruit] = "果品",
         [Game] = "野味",
+        [Ore] = "矿石",
+        [Salt] = "盐",
     };
 
     public static string NameOf(string id) => DisplayName.GetValueOrDefault(id, id);

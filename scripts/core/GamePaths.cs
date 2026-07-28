@@ -18,4 +18,7 @@ public static class GamePaths
 
     /// <summary>存档根目录（游戏根目录/saves）。</summary>
     public static string SavesDir => Path.Combine(Root, "saves");
+
+    /// <summary>内容 mod 根目录（游戏根目录/mods，每个子目录一个模组，内放 buildings.json 等定义）。</summary>
+    public static string ModsDir => Path.Combine(Root, "mods");
 }

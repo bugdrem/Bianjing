@@ -40,8 +40,10 @@ public partial class CitizenAgent : Node3D
     private List<Vector3> _path;
     private int _pathIndex;
     private float _dwell;
-    private Vector2I? _activityCell; // 当前活动目标格（伐木/采摘结算用）
+    private Vector2I? _activityCell; // 当前活动目标格（伐木/采摘/拾堆结算用）
     private int _activityAnimalId = -1; // 打猎目标动物 Id
+    private int _haulBuildingId = -1; // 挑担目的地建筑（自家或田仓）
+    private bool _fieldHarvest; // 背上的货是自家田里拾的收成（优先挑入田仓而非回家）
     private Vector3 _laneJitter; // 个人固定车道偏移，避免全员踩路心叠成一条线
     private int _lookAgeYears = -1;
 
@@ -137,13 +139,26 @@ public partial class CitizenAgent : Node3D
         if (C.AgeYears != _lookAgeYears)
             ApplyLook();
 
-        // 背着山货（粮/柴/野果/猎物）：家里放得下先搬回家，否则挑去专营铺子卖掉
-        if (C.Carrying != "")
+        // 背包有货：田里拾的收成先挑入田仓；否则家里放得下先搬回家，再不行挑去专营铺子卖掉
+        if (!C.Pack.IsEmpty)
         {
-            if (gs.Buildings.TryGetValue(C.HomeId, out var home) && home.StorageFree >= 1)
+            if (_fieldHarvest && C.JobKind == JobKind.Employed
+                && gs.Buildings.TryGetValue(C.WorkplaceId, out var barn) && barn.StorageFree >= 1)
+            {
+                _haulBuildingId = barn.Id;
+                StartActivity(ActivityType.Hauling, BuildingAnchor(barn) ?? barn.Origin, 2f);
+            }
+            else if (gs.Buildings.TryGetValue(C.HomeId, out var home) && home.StorageFree >= 1)
+            {
+                _fieldHarvest = false;
+                _haulBuildingId = home.Id;
                 StartActivity(ActivityType.Hauling, HomeAnchor(), 2f);
+            }
             else
+            {
+                _fieldHarvest = false;
                 StartActivity(ActivityType.Trading, TradeAnchor(gs), 2.5f);
+            }
             return;
         }
 
@@ -166,6 +181,19 @@ public partial class CitizenAgent : Node3D
 
         if (C.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(C.WorkplaceId, out var wp))
         {
+            // 修缮房雇工：外出巡修最破旧的公共建筑（而非坐班）
+            if (wp.Def.Id == "repairhouse")
+            {
+                StartRepairing(gs, wp);
+                return;
+            }
+            // 农夫：田面有收成堆先去拾担（拾完下一轮决策挑入田仓），否则照常驻留耕作
+            var fieldPile = FindFieldPile(gs, wp);
+            if (fieldPile != null)
+            {
+                StartActivity(ActivityType.PickingUp, new Vector2I(fieldPile.X, fieldPile.Y), 2f);
+                return;
+            }
             // 受雇者/店主：进工作地驻留，疲劳攒满才下班
             StartWorkAt(wp);
             return;
@@ -174,12 +202,6 @@ public partial class CitizenAgent : Node3D
         if (C.JobKind == JobKind.Logger)
         {
             StartForaging();
-            return;
-        }
-
-        if (C.JobKind == JobKind.Repairer)
-        {
-            StartRepairing(gs);
             return;
         }
 
@@ -257,16 +279,28 @@ public partial class CitizenAgent : Node3D
         StartActivity(ActivityType.Logging, tree, 4f);
     }
 
-    /// <summary>采摘：到林中采野果，不砸树不伐木；无树则闲逛等待。</summary>
+    /// <summary>采摘：优先拾附近的地面果堆，其次去挂果成树采摘；都没有则闲逛等待。</summary>
     private void StartGathering()
     {
-        var tree = GameState.I.Map.FindNearestTree(MapGrid.WorldToCell(Position), 48);
+        var gs = GameState.I;
+        var pos = MapGrid.WorldToCell(Position);
+
+        // 落地的熟果不拾白不拾（典型案例三）
+        var pile = gs.FindNearestPile(pos, Goods.Fruit, 48);
+        if (pile != null)
+        {
+            StartActivity(ActivityType.PickingUp, new Vector2I(pile.X, pile.Y), 2f);
+            return;
+        }
+
+        // 树上挂果才有得摘（典型案例四），不再凭空产果
+        var tree = gs.FindNearestFruitTree(pos, 48);
         if (tree == null)
         {
             StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
             return;
         }
-        StartActivity(ActivityType.Gathering, tree, 3f);
+        StartActivity(ActivityType.Gathering, new Vector2I(tree.X, tree.Y), 3f);
     }
 
     /// <summary>打猎：锁定最近的野物赶过去；没有猎物则改伐木。</summary>
@@ -282,8 +316,8 @@ public partial class CitizenAgent : Node3D
         _activityAnimalId = prey.Id;
     }
 
-    /// <summary>修缮匠：去最破旧的公共建筑驻留巡修（实际修复量由 MaintenanceSystem 月结）。</summary>
-    private void StartRepairing(GameState gs)
+    /// <summary>修缮匠：去最破旧的公共建筑驻留巡修（实际修复量由 MaintenanceSystem 日结）；无可修则回修缮房值守。</summary>
+    private void StartRepairing(GameState gs, BuildingInstance repairhouse)
     {
         BuildingInstance target = null;
         foreach (var b in gs.Buildings.Values)
@@ -293,79 +327,135 @@ public partial class CitizenAgent : Node3D
             if (target == null || b.Condition < target.Condition)
                 target = b;
         }
-        if (target == null)
-        {
-            StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
-            return;
-        }
-        StartWorkAt(target, ActivityType.Repairing);
+        StartWorkAt(target ?? repairhouse, ActivityType.Repairing);
     }
 
-    /// <summary>驻留结束时的活动结算（砍树/采摘/打猎/卖货/下工工钱）：钱与货品一律按动作完成即时结算。</summary>
+    /// <summary>驻留结束时的活动结算（砍树/采摘/打猎/拾堆/卖货/挑担入库/下工工钱）：钱与货品一律按动作完成即时结算。</summary>
     private void CompleteActivity()
     {
+        var gs = GameState.I;
         switch (C.Activity)
         {
             case ActivityType.Logging:
-                if (_activityCell != null && GameState.I.ChopTree(_activityCell.Value))
-                    C.Carrying = "wood";
+                // 砍倒一棵树得一担柴，直接入背包
+                if (_activityCell != null && gs.ChopTree(_activityCell.Value))
+                    C.Pack.Store(Goods.Wood, Goods.LoadUnits);
                 break;
             case ActivityType.Gathering:
-                // 采摘不破坏树木，只要树还在就有收获
-                if (_activityCell != null && MapGrid.InBounds(_activityCell.Value)
-                    && GameState.I.Map.CellAt(_activityCell.Value).HasTree)
-                    C.Carrying = "fruit";
-                break;
-            case ActivityType.Hunting:
-                if (_activityAnimalId >= 0 && GameState.I.HarvestAnimal(_activityAnimalId))
-                    C.Carrying = "game";
-                break;
-            case ActivityType.Trading:
-                if (C.Carrying != "")
+                // 从树上摘果：背包能装多少摘多少，树上存量相应减少
+                if (_activityCell != null
+                    && gs.Plants.TryGetValue(GameState.CellIndex(_activityCell.Value), out var plant)
+                    && plant.FruitStock > 0)
                 {
-                    SellCarrying(GameState.I);
-                    C.Carrying = "";
+                    double got = Math.Min(plant.FruitStock, C.Pack.Free);
+                    plant.FruitStock -= C.Pack.Store(Goods.Fruit, got);
                 }
                 break;
+            case ActivityType.Hunting:
+                // 猎物倒地化为野味堆，猎人当场拾入背包（装不下的留在原地待拾）
+                if (_activityAnimalId >= 0 && gs.Animals.TryGetValue(_activityAnimalId, out var prey))
+                {
+                    var kill = new Vector2I(prey.X, prey.Y);
+                    if (gs.HarvestAnimal(prey.Id))
+                        gs.PickupPile(kill, C.Pack);
+                }
+                break;
+            case ActivityType.PickingUp:
+                // 拾堆入背包；若拾的是自家田里的收成，标记优先挑入田仓
+                if (_activityCell != null)
+                {
+                    gs.PickupPile(_activityCell.Value, C.Pack);
+                    _fieldHarvest = !C.Pack.IsEmpty && IsOnWorkplaceField(gs, _activityCell.Value);
+                }
+                break;
+            case ActivityType.Trading:
+                if (!C.Pack.IsEmpty)
+                    SellPack(gs);
+                break;
             case ActivityType.Hauling:
-                // 搬回家入库；家里已装不下整担则下次决策转去市集
-                if (C.Carrying != "" && GameState.I.Buildings.TryGetValue(C.HomeId, out var home)
-                    && home.StoreGoods(C.Carrying, Goods.LoadUnits) > 0)
-                    C.Carrying = "";
+                // 挑到目的地入库（装不下的留在背包，下次决策转去市集）
+                if (gs.Buildings.TryGetValue(_haulBuildingId, out var dest))
+                {
+                    foreach (var s in C.Pack.Stacks.ToArray())
+                        C.Pack.Take(s.GoodsId, dest.StoreGoods(s.GoodsId, s.Amount));
+                    if (C.Pack.IsEmpty)
+                        _fieldHarvest = false; // 收成已入仓，回到日常循环
+                }
+                _haulBuildingId = -1;
                 break;
             case ActivityType.Working:
-                // 下工即结：当班工钱（月俸/30）入账；农夫另将当班产粮入田仓，田仓有存就挑一担带走
-                if (GameState.I.Buildings.TryGetValue(C.WorkplaceId, out var work))
+                // 下工即结：当班工钱（月俸/30）入账；农夫田仓有存粮就挑一担带走（回家或上市）
+                if (gs.Buildings.TryGetValue(C.WorkplaceId, out var work))
                 {
                     C.Money += work.Def.Salary / GameClock.DaysPerMonth;
-                    if (work.Def.Id == "farm")
+                    if (work.Def.HarvestMonths > 0 && C.Pack.IsEmpty)
                     {
-                        work.StoreGoods(Goods.Grain, GoodsSystem.GrainPerWorkerShift);
-                        if (C.Carrying == "" && work.TakeGoods(Goods.Grain, Goods.LoadUnits) > 0)
-                            C.Carrying = Goods.Grain;
+                        double got = work.TakeGoods(Goods.Grain, C.Pack.Free);
+                        if (got > 0)
+                            C.Pack.Store(Goods.Grain, got);
                     }
                 }
                 break;
             case ActivityType.Repairing:
-                // 修缮匠下工即结：官库发当班俸禄并记账
-                double pay = JobSystem.RepairerIncome / GameClock.DaysPerMonth;
-                C.Money += pay;
-                GameState.I.Money -= pay;
-                GameState.I.Ledger.Add("修缮匠俸禄", -pay);
+                // 修缮匠下工即结：官库发当班俸禄并记账（俸禄随修缮房定义 Salary）
+                if (gs.Buildings.TryGetValue(C.WorkplaceId, out var rh))
+                {
+                    double pay = rh.Def.Salary / GameClock.DaysPerMonth;
+                    C.Money += pay;
+                    gs.Money -= pay;
+                    gs.Ledger.Add("修缮匠俸禄", -pay);
+                }
                 break;
         }
         _activityCell = null;
         _activityAnimalId = -1;
     }
 
-    /// <summary>把肩上一担货卖进专营铺面：入库多少收多少钱；铺面全满则按基价散卖给行商。</summary>
-    private void SellCarrying(GameState gs)
+    /// <summary>目标格是否落在自己工作的农田占地内（判断拾的是不是自家收成）。</summary>
+    private bool IsOnWorkplaceField(GameState gs, Vector2I c)
     {
-        var shop = FindTradeShop(gs, C.Carrying, needFree: true);
-        double sold = shop?.StoreGoods(C.Carrying, Goods.LoadUnits) ?? 0;
-        if (sold <= 0)
-            sold = Goods.LoadUnits; // 散卖：货物离场，不入任何库
-        C.Money += Goods.PriceOf(C.Carrying) * sold;
+        if (C.JobKind != JobKind.Employed || !gs.Buildings.TryGetValue(C.WorkplaceId, out var wp))
+            return false;
+        return c.X >= wp.Origin.X && c.X < wp.Origin.X + wp.Def.SizeX
+            && c.Y >= wp.Origin.Y && c.Y < wp.Origin.Y + wp.Def.SizeY;
+    }
+
+    /// <summary>找工作建筑占地格上的收成堆（农夫拾运用）。</summary>
+    private static ItemPileObj FindFieldPile(GameState gs, BuildingInstance wp)
+    {
+        for (int x = wp.Origin.X; x < wp.Origin.X + wp.Def.SizeX; x++)
+            for (int y = wp.Origin.Y; y < wp.Origin.Y + wp.Def.SizeY; y++)
+                if (gs.Piles.TryGetValue(GameState.CellIndex(new Vector2I(x, y)), out var pile))
+                    return pile;
+        return null;
+    }
+
+    /// <summary>把背包里的货逐堆卖掉：优先专营铺、其次市集（通吃各货）收多少入库多少，剩余散卖给行商，一律按基价结钱。</summary>
+    private void SellPack(GameState gs)
+    {
+        foreach (var s in C.Pack.Stacks.ToArray())
+        {
+            var shop = FindTradeShop(gs, s.GoodsId, needFree: true) ?? FindMarket(gs, needFree: true);
+            shop?.StoreGoods(s.GoodsId, s.Amount); // 铺面/市集能入库的部分上架（供他人购买），其余离场
+            C.Money += Goods.PriceOf(s.GoodsId) * s.Amount;
+            C.Pack.Take(s.GoodsId, s.Amount);
+        }
+    }
+
+    /// <summary>找一座市集（通收各货）：needFree 时要求还有库容，取余仓最大者。</summary>
+    private static BuildingInstance FindMarket(GameState gs, bool needFree)
+    {
+        BuildingInstance best = null;
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Def.Id != "market")
+                continue;
+            if (needFree && b.StorageFree < 1)
+                continue;
+            if (best == null || b.StorageFree > best.StorageFree)
+                best = b;
+        }
+        return best;
     }
 
     /// <summary>找专营该货品的商铺/工坊（needFree 时要求还有库容），取余仓最大者。</summary>
@@ -384,11 +474,13 @@ public partial class CitizenAgent : Node3D
         return best;
     }
 
-    /// <summary>交易目的地：优先有库容的专营铺，其次任意专营铺，再退化到随机商铺。</summary>
+    /// <summary>交易目的地：优先有库容的专营铺，其次任意专营铺，再次市集，最后退化到随机商铺。</summary>
     private Vector2I? TradeAnchor(GameState gs)
     {
-        var shop = FindTradeShop(gs, C.Carrying, needFree: true)
-                   ?? FindTradeShop(gs, C.Carrying, needFree: false);
+        var shop = FindTradeShop(gs, C.PackGoodsId, needFree: true)
+                   ?? FindTradeShop(gs, C.PackGoodsId, needFree: false)
+                   ?? FindMarket(gs, needFree: true)
+                   ?? FindMarket(gs, needFree: false);
         return shop != null ? BuildingAnchor(shop) ?? shop.Origin : ShoppingAnchor(gs);
     }
 
@@ -407,8 +499,9 @@ public partial class CitizenAgent : Node3D
 
         var points = new List<Vector3>();
 
-        var entry = gs.Map.FindNearestRoad(startCell, 8);
-        var exit = gs.Map.FindNearestRoad(targetCell, 8);
+        // 上路与下路都先找最近道路：前往树林等远处目标时尽量骑到最近的路再下路直行（减少脱路慢行）
+        var entry = gs.Map.FindNearestRoad(startCell, 16);
+        var exit = gs.Map.FindNearestRoad(targetCell, 24);
         if (entry != null && exit != null && entry.Value != exit.Value)
         {
             var cells = gs.Roads.FindPath(entry.Value, exit.Value);
@@ -567,7 +660,10 @@ public partial class CitizenAgent : Node3D
                 C.Fun += 1f * dt;
                 break;
             case ActivityType.Hauling:
-                C.Fatigue += 1f * dt; // 挑担回家：略耗体力
+                C.Fatigue += 1f * dt; // 挑担赶路：略耗体力
+                break;
+            case ActivityType.PickingUp:
+                C.Fatigue += 1.5f * dt; // 弯腰拾货：比挑担更耗体力
                 break;
         }
         C.Fatigue = Mathf.Clamp(C.Fatigue, 0f, 100f);

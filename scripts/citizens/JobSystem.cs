@@ -7,14 +7,12 @@ namespace Bianjing;
 /// <summary>
 /// 就业系统（每日结算）：
 /// 岗位失效清理 → 退休（家产充裕的老人才退）→ 适龄求职（无岗位则伐木自谋生路）→ 家庭开销；
+/// 修缮匠并入受雇体系（岗位在修缮房，俸禄由官库在下工时结算）。
 /// 工钱不在此处发放——由表现层 CitizenAgent 在每班下工时按动作即时结算（月俸/30 一班）。
 /// 工商业「一直营业只退休」，作息疲劳由表现层 CitizenAgent 实时驱动。
 /// </summary>
 public class JobSystem
 {
-    /// <summary>修缮匠月俸（官府出资，专职修缮公共设施；每班按 1/30 由下工动作结算）。</summary>
-    public const double RepairerIncome = 2.0;
-
     /// <summary>家产超过此数的老人选择退休颐养。</summary>
     private const double ElderRetireAssets = 200;
 
@@ -61,13 +59,12 @@ public class JobSystem
     }
 
     /// <summary>
-    /// 求职：适龄青年优先应聘建筑岗位；无空缺则入行修缮匠或上山谋生（伐木/采摘/打猎）。
+    /// 求职：适龄青年应聘建筑岗位（含修缮房/税所/铸币局/矿盐厂）；无空缺则上山谋生（伐木/采摘/打猎）。
     /// 已婚且丈夫有工作的妻子留家采购（不求职）；家里揭不开锅的老人也会再就业。
     /// </summary>
     private void SeekJobs(GameState gs)
     {
         var workers = CountWorkers(gs);
-        bool hasOfficial = gs.Buildings.Values.Any(b => b.Def.Category == "official" && !b.Def.Natural);
 
         foreach (var c in gs.Citizens.Values)
         {
@@ -94,21 +91,11 @@ public class JobSystem
                 c.WorkplaceId = workplace.Id;
                 workers[workplace.Id] = workers.GetValueOrDefault(workplace.Id) + 1;
             }
-            else
+            else if (_rng.NextDouble() < 0.6)
             {
-                double roll = _rng.NextDouble();
-                if (roll < 0.2 && hasOfficial)
-                {
-                    // 入行修缮匠：专职维护公共设施，吃官府料钱
-                    c.JobKind = JobKind.Repairer;
-                    c.WorkplaceId = -1;
-                }
-                else if (roll < 0.6)
-                {
-                    // 上山谋生：伐木/采摘/打猎（创业开店由坊区生长承接，后续版本个体化）
-                    c.JobKind = JobKind.Logger;
-                    c.WorkplaceId = -1;
-                }
+                // 上山谋生：伐木/采摘/打猎（创业开店由坊区生长承接，后续版本个体化）
+                c.JobKind = JobKind.Logger;
+                c.WorkplaceId = -1;
             }
         }
     }

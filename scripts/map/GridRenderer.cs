@@ -12,9 +12,7 @@ public partial class GridRenderer : Node3D
     private static readonly Color BridgeColor = new(0.55f, 0.42f, 0.26f);
     private static readonly Color TreeColor = new(0.2f, 0.45f, 0.2f);
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
-    private static readonly Color ResidentialZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
-    private static readonly Color MarketZoneColor = new(0.35f, 0.55f, 0.95f, 0.35f);
-    private static readonly Color WorkshopZoneColor = new(0.9f, 0.7f, 0.25f, 0.35f);
+    private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
 
     /// <summary>建筑主体透明度（能看清屋内居民）。</summary>
     private const float BodyAlpha = 0.55f;
@@ -184,12 +182,7 @@ public partial class GridRenderer : Node3D
                 else if (cell.Zone != ZoneType.None && cell.BuildingId < 0)
                 {
                     zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * 0.05f));
-                    zoneColor.Add(cell.Zone switch
-                    {
-                        ZoneType.Residential => ResidentialZoneColor,
-                        ZoneType.Market => MarketZoneColor,
-                        _ => WorkshopZoneColor,
-                    });
+                    zoneColor.Add(BuildableZoneColor);
                 }
             }
         }

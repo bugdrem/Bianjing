@@ -8,13 +8,12 @@ public enum Gender
     Female,
 }
 
-/// <summary>就业形态：无业 / 受雇于建筑 / 进山自谋生路（伐木采猎）/ 修缮匠（维护公共设施）。</summary>
+/// <summary>就业形态：无业 / 受雇于建筑（含修缮房）/ 进山自谋生路（伐木采猎）。</summary>
 public enum JobKind
 {
     None,
     Employed,
     Logger,
-    Repairer,
 }
 
 /// <summary>居民当前活动（表现层状态机驱动，随存档保存；新值只能尾部追加，防老档枚举错位）。</summary>
@@ -30,8 +29,10 @@ public enum ActivityType
     Hunting,
     Trading,
     Repairing,
-    /// <summary>把携带的货物搬回自家入库。</summary>
+    /// <summary>把背的货物挑去目标建筑入库（自家或田仓）。</summary>
     Hauling,
+    /// <summary>走到地面物资堆拾货入背包。</summary>
+    PickingUp,
 }
 
 /// <summary>
@@ -80,8 +81,11 @@ public class Citizen
     public float PosZ;
     public bool PosValid;
 
-    /// <summary>携带的货物（grain/wood/fruit/game，一担；待搬回家或去市集交易；空串表示空手）。</summary>
-    public string Carrying = "";
+    /// <summary>背包（统一仓储接口，典型案例二）：容量一担，后期载具货舱同接口；待搬回家/入仓或去市集交易。</summary>
+    public Inventory Pack = new() { Capacity = Goods.LoadUnits };
+
+    /// <summary>背包首堆货品 id（空背包返回空串，兼容旧逻辑的单货品判断）。</summary>
+    public string PackGoodsId => Pack.Stacks.Count > 0 ? Pack.Stacks[0].GoodsId : "";
 
     /// <summary>无家可归的持续月数，过久则迁出。</summary>
     public int HomelessMonths;
@@ -108,8 +112,6 @@ public class Citizen
             return "孩童";
         if (JobKind == JobKind.Logger)
             return "山民";
-        if (JobKind == JobKind.Repairer)
-            return "修缮匠";
         if (JobKind == JobKind.Employed && gs.Buildings.TryGetValue(WorkplaceId, out var b))
         {
             return b.Def.Id switch
@@ -120,6 +122,11 @@ public class Citizen
                 "shop" => "商贩",
                 "workshop" => "工匠",
                 "farm" => "农夫",
+                "repairhouse" => "修缮匠",
+                "taxoffice" => "税吏",
+                "mint" => "铸钱匠",
+                "mine" => "矿工",
+                "saltworks" => "盐工",
                 _ => "雇工",
             };
         }

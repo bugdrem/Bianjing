@@ -47,7 +47,7 @@ public partial class TopBar : PanelContainer
         AddSpeedButton(box, "暂停", 0);
         AddSpeedButton(box, "1x", 1);
         AddSpeedButton(box, "2x", 2);
-        AddSpeedButton(box, "3x", 3);
+        AddSpeedButton(box, "4x", 4);
 
         box.AddChild(new VSeparator());
         AddActionButton(box, "政策", _onPolicy);

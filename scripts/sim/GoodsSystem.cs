@@ -4,16 +4,14 @@ using System.Collections.Generic;
 namespace Bianjing;
 
 /// <summary>
-/// 货品日结算：各户消耗口粮/柴薪 → 家中无存自动上市购买（钱货当场两讫）→
-/// 买不到则记短缺天数并扣兴致。货款优先分给铺面雇工，无雇工的官营铺面收入入官库。
-/// 农田产粮不在此处——由表现层 CitizenAgent 在农夫下工时按动作即时结算入田仓。
-/// 只动 Storage/Money/短缺计数，不做任何雇佣与生死决策。
+/// 货品系统：
+/// 日结——各户消耗口粮/柴薪 → 家中无存自动上市购买（钱货当场两讫）→ 买不到则记短缺天数并扣兴致，
+/// 并对全部库存（建筑/背包/地面堆）计龄一天（为变质铺垫）；
+/// 月结——农田按收获周期产粮，收成散落在田格上化为物资堆，由农夫拾运入仓。
+/// 货款优先分给铺面雇工，无雇工的官营铺面收入入官库。只动库存/Money/短缺计数，不做任何雇佣与生死决策。
 /// </summary>
 public class GoodsSystem
 {
-    /// <summary>农田每名工人每班产粮（份，下工动作结算时入田仓）。</summary>
-    public const double GrainPerWorkerShift = 0.4;
-
     /// <summary>每人每日口粮 / 柴薪消耗（份）。</summary>
     private const double FoodPerDay = 0.1;
     private const double FuelPerDay = 0.03;
@@ -24,6 +22,7 @@ public class GoodsSystem
     public void TickDay(GameState gs)
     {
         var workersOf = BuildWorkerIndex(gs);
+        AgeAllInventories(gs);
 
         foreach (var c in gs.Citizens.Values)
         {
@@ -47,7 +46,49 @@ public class GoodsSystem
         }
     }
 
-    /// <summary>建筑 Id → 在岗雇工列表（分货款用）。</summary>
+    /// <summary>月结：产业建筑（粮田/采矿场/制盐厂）到期收获——产量=在岗工人×每人产量，产物由定义 ProduceGoods 指定，
+    /// 收成均分散落在占地格上（堆满装不下的烂在地里）。</summary>
+    public void TickMonth(GameState gs)
+    {
+        var workersOf = BuildWorkerIndex(gs);
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Def.HarvestMonths <= 0)
+                continue;
+            b.MonthsSinceHarvest++;
+            if (b.MonthsSinceHarvest < b.Def.HarvestMonths)
+                continue;
+            b.MonthsSinceHarvest = 0;
+
+            int workers = workersOf.TryGetValue(b.Id, out var list) ? list.Count : 0;
+            double yield = workers * b.Def.YieldPerWorker;
+            if (yield <= 0)
+                continue;
+
+            // 产物数据驱动：空串默认产粮（采矿场产矿石、制盐厂产盐）
+            string goodsId = string.IsNullOrEmpty(b.Def.ProduceGoods) ? Goods.Grain : b.Def.ProduceGoods;
+
+            // 收成均分散落在占地格（典型案例三：散落地图的物资）
+            int cellCount = b.Def.SizeX * b.Def.SizeY;
+            double per = yield / cellCount;
+            for (int x = b.Origin.X; x < b.Origin.X + b.Def.SizeX; x++)
+                for (int y = b.Origin.Y; y < b.Origin.Y + b.Def.SizeY; y++)
+                    gs.DropOnGround(new Godot.Vector2I(x, y), goodsId, per);
+        }
+    }
+
+    /// <summary>全部库存计龄一天（建筑/背包/地面堆）：本批次仅记录，变质效果后期在 Inventory 上挂接。</summary>
+    private static void AgeAllInventories(GameState gs)
+    {
+        foreach (var b in gs.Buildings.Values)
+            b.Inv.AgeOneDay();
+        foreach (var c in gs.Citizens.Values)
+            c.Pack.AgeOneDay();
+        foreach (var p in gs.Piles.Values)
+            p.Inv.AgeOneDay();
+    }
+
+    /// <summary>建筑 Id → 在岗雇工列表（分货款/算产量用）。</summary>
     private static Dictionary<int, List<Citizen>> BuildWorkerIndex(GameState gs)
     {
         var map = new Dictionary<int, List<Citizen>>();
@@ -116,7 +157,8 @@ public class GoodsSystem
         double bought = 0;
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Specialty != goodsId || b.Storage.GetValueOrDefault(goodsId) <= 0)
+            // 专营该货的铺面或市集（市集通卖各货），且有存货才能买
+            if ((b.Specialty != goodsId && b.Def.Id != "market") || b.Inv.AmountOf(goodsId) <= 0)
                 continue;
             double got = b.TakeGoods(goodsId, want - bought);
             if (got <= 0)

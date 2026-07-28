@@ -1,12 +1,11 @@
 namespace Bianjing;
 
-/// <summary>坊区类型：住宅坊 / 市坊（商业）/ 工坊（工业）。</summary>
+/// <summary>坊区类型：只保留「可建设区」——居民在区内自行决定建房/开店/设工坊（由生长系统按需配比）。</summary>
 public enum ZoneType
 {
     None,
-    Residential,
-    Market,
-    Workshop,
+    /// <summary>可建设区：AI 居民自动建造民居/商铺/工坊的划定范围。</summary>
+    Buildable,
 }
 
 /// <summary>单个地图格子的逻辑数据。</summary>

@@ -28,6 +28,9 @@ public class GameState
     /// <summary>动物实体，以自增 Id 为键。</summary>
     public Dictionary<int, AnimalObj> Animals { get; } = new();
 
+    /// <summary>地面物资堆，以格索引（y*Size+x）为键（一格至多一堆，拾空即消）。</summary>
+    public Dictionary<int, ItemPileObj> Piles { get; } = new();
+
     public double Money = 5000;
     public double Food = 500;
 
@@ -50,6 +53,7 @@ public class GameState
     public int NextFamilyId { get; set; } = 1;
     public int NextPlantId { get; set; } = 1;
     public int NextAnimalId { get; set; } = 1;
+    public int NextPileId { get; set; } = 1;
 
     /// <summary>格子坐标→一维索引（Plants 字典键）。</summary>
     public static int CellIndex(Vector2I c) => c.Y * MapGrid.Size + c.X;
@@ -129,6 +133,18 @@ public class GameState
         "workshop" => Goods.Wood,
         _ => "",
     };
+
+    /// <summary>就地转业：把一座 grown 建筑（如住宅升级后）换成另一种 grown 定义，占地不变、居民保留、重置专营；
+    /// 供 ZoneGrowthSystem 实现「住宅升级概率变商铺/工坊」。</summary>
+    public void ConvertGrown(BuildingInstance b, string defId)
+    {
+        if (!Defs.TryGetValue(defId, out var def) || def.Category != "grown")
+            return;
+        b.Def = def;
+        b.Specialty = DefaultSpecialty(def);
+        b.Abandoned = false;
+        EventBus.RaiseMapChanged();
+    }
 
     /// <summary>拆除：桥梁 > 道路 > 建筑 > 坊区 > 树木，逐层清理；河水不可拆。</summary>
     public void DemolishAt(Vector2I c)
@@ -227,13 +243,87 @@ public class GameState
         return a;
     }
 
-    /// <summary>捕获动物（打猎），返回是否成功。</summary>
+    /// <summary>捕获动物（打猎）：猎物在倒地处化为野味堆（一担），等待猎人拾取；返回是否成功。</summary>
     public bool HarvestAnimal(int id)
     {
-        if (!Animals.Remove(id))
+        if (!Animals.Remove(id, out var prey))
             return false;
+        DropOnGround(new Vector2I(prey.X, prey.Y), Goods.Game, Goods.LoadUnits);
         EventBus.RaiseWildlifeChanged();
         return true;
+    }
+
+    // ---- 地面物资堆 ----
+
+    /// <summary>货品落地成堆（收获/猎杀/落果）：同格并堆，受堆容量限制；返回实际落地份数（装不下的烂掉）。</summary>
+    public double DropOnGround(Vector2I c, string goodsId, double amount)
+    {
+        if (!MapGrid.InBounds(c) || amount <= 0)
+            return 0;
+        int key = CellIndex(c);
+        if (!Piles.TryGetValue(key, out var pile))
+        {
+            pile = new ItemPileObj { Id = NextPileId++, X = c.X, Y = c.Y };
+            Piles[key] = pile;
+        }
+        double dropped = pile.Inv.Store(goodsId, amount);
+        if (pile.Inv.IsEmpty)
+            Piles.Remove(key); // 一份没落下（满堆）：不留空堆
+        return dropped;
+    }
+
+    /// <summary>从格上物资堆拾货入目标库存（背包/后期载具），能装多少拾多少；拾空即删堆。</summary>
+    public void PickupPile(Vector2I c, Inventory into)
+    {
+        if (!Piles.TryGetValue(CellIndex(c), out var pile))
+            return;
+        // 逐堆搬入（列表快照：搬空的堆会从原库存移除）
+        foreach (var s in pile.Inv.Stacks.ToArray())
+        {
+            double got = pile.Inv.Take(s.GoodsId, into.Free);
+            if (got > 0)
+                into.Store(s.GoodsId, got);
+        }
+        if (pile.Inv.IsEmpty)
+            Piles.Remove(CellIndex(c));
+    }
+
+    /// <summary>找最近的地面物资堆（goodsId 空串表示不限货品；切比雪夫距离）。</summary>
+    public ItemPileObj FindNearestPile(Vector2I from, string goodsId, int maxRadius)
+    {
+        ItemPileObj best = null;
+        int bestDist = maxRadius + 1;
+        foreach (var p in Piles.Values)
+        {
+            if (goodsId != "" && p.Inv.AmountOf(goodsId) <= 0)
+                continue;
+            int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = p;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>找最近的挂果成树（至少一份可摘；线性扫描，植物数有上限）。</summary>
+    public PlantObj FindNearestFruitTree(Vector2I from, int maxRadius)
+    {
+        PlantObj best = null;
+        int bestDist = maxRadius + 1;
+        foreach (var p in Plants.Values)
+        {
+            if (!p.Mature || p.FruitStock < 1)
+                continue;
+            int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = p;
+            }
+        }
+        return best;
     }
 
     /// <summary>找最近的动物（线性扫描，动物数量有上限）。</summary>
