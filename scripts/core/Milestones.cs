@@ -30,10 +30,11 @@ public class MilestoneDef
     /// <summary>晋级时全城成人兴致小幅提升。</summary>
     public float FunBonus;
 
-    /// <summary>是否满足全部晋级条件。</summary>
+    /// <summary>是否满足全部晋级条件。MoneyRequired 为 0 时不检查官库——
+    /// 否则无限钱模式下负债建造会把晋级永久卡死（人口达标也不升）。</summary>
     public bool Reached(GameState gs) =>
         gs.Population >= PopulationRequired
-        && gs.Money >= MoneyRequired
+        && (MoneyRequired <= 0 || gs.Money >= MoneyRequired)
         && (RequiredBuildingId == "" || gs.CountByDef(RequiredBuildingId) > 0);
 }
 

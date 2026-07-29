@@ -275,7 +275,7 @@ public partial class InspectPanel : PanelContainer
         // 储存（逐堆列出，入库天数为后期变质系统铺垫）
         if (b.Def.StorageCapacity > 0)
         {
-            sb.AppendLine($"—— 储存 {b.StorageTotal:F1}/{b.Def.StorageCapacity} 份 ——");
+            sb.AppendLine($"—— 储存 {b.StorageTotal:F1}/{b.StorageCap:F0} 份 ——");
             if (b.Inv.IsEmpty)
                 sb.AppendLine("（空仓）");
             else

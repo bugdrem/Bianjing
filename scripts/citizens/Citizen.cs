@@ -107,6 +107,11 @@ public class Citizen
     public int FoodShortDays;
     public int FuelShortDays;
 
+    /// <summary>供货认领：出发为某建筑采集/补料时登记目标与货品（-1/空串=无认领），
+    /// 需求判定扣除在途认领量防多人扎堆；背包腾空进入新决策时释放（随存档，旧档缺字段取默认值）。</summary>
+    public int ClaimBuildingId = -1;
+    public string ClaimGoodsId = "";
+
     /// <summary>年龄履历（重大事件按时间正序追加，随存档保存，上限见 GameState.LogLifeEvent）。</summary>
     public List<LifeEvent> LifeEvents = new();
 

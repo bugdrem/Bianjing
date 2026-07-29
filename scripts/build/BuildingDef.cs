@@ -182,28 +182,37 @@ public class BuildingInstance : Obj
     /// <summary>距上次收获的月数（仅农田类建筑使用，到期清零）。</summary>
     public int MonthsSinceHarvest;
 
-    /// <summary>建筑内库存（统一仓储接口，典型案例一）；容量由定义 StorageCapacity 驱动。</summary>
+    /// <summary>建筑内库存（统一仓储接口，典型案例一）；容量随实例占地等比伸缩（见 StorageCap）。</summary>
     public Inventory Inv = new();
+
+    /// <summary>实例仓储容量：定义值按基准占地计，实例扩地后容量与占地面积成正比
+    /// （如民居 4×4 基准 32 份，扩到 8×8 即 128 份）；mod 改定义即时生效。</summary>
+    public double StorageCap =>
+        Def.StorageCapacity * (double)(FootX * FootY) / System.Math.Max(1, Def.SizeX * Def.SizeY);
 
     /// <summary>库存总量（份）。</summary>
     public double StorageTotal => Inv.Total;
 
-    /// <summary>剩余库容（份）。</summary>
-    public double StorageFree
-    {
-        get
-        {
-            Inv.Capacity = Def.StorageCapacity; // 容量随定义同步（mod 改定义即时生效）
-            return Inv.Free;
-        }
-    }
-
     /// <summary>入库（受容量限制），返回实际入库份数。</summary>
     public double StoreGoods(string goodsId, double amount)
     {
-        Inv.Capacity = Def.StorageCapacity;
+        Inv.Capacity = StorageCap;
         return Inv.Store(goodsId, amount);
     }
+
+    /// <summary>超限入库：村民背来的货全收（超过上限也不浪费）；
+    /// 上限只作 StorageAtCap 闸门，阻断后续派人采集/进货。</summary>
+    public double StoreGoodsForce(string goodsId, double amount)
+    {
+        Inv.Capacity = StorageCap;
+        return Inv.StoreForce(goodsId, amount);
+    }
+
+    /// <summary>仓储已达/超上限（超限入库后可为真）：作为"继续进货/派人采集"的闸门。</summary>
+    public bool StorageAtCap => Inv.Total >= StorageCap;
+
+    /// <summary>剩余仓储余量（可为负，超限时负得越多越满）：挑选"最空收货方"的比较基准。</summary>
+    public double SpareCap => StorageCap - Inv.Total;
 
     /// <summary>出库，返回实际取出份数。</summary>
     public double TakeGoods(string goodsId, double amount) => Inv.Take(goodsId, amount);

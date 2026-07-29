@@ -318,10 +318,10 @@ public class GameState
     public void ClaimCellForBuilding(Vector2I c, int buildingId)
     {
         RemovePlantAt(c);
-        // 扩地格上的地面物资堆并入建筑仓（装不下的散佚），免得永久压在房底下
+        // 扩地格上的地面物资堆并入建筑仓（超限也全收，不散佚），免得永久压在房底下
         if (Piles.Remove(CellIndex(c), out var pile) && Buildings.TryGetValue(buildingId, out var owner))
             foreach (var s in pile.Inv.Stacks)
-                owner.StoreGoods(s.GoodsId, s.Amount);
+                owner.StoreGoodsForce(s.GoodsId, s.Amount);
         Map.CellAt(c).BuildingId = buildingId;
         EventBus.RaiseCellChanged(c);
     }

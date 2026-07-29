@@ -65,7 +65,21 @@ public class Inventory
         double accepted = System.Math.Min(amount, Free);
         if (accepted <= 0)
             return 0;
+        return StoreInto(goodsId, accepted);
+    }
 
+    /// <summary>超限入库：无视容量全部收下（村民背回的货不浪费）——
+    /// 上限只作"继续派人采集/进货"的闸门，不作硬墙。</summary>
+    public double StoreForce(string goodsId, double amount)
+    {
+        if (amount <= 0)
+            return 0;
+        return StoreInto(goodsId, amount);
+    }
+
+    /// <summary>实际并堆写入（Store/StoreForce 共用）。</summary>
+    private double StoreInto(string goodsId, double accepted)
+    {
         foreach (var s in Stacks)
         {
             if (s.GoodsId == goodsId)

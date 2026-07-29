@@ -32,21 +32,22 @@ public class CraftingSystem
             if (inputs.Length == 0)
                 continue;
 
-            // 本次最多可产：受工人产能（含工艺科技加成）、成品库容、以及最紧缺原料的存量三者共同限制
+            // 本次最多可产：受工人产能（含工艺科技加成）与最紧缺原料存量限制；
+            // 不再受成品库容卡产——消耗原料份数≥产出份数，加工不会增加仓储占用，
+            // 且超限存入机制下原料可能堆超上限，若按剩余库容限产会永久停工
             double byWorkers = workers * CraftPerWorkerDay * gs.TechFactor("craft");
-            double byStorage = b.StorageFree;
             double byInputs = double.MaxValue;
             foreach (var raw in inputs)
                 byInputs = Math.Min(byInputs, b.Inv.AmountOf(raw)); // 每份成品耗每种原料各一份
 
-            double make = Math.Min(byWorkers, Math.Min(byStorage, byInputs));
+            double make = Math.Min(byWorkers, byInputs);
             if (make <= 0.0001)
                 continue;
 
-            // 扣原料、入成品
+            // 扣原料、入成品（超限入库：加工前后总占用只减不增）
             foreach (var raw in inputs)
                 b.TakeGoods(raw, make);
-            b.StoreGoods(b.Specialty, make);
+            b.StoreGoodsForce(b.Specialty, make);
         }
     }
 
