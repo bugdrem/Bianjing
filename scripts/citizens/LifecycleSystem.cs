@@ -358,8 +358,9 @@ public class LifecycleSystem
 
     // ---- 住房拥挤 ----
 
-    /// <summary>住房拥挤调整（每月，概率事件）：先标记/清除废弃屋；满员住户按概率处理——
-    /// 若有成年未婚男则让其独立门户搬出（候选 A），否则升级扩建以增容（候选 C，占地扩大留 TODO）。</summary>
+    /// <summary>住房拥挤调整（每月，概率事件）：先标记/清除废弃屋；住满或超员的住户按概率处理——
+    /// 先尝试扩地增容（房体变大内部格数即容量，上限 8×8 米）；扩不动则搬家：
+    /// 有成年未婚男先另立门户，否则（仍超员时）任挑一名成年住户迁往别处空床。</summary>
     private void ResolveHousing(GameState gs)
     {
         var occupancy = gs.BuildHomeOccupancy();
@@ -373,37 +374,57 @@ public class LifecycleSystem
         {
             if (b.Def.Category != "grown")
                 continue;
-            if (occupancy.GetValueOrDefault(b.Id) < b.HousingCapacity) // 未满不处理
+            int occ = occupancy.GetValueOrDefault(b.Id);
+            if (occ < b.HousingCapacity) // 未满不处理
                 continue;
             if (_rng.NextDouble() >= CrowdEventChance)
                 continue;
 
+            // 优先扩建：向邻接坊区空地扩一条带，房体随之变大、内部格数（容量）增加
+            if (ZoneGrowthSystem.TryExpandHouse(gs, b))
+                continue; // TryExpandHouse 内部已广播 MapChanged
+
+            // 扩不动：成年未婚男另立门户，迁往空置/废弃住宅（无则等待坊区新建房）
             var male = FindAdultUnmarriedMale(gs, b);
             if (male != null)
             {
-                // 候选 A：成年未婚男另立门户，迁往空置/废弃住宅（无则等待坊区新建房）
                 var newHome = FindVacantHouse(gs, occupancy, 1, b.Id);
                 if (newHome != null)
                     LeaveForNewHome(gs, male, newHome, occupancy);
+                continue;
             }
-            else if (b.Level < EffectiveMaxLevel(gs, b) && b.Condition >= 60f)
+
+            // 超员（如临路变化使容量回落）：任挑一名成年住户迁往别处空床，一月至多一人逐步疏解
+            if (occ > b.HousingCapacity)
             {
-                // 候选 C：无成年未婚男则升级扩建增容（受里程碑限级；后期改为占用邻格的大房屋）
-                b.Level++;
-                EventBus.RaiseMapChanged(); // 楼高变化即时重绘
+                var mover = FindAdultResident(gs, b);
+                var newHome = mover != null ? FindVacantHouse(gs, occupancy, 1, b.Id) : null;
+                if (newHome != null)
+                {
+                    if (occupancy.ContainsKey(mover.HomeId))
+                        occupancy[mover.HomeId]--;
+                    newHome.Abandoned = false;
+                    MoveIn(gs, mover, newHome.Id, occupancy);
+                    gs.LogLifeEvent(mover, "屋室拥挤，迁居别宅");
+                }
             }
         }
     }
-
-    /// <summary>当前里程碑下的住宅有效最高等级（非住宅 grown 建筑同受限）。</summary>
-    private static int EffectiveMaxLevel(GameState gs, BuildingInstance b) =>
-        Math.Min(b.Def.MaxLevel, Milestones.MaxHouseLevel(gs));
 
     /// <summary>住户中的成年未婚男（有则触发“独立门户搬出”）。</summary>
     private static Citizen FindAdultUnmarriedMale(GameState gs, BuildingInstance home)
     {
         foreach (var c in gs.Citizens.Values)
             if (c.HomeId == home.Id && c.Gender == Gender.Male && c.IsAdult && !c.IsMarried)
+                return c;
+        return null;
+    }
+
+    /// <summary>住户中任一成年人（超员疏解搬家用，不拆未成年人离家）。</summary>
+    private static Citizen FindAdultResident(GameState gs, BuildingInstance home)
+    {
+        foreach (var c in gs.Citizens.Values)
+            if (c.HomeId == home.Id && c.IsAdult)
                 return c;
         return null;
     }

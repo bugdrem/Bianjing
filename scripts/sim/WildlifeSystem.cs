@@ -14,12 +14,12 @@ public class WildlifeSystem
 {
     /// <summary>每多少格树林支撑一只动物（总数与林地成正比）。</summary>
     private const int TreesPerAnimal = 15;
-    /// <summary>种群硬上限（防极端密林爆量）。</summary>
-    private const int HardCap = 60;
+    /// <summary>种群硬上限（防极端密林爆量；世界面积扩大四倍后同比上调）。</summary>
+    private const int HardCap = 240;
     /// <summary>每月补充新个体的触发比例（“一定比例的树林会刷新”）。</summary>
     private const float SpawnChancePerMonth = 0.5f;
-    /// <summary>刷新点该半径内无动物才算“此处动物少于一”。</summary>
-    private const int LonelyRadius = 6;
+    /// <summary>刷新点该半径（米）内无动物才算“此处动物少于一”。</summary>
+    private const int LonelyRadius = 24;
     private const float BreedChance = 0.12f;
     private const float NaturalDeathChance = 0.01f;
 
@@ -37,7 +37,7 @@ public class WildlifeSystem
         EventBus.RaiseWildlifeChanged();
     }
 
-    /// <summary>每日游走：每只动物在 ±1 格内挑最宜栖落脚点，已被同类占用的格子不去（防堆叠）。</summary>
+    /// <summary>每日游走：每只动物在 ±4 米内挑最宜栖落脚点，已被同类占用的格子不去（防堆叠）。</summary>
     public void TickDay(GameState gs)
     {
         if (gs.Animals.Count == 0)
@@ -49,7 +49,7 @@ public class WildlifeSystem
         foreach (var a in gs.Animals.Values)
         {
             var cur = new Vector2I(a.X, a.Y);
-            var next = BestNearbyCell(gs, cur, 1, occupied);
+            var next = BestNearbyCell(gs, cur, 4, occupied);
             if (next == null || next.Value == cur)
                 continue;
             occupied.Remove(cur);
@@ -86,7 +86,7 @@ public class WildlifeSystem
             if (canBreed && gs.Animals.Count + newborns.Count < max
                 && _rng.NextDouble() < BreedChance)
             {
-                var spot = BestNearbyCell(gs, new Vector2I(a.X, a.Y), 1, occupied);
+                var spot = BestNearbyCell(gs, new Vector2I(a.X, a.Y), 4, occupied);
                 if (spot != null)
                 {
                     newborns.Add(spot.Value);
@@ -127,8 +127,8 @@ public class WildlifeSystem
             ref var cell = ref gs.Map.CellAt(c);
             if (!cell.IsEmpty || cell.HasTree)
                 continue;
-            // 栖息地约束：2 格内有树林、避开人口区，且此处附近暂无动物（动物数 <1）
-            if (gs.Map.FindNearestTree(c, 2) == null || CrowdScore(gs, c, 4) > 0)
+            // 栖息地约束：8 米内有树林、避开人口区，且此处附近暂无动物（动物数 <1）
+            if (gs.Map.FindNearestTree(c, 8) == null || CrowdScore(gs, c, 16) > 0)
                 continue;
             if (HasAnimalNear(gs, c, LonelyRadius))
                 continue;
@@ -167,7 +167,7 @@ public class WildlifeSystem
     }
 
     /// <summary>
-    /// 附近挑最宜栖的落脚点：候选中优先选人烟少、离树林近的格子（不离开树林 3 格，保持栖息地）；
+    /// 附近挑最宜栖的落脚点：候选中优先选人烟少、离树林近的格子（不离开树林 12 米，保持栖息地）；
     /// 已被其他动物占用的格子跳过，避免全群收敛堆叠。
     /// </summary>
     private Vector2I? BestNearbyCell(GameState gs, Vector2I from, int radius, HashSet<Vector2I> occupied)
@@ -184,11 +184,11 @@ public class WildlifeSystem
             ref var cell = ref gs.Map.CellAt(c);
             if (!cell.IsEmpty || cell.HasTree)
                 continue;
-            var tree = gs.Map.FindNearestTree(c, 3);
+            var tree = gs.Map.FindNearestTree(c, 12);
             if (tree == null)
                 continue;
             int treeDist = Math.Max(Math.Abs(tree.Value.X - c.X), Math.Abs(tree.Value.Y - c.Y));
-            int score = CrowdScore(gs, c, 3) * 4 + treeDist; // 人烟惩罚权重远大于树林距离
+            int score = CrowdScore(gs, c, 12) * 4 + treeDist; // 人烟惩罚权重远大于树林距离
             if (score < bestScore)
             {
                 bestScore = score;

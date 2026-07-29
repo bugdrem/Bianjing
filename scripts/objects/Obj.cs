@@ -19,7 +19,7 @@ public abstract class Obj
     public Dictionary<string, string> Extra = new();
 }
 
-/// <summary>植物实体：固定生长，成熟后向周围散播幼体；成树逐日挂果，过熟掉落成地面果堆（PlantGrowthSystem 驱动）。
+/// <summary>植物实体：固定生长，成熟后向周围散播幼体；果树成树逐日挂果，过熟掉落成地面果堆（PlantGrowthSystem 驱动）。
 /// 砍伐为血量制：每斧扣血而非一击砍倒，无人砍伐一段时间后逐日回血。</summary>
 public class PlantObj : Obj
 {
@@ -32,6 +32,10 @@ public class PlantObj : Obj
     /// <summary>新芽基础血量与随龄增量上限（渐进上界 BaseHp+HpGainCap）。</summary>
     public const float BaseHp = 20f;
     public const float HpGainCap = 80f;
+
+    /// <summary>是否果树：果树是树的一种（同样可砍柴），但只有果树才挂果产水果；
+    /// 自然生成比例约 1:10，散播幼体继承母树类型。</summary>
+    public bool IsFruitTree;
 
     /// <summary>生长月龄（每月 +1，达到 MatureMonths 即成熟；成熟后继续累积作树龄，驱动血量缓涨）。</summary>
     public int GrowthMonths;

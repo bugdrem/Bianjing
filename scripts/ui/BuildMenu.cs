@@ -98,10 +98,10 @@ public partial class BuildMenu : PanelContainer
 
         if (key == "infrastructure")
         {
-            AddButton(_itemRow, $"主路 {GameState.RoadCostOf(RoadKind.Main)}", () => _build.SetRoadMode(RoadKind.Main));
-            AddButton(_itemRow, $"辅路 {GameState.RoadCostOf(RoadKind.Side)}", () => _build.SetRoadMode(RoadKind.Side));
-            AddButton(_itemRow, $"小路 {GameState.RoadCostOf(RoadKind.Small)}", () => _build.SetRoadMode(RoadKind.Small));
-            AddButton(_itemRow, $"桥梁 {GameState.BridgeCost}", () => _build.SetBridgeMode());
+            // 道路/桥按长度计价（每延米，不计宽度），标价带单位一目了然
+            AddButton(_itemRow, $"主路 {GameState.RoadCostOf(RoadKind.Main)}/米", () => _build.SetRoadMode(RoadKind.Main));
+            AddButton(_itemRow, $"辅路 {GameState.RoadCostOf(RoadKind.Side)}/米", () => _build.SetRoadMode(RoadKind.Side));
+            AddButton(_itemRow, $"桥梁 {GameState.BridgeCost}/米", () => _build.SetBridgeMode());
             AddButton(_itemRow, "树木", () => _build.SetTreeMode());
         }
 

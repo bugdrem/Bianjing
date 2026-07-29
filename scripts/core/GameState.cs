@@ -9,16 +9,16 @@ public class GameState
 {
     public static GameState I { get; set; }
 
-    public const int RoadCost = 10;
     public const int BridgeCost = 30;
 
-    /// <summary>三种道路造价：小路 6 / 辅路 10 / 主路 18。</summary>
-    public static int RoadCostOf(RoadKind kind) => kind switch
-    {
-        RoadKind.Main => 18,
-        RoadKind.Side => 10,
-        _ => 6,
-    };
+    /// <summary>两种道路造价（每延米，不计宽度）：辅路 10 / 主路 18。</summary>
+    public static int RoadCostOf(RoadKind kind) => kind == RoadKind.Main ? 18 : 10;
+
+    /// <summary>道路占地宽度（米/格）：主路 4，辅路 2。</summary>
+    public static int RoadWidthOf(RoadKind kind) => kind == RoadKind.Main ? 4 : 2;
+
+    /// <summary>桥梁宽度（米/格）。</summary>
+    public const int BridgeWidth = 4;
 
     /// <summary>城市名（新建游戏时命名，随存档保存）。</summary>
     public string CityName = "汴京";
@@ -138,7 +138,73 @@ public class GameState
         Defs = defs;
     }
 
-    public void PlaceRoad(Vector2I c, RoadKind kind = RoadKind.Side)
+    /// <summary>以 center 为中心的方形道路画笔（w×w，宽度随道路种类）：任一格新铺成功即按「每米长度」扣一次造价，
+    /// 已占用格（路/水/建筑）跳过；钱不够时不铺。拖动沿线逐米盖戳，重叠区已铺不重复扣费。返回是否铺下了新格。</summary>
+    public bool PlaceRoadStamp(Vector2I center, RoadKind kind)
+    {
+        int cost = RoadCostOf(kind);
+        if (!GameSettings.InfiniteMoney && Money < cost)
+            return false;
+
+        // 宽度为偶数，偏移范围 -(w-1)/2..w/2 两轴一致（宽 4 时 -1..2）
+        int w = RoadWidthOf(kind);
+        bool laid = false;
+        for (int ox = -((w - 1) / 2); ox <= w / 2; ox++)
+        {
+            for (int oy = -((w - 1) / 2); oy <= w / 2; oy++)
+            {
+                var c = center + new Vector2I(ox, oy);
+                if (!MapGrid.InBounds(c) || !Map.CellAt(c).IsEmpty)
+                    continue;
+                LayRoadCell(c, kind);
+                laid = true;
+            }
+        }
+        if (laid)
+        {
+            Money -= cost;
+            Ledger.Add("营造道路", -cost);
+            EventBus.RaiseStatsChanged();
+        }
+        return laid;
+    }
+
+    /// <summary>以 center 为中心的方形桥梁画笔（4×4 米）：只在无桥的水面格架设，按长度计价同道路。</summary>
+    public bool PlaceBridgeStamp(Vector2I center)
+    {
+        if (!GameSettings.InfiniteMoney && Money < BridgeCost)
+            return false;
+
+        bool laid = false;
+        for (int ox = -((BridgeWidth - 1) / 2); ox <= BridgeWidth / 2; ox++)
+        {
+            for (int oy = -((BridgeWidth - 1) / 2); oy <= BridgeWidth / 2; oy++)
+            {
+                var c = center + new Vector2I(ox, oy);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                ref var cell = ref Map.CellAt(c);
+                if (!cell.HasWater || cell.HasBridge)
+                    continue; // 岸上/已有桥的格跳过，桥只跨水
+                cell.HasBridge = true;
+                cell.HasRoad = true;
+                Roads.SetRoad(c, true);
+                RegisterRoadCell(c);
+                EventBus.RaiseCellChanged(c);
+                laid = true;
+            }
+        }
+        if (laid)
+        {
+            Money -= BridgeCost;
+            Ledger.Add("营造桥梁", -BridgeCost);
+            EventBus.RaiseStatsChanged();
+        }
+        return laid;
+    }
+
+    /// <summary>铺单格道路（条带内部用，不扣费不广播统计）。</summary>
+    private void LayRoadCell(Vector2I c, RoadKind kind)
     {
         ref var cell = ref Map.CellAt(c);
         RemovePlantAt(c); // 施工砍伐
@@ -147,25 +213,7 @@ public class GameState
         SetZone(c, ZoneType.None);
         Roads.SetRoad(c, true);
         RegisterRoadCell(c);
-        int cost = RoadCostOf(kind);
-        Money -= cost;
-        Ledger.Add("营造道路", -cost);
         EventBus.RaiseCellChanged(c); // 单格变更：只重建所在分块
-        EventBus.RaiseStatsChanged();
-    }
-
-    /// <summary>在水面架桥：桥面等效道路接入路网。</summary>
-    public void PlaceBridge(Vector2I c)
-    {
-        ref var cell = ref Map.CellAt(c);
-        cell.HasBridge = true;
-        cell.HasRoad = true;
-        Roads.SetRoad(c, true);
-        RegisterRoadCell(c);
-        Money -= BridgeCost;
-        Ledger.Add("营造桥梁", -BridgeCost);
-        EventBus.RaiseCellChanged(c);
-        EventBus.RaiseStatsChanged();
     }
 
     /// <summary>放置建筑（已通过合法性校验）。official 扣钱，grown 免费。</summary>
@@ -290,13 +338,13 @@ public class GameState
 
     // ---- 植物 / 动物 ----
 
-    /// <summary>种植树木实体（growthMonths 为初始月龄），格子不可用时返回 null。</summary>
-    public PlantObj AddPlant(Vector2I c, int growthMonths)
+    /// <summary>种植树木实体（growthMonths 为初始月龄，isFruit 为果树），格子不可用时返回 null。</summary>
+    public PlantObj AddPlant(Vector2I c, int growthMonths, bool isFruit = false)
     {
         ref var cell = ref Map.CellAt(c);
         if (!cell.IsEmpty || cell.HasTree)
             return null;
-        var p = new PlantObj { Id = NextPlantId++, X = c.X, Y = c.Y, GrowthMonths = growthMonths };
+        var p = new PlantObj { Id = NextPlantId++, X = c.X, Y = c.Y, GrowthMonths = growthMonths, IsFruitTree = isFruit };
         p.Hp = p.MaxHp; // 新植满血（上限随树龄而定）
         Plants[CellIndex(c)] = p;
         cell.HasTree = true;
@@ -385,6 +433,38 @@ public class GameState
         return dropped;
     }
 
+    /// <summary>可落堆的净地：无路无水无建筑（树下可堆，落果本就堆在树格）。</summary>
+    private bool IsPileableCell(Vector2I c)
+    {
+        ref var cell = ref Map.CellAt(c);
+        return !cell.HasRoad && !cell.HasWater && cell.BuildingId < 0;
+    }
+
+    /// <summary>就近落堆：卸货人常站在路边/路上，货不能落在路面/水面/房底——
+    /// 站位不可堆时向外逐圈（半径≤6）找首个净地格再落，实在无净地才原地兑底。</summary>
+    public double DropNearby(Vector2I c, string goodsId, double amount)
+    {
+        if (!MapGrid.InBounds(c) || amount <= 0)
+            return 0;
+        if (IsPileableCell(c))
+            return DropOnGround(c, goodsId, amount);
+        for (int r = 1; r <= 6; r++)
+        {
+            for (int ox = -r; ox <= r; ox++)
+            {
+                for (int oy = -r; oy <= r; oy++)
+                {
+                    if (Math.Max(Math.Abs(ox), Math.Abs(oy)) != r)
+                        continue; // 只扫本圈环上的格
+                    var n = c + new Vector2I(ox, oy);
+                    if (MapGrid.InBounds(n) && IsPileableCell(n))
+                        return DropOnGround(n, goodsId, amount);
+                }
+            }
+        }
+        return DropOnGround(c, goodsId, amount);
+    }
+
     /// <summary>从格上物资堆拾货入目标库存（背包/后期载具），能装多少拾多少；拾空即删堆。</summary>
     public void PickupPile(Vector2I c, Inventory into)
     {
@@ -420,14 +500,31 @@ public class GameState
         return best;
     }
 
-    /// <summary>找最近的挂果成树（至少一份可摘；线性扫描，植物数有上限）。</summary>
+    /// <summary>找最近的树木格（线性扫描植物实体，免大半径环扫全图；伐木选目标用）。</summary>
+    public Vector2I? FindNearestTreeCell(Vector2I from, int maxRadius)
+    {
+        PlantObj best = null;
+        int bestDist = maxRadius + 1;
+        foreach (var p in Plants.Values)
+        {
+            int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = p;
+            }
+        }
+        return best != null ? new Vector2I(best.X, best.Y) : null;
+    }
+
+    /// <summary>找最近的挂果果树（至少一份可摘；普通树不挂果，字段双重过滤防误摘）。</summary>
     public PlantObj FindNearestFruitTree(Vector2I from, int maxRadius)
     {
         PlantObj best = null;
         int bestDist = maxRadius + 1;
         foreach (var p in Plants.Values)
         {
-            if (!p.Mature || p.FruitStock < 1)
+            if (!p.IsFruitTree || !p.Mature || p.FruitStock < 1)
                 continue;
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)
@@ -437,6 +534,34 @@ public class GameState
             }
         }
         return best;
+    }
+
+    /// <summary>找最近的河岸格（水格的邻接陆格，打水站位）：逐圈环扫，找到即停；
+    /// 仅在触发打水时偶发调用，城中有井时不走此路径。</summary>
+    public Vector2I? FindNearestWaterShore(Vector2I from, int maxRadius)
+    {
+        Vector2I[] dirs = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
+        for (int r = 0; r <= maxRadius; r++)
+        {
+            for (int ox = -r; ox <= r; ox++)
+            {
+                for (int oy = -r; oy <= r; oy++)
+                {
+                    if (Math.Max(Math.Abs(ox), Math.Abs(oy)) != r)
+                        continue; // 只扫本圈环上的格
+                    var c = from + new Vector2I(ox, oy);
+                    if (!MapGrid.InBounds(c) || !Map.CellAt(c).HasWater)
+                        continue;
+                    foreach (var d in dirs)
+                    {
+                        var n = c + d;
+                        if (MapGrid.InBounds(n) && !Map.CellAt(n).HasWater)
+                            return n;
+                    }
+                }
+            }
+        }
+        return null;
     }
 
     /// <summary>找最近的动物（线性扫描，动物数量有上限）。</summary>
@@ -510,6 +635,28 @@ public class GameState
             Money += amount;
             Ledger.Add("市易收入", amount);
         }
+    }
+
+    /// <summary>建筑四侧是否紧贴道路（左/右/上/下，即 -X/+X/-Y/+Y 侧）：
+    /// 房体绘制与容量计算共用——临路侧贴边建（前门临街），其余侧留 1 米檐隙。</summary>
+    public (bool Left, bool Right, bool Top, bool Bottom) RoadAdjacency(BuildingInstance b)
+    {
+        bool left = false, right = false, top = false, bottom = false;
+        for (int y = b.Origin.Y; y < b.Origin.Y + b.FootY; y++)
+        {
+            var l = new Vector2I(b.Origin.X - 1, y);
+            var r = new Vector2I(b.Origin.X + b.FootX, y);
+            left |= MapGrid.InBounds(l) && Map.CellAt(l).HasRoad;
+            right |= MapGrid.InBounds(r) && Map.CellAt(r).HasRoad;
+        }
+        for (int x = b.Origin.X; x < b.Origin.X + b.FootX; x++)
+        {
+            var t = new Vector2I(x, b.Origin.Y - 1);
+            var bo = new Vector2I(x, b.Origin.Y + b.FootY);
+            top |= MapGrid.InBounds(t) && Map.CellAt(t).HasRoad;
+            bottom |= MapGrid.InBounds(bo) && Map.CellAt(bo).HasRoad;
+        }
+        return (left, right, top, bottom);
     }
 
     public int CountByDef(string defId)
@@ -596,5 +743,15 @@ public class GameState
             if (c.HomeId >= 0)
                 occ[c.HomeId] = occ.GetValueOrDefault(c.HomeId) + 1;
         return occ;
+    }
+
+    /// <summary>住在指定民居的人数（家庭储备目标按人口计；居民数百量级线性扫尚廉）。</summary>
+    public int HomeResidents(int homeId)
+    {
+        int n = 0;
+        foreach (var c in Citizens.Values)
+            if (c.HomeId == homeId)
+                n++;
+        return n;
     }
 }

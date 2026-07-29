@@ -3,13 +3,15 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>新地图树木生成：随机撒若干片树林（簇状），模拟城郊野地。</summary>
+/// <summary>新地图树木生成：随机撒若干片树林（簇状），模拟城郊野地。
+/// 1m 格下参数按米换算：簇数随世界面积 ×4，半径按米不变（格数 ×4），
+/// 峰值密度除 16 保持每平米树数与旧版一致（树冠尺寸是米制，不除会密成一片）。</summary>
 public static class TreeGenerator
 {
-    private const int ClusterCount = 26;
-    private const int ClusterRadiusMin = 2;
-    private const int ClusterRadiusMax = 6;
-    private const float ClusterDensity = 0.55f;
+    private const int ClusterCount = 104;
+    private const int ClusterRadiusMin = 8;
+    private const int ClusterRadiusMax = 24;
+    private const float ClusterDensity = 0.035f;
 
     public static void Scatter(GameState gs, Random rng)
     {
@@ -34,8 +36,8 @@ public static class TreeGenerator
                     if (rng.NextDouble() >= chance)
                         continue;
 
-                    // 植物实体入图：月龄随机，新图林子老幼混杂
-                    gs.AddPlant(c, 6 + rng.Next(19));
+                    // 植物实体入图：月龄随机，新图林子老幼混杂；约每十一株出一株果树（果树:普通树≈1:10）
+                    gs.AddPlant(c, 6 + rng.Next(19), rng.Next(11) == 0);
                 }
             }
         }

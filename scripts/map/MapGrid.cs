@@ -2,11 +2,11 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>纯 C# 逻辑网格：128x128，格边长 4m，地图中心位于世界原点。</summary>
+/// <summary>纯 C# 逻辑网格：1024x1024，格边长 1m（一格一米），地图中心位于世界原点。</summary>
 public class MapGrid
 {
-    public const int Size = 128;
-    public const float CellSize = 4f;
+    public const int Size = 1024;
+    public const float CellSize = 1f;
 
     private readonly Cell[] _cells = new Cell[Size * Size];
 

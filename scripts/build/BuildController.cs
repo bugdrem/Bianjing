@@ -37,6 +37,9 @@ public partial class BuildController : Node
     private Vector2I _hover = new(-1, -1);
     private bool _hoverInMap;
 
+    // 道路/桥方形画笔拖动：上一盖戳中心格（沿线插值防跳格）
+    private Vector2I? _lastRoadCell;
+
     private MeshInstance3D _preview;
     private StandardMaterial3D _previewMat;
 
@@ -99,6 +102,7 @@ public partial class BuildController : Node
     {
         Mode = mode;
         _dragging = false;
+        _lastRoadCell = null;
         _renderer.SetGridVisible(mode != BuildMode.None);
         _preview.Visible = false;
     }
@@ -135,11 +139,13 @@ public partial class BuildController : Node
                 break;
             case BuildMode.Road:
                 _dragging = true;
-                TryPlaceRoad(_hover);
+                _lastRoadCell = null;
+                DragRoadTo(_hover, isBridge: false);
                 break;
             case BuildMode.Bridge:
                 _dragging = true;
-                TryPlaceBridge(_hover);
+                _lastRoadCell = null;
+                DragRoadTo(_hover, isBridge: true);
                 break;
             case BuildMode.Building:
                 TryPlaceBuilding(_hover);
@@ -173,9 +179,9 @@ public partial class BuildController : Node
         if (_dragging && _hoverInMap)
         {
             if (Mode == BuildMode.Road)
-                TryPlaceRoad(_hover);
+                DragRoadTo(_hover, isBridge: false);
             else if (Mode == BuildMode.Bridge)
-                TryPlaceBridge(_hover);
+                DragRoadTo(_hover, isBridge: true);
             else if (Mode == BuildMode.Tree)
                 GameState.I.PlaceTree(_hover);
             else if (Mode == BuildMode.Demolish)
@@ -210,18 +216,34 @@ public partial class BuildController : Node
 
     // ---- 放置操作 ----
 
-    private void TryPlaceRoad(Vector2I c)
+    /// <summary>拖动铺设道路/桥：方形画笔（主路 4×4、辅路 2×2、桥 4×4）沿拖动轨迹逐米盖戳，
+    /// 鼠标快速拖动时从上一中心格沿线插值不断档；每前进一米扣一次造价（重叠区不重复扣）。</summary>
+    private void DragRoadTo(Vector2I c, bool isBridge)
     {
         var gs = GameState.I;
-        if (PlacementValidator.CanPlaceRoad(gs, c, _roadKind))
-            gs.PlaceRoad(c, _roadKind);
+        if (_lastRoadCell == null)
+        {
+            LayStamp(gs, c, isBridge);
+            _lastRoadCell = c;
+            return;
+        }
+
+        var from = _lastRoadCell.Value;
+        if (c == from)
+            return;
+        var d = c - from;
+        int steps = Mathf.Max(Mathf.Abs(d.X), Mathf.Abs(d.Y));
+        for (int i = 1; i <= steps; i++)
+            LayStamp(gs, new Vector2I(from.X + d.X * i / steps, from.Y + d.Y * i / steps), isBridge);
+        _lastRoadCell = c;
     }
 
-    private static void TryPlaceBridge(Vector2I c)
+    private void LayStamp(GameState gs, Vector2I center, bool isBridge)
     {
-        var gs = GameState.I;
-        if (PlacementValidator.CanPlaceBridge(gs, c))
-            gs.PlaceBridge(c);
+        if (isBridge)
+            gs.PlaceBridgeStamp(center);
+        else
+            gs.PlaceRoadStamp(center, _roadKind);
     }
 
     private void TryPlaceBuilding(Vector2I origin)
@@ -269,12 +291,16 @@ public partial class BuildController : Node
         switch (Mode)
         {
             case BuildMode.Road:
-                SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * 0.15f, new Vector3(cs, 0.3f, cs),
+            {
+                // 方形画笔预览：w×w整块（宽 4 时偏移 -1..2，中心偏移半格）
+                int w = GameState.RoadWidthOf(_roadKind);
+                SetPreviewBox(StampCenter(w) + Vector3.Up * 0.15f, StampSize(w, 0.3f),
                     PlacementValidator.CanPlaceRoad(gs, _hover, _roadKind) ? ValidColor : InvalidColor);
                 break;
+            }
 
             case BuildMode.Bridge:
-                SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * 0.25f, new Vector3(cs, 0.5f, cs),
+                SetPreviewBox(StampCenter(GameState.BridgeWidth) + Vector3.Up * 0.25f, StampSize(GameState.BridgeWidth, 0.5f),
                     PlacementValidator.CanPlaceBridge(gs, _hover) ? ValidColor : InvalidColor);
                 break;
 
@@ -317,6 +343,20 @@ public partial class BuildController : Node
         _preview.Position = center;
         _preview.Scale = size;
         _previewMat.AlbedoColor = color;
+    }
+
+    /// <summary>方形画笔预览中心：宽度偏移范围 -(w-1)/2..w/2 非对称，中心沿两轴各偏移半步。</summary>
+    private Vector3 StampCenter(int w)
+    {
+        float offset = (-((w - 1) / 2) + w / 2) / 2f * MapGrid.CellSize;
+        return MapGrid.CellToWorld(_hover) + new Vector3(offset, 0f, offset);
+    }
+
+    /// <summary>方形画笔预览尺寸：w×w 格。</summary>
+    private static Vector3 StampSize(int w, float h)
+    {
+        const float cs = MapGrid.CellSize;
+        return new Vector3(w * cs, h, w * cs);
     }
 
     // ---- 查看格子信息 ----

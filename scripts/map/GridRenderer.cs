@@ -15,6 +15,7 @@ public partial class GridRenderer : Node3D
     private static readonly Color WaterColor = new(0.2f, 0.38f, 0.62f);
     private static readonly Color BridgeColor = new(0.55f, 0.42f, 0.26f);
     private static readonly Color TreeColor = new(0.2f, 0.45f, 0.2f);
+    private static readonly Color FruitTreeColor = new(0.5f, 0.52f, 0.16f); // 果树：暖黄绿树冠，一眼可辨
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
     private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
 
@@ -140,13 +141,15 @@ public partial class GridRenderer : Node3D
 
     private void MarkZonesDirty() => _zonesDirty = true;
 
-    /// <summary>单格变更（铺路/砍树/拆除/扩地）：只重建所在分块；格上坊区色可能被覆盖，坊区层一并刷新。</summary>
+    /// <summary>单格变更（铺路/砍树/拆除/扩地）：只重建所在分块；格上坊区色可能被覆盖，坊区层一并刷新；
+    /// 道路增减会改变住宅房体的临街贴边（檐隙），建筑层跟随重建。</summary>
     private void OnCellChanged(Vector2I c)
     {
         int cx = c.X / ChunkCells, cy = c.Y / ChunkCells;
         if (cx >= 0 && cx < _chunksPerSide && cy >= 0 && cy < _chunksPerSide)
             _chunks[cy * _chunksPerSide + cx].Dirty = true;
         _zonesDirty = true; // 坊区色块层便宜，跟随刷新
+        _buildingsDirty = true; // 房体檐隙随临路变化，建筑数量级小整层重建不贵
     }
 
     public void SetGridVisible(bool visible) => _gridLines.Visible = visible;
@@ -184,6 +187,7 @@ public partial class GridRenderer : Node3D
         var boxXf = new List<Transform3D>();
         var boxColor = new List<Color>();
         var treeXf = new List<Transform3D>();
+        var treeColor = new List<Color>();
 
         const float cs = MapGrid.CellSize;
         for (int x = x0; x < x1; x++)
@@ -205,14 +209,9 @@ public partial class GridRenderer : Node3D
                 }
                 else if (cell.HasRoad)
                 {
-                    // 三种道路按种类区分明度与厚度：主路最亮最厚，小路最暗最薄
-                    float h = cell.RoadKind switch { RoadKind.Main => 0.24f, RoadKind.Side => 0.2f, _ => 0.16f };
-                    var rc = cell.RoadKind switch
-                    {
-                        RoadKind.Main => RoadColor.Lightened(0.25f),
-                        RoadKind.Small => RoadColor.Darkened(0.25f),
-                        _ => RoadColor,
-                    };
+                    // 两种道路按种类区分明度与厚度：主路更亮更厚
+                    float h = cell.RoadKind == RoadKind.Main ? 0.24f : 0.2f;
+                    var rc = cell.RoadKind == RoadKind.Main ? RoadColor.Lightened(0.25f) : RoadColor;
                     boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, h, cs)), world + Vector3.Up * (h / 2f)));
                     boxColor.Add(rc);
                 }
@@ -225,6 +224,7 @@ public partial class GridRenderer : Node3D
                     float jz = ((x * 41 + y * 57) % 7 - 3) * 0.15f;
                     float s = (0.8f + ((x * 13 + y * 17) % 5) * 0.1f) * (0.35f + 0.65f * p.GrowthRatio);
                     treeXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, s, s)), world + new Vector3(jx, 1.5f * s, jz)));
+                    treeColor.Add(p.IsFruitTree ? FruitTreeColor : TreeColor);
                 }
             }
         }
@@ -236,7 +236,7 @@ public partial class GridRenderer : Node3D
         for (int i = 0; i < treeXf.Count; i++)
         {
             chunk.Trees.Multimesh.SetInstanceTransform(i, treeXf[i]);
-            chunk.Trees.Multimesh.SetInstanceColor(i, TreeColor);
+            chunk.Trees.Multimesh.SetInstanceColor(i, treeColor[i]);
         }
     }
 
@@ -272,12 +272,30 @@ public partial class GridRenderer : Node3D
 
         foreach (var b in gs.Buildings.Values)
         {
-            var origin = MapGrid.CellToWorld(b.Origin);
             // 等级越高楼越高；年久失修则发暗
             float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
-            float w = b.FootX * cs * 0.92f;
-            float d = b.FootY * cs * 0.92f;
-            var center = origin + new Vector3((b.FootX - 1) * cs / 2f, height / 2f, (b.FootY - 1) * cs / 2f);
+
+            // 房体范围：grown 建筑在地块中间建房——四周各留 1 米檐隙，紧贴道路的一侧贴边（前门临街）；
+            // 官营建筑仍按占地 0.92 缩放整块绘制
+            float w, d;
+            var center = MapGrid.CellToWorld(b.Origin);
+            if (b.Def.Category == "grown")
+            {
+                var (roadL, roadR, roadT, roadB) = gs.RoadAdjacency(b);
+                float mL = roadL ? 0f : cs, mR = roadR ? 0f : cs;
+                float mT = roadT ? 0f : cs, mB = roadB ? 0f : cs;
+                w = Mathf.Max(cs, b.FootX * cs - mL - mR);
+                d = Mathf.Max(cs, b.FootY * cs - mT - mB);
+                // 地块世界中心 + 檐隙不对称产生的房体偏移（右檐大则房体左移）
+                center += new Vector3((b.FootX - 1) * cs / 2f + (mL - mR) / 2f, height / 2f, (b.FootY - 1) * cs / 2f + (mT - mB) / 2f);
+            }
+            else
+            {
+                w = b.FootX * cs * 0.92f;
+                d = b.FootY * cs * 0.92f;
+                center += new Vector3((b.FootX - 1) * cs / 2f, height / 2f, (b.FootY - 1) * cs / 2f);
+            }
+
             var color = b.Def.GodotColor;
             if (b.Condition < 50f)
                 color = color.Darkened(0.35f * (1f - b.Condition / 50f));
@@ -289,12 +307,12 @@ public partial class GridRenderer : Node3D
             bodyXf.Add(bodyTransform);
             bodyColor.Add(bodyCol);
 
-            // 斜屋顶：脊线沿长边，稍出檐
+            // 斜屋顶：脊线沿长边，稍出檐（跟随房体尺寸与中心）
             float roofH = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
-            var roofBasis = b.FootX >= b.FootY
+            var roofBasis = w >= d
                 ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * 1.06f, roofH, w * 1.06f))
                 : Basis.FromScale(new Vector3(w * 1.06f, roofH, d * 1.06f));
-            var roofCenter = origin + new Vector3((b.FootX - 1) * cs / 2f, height + roofH / 2f, (b.FootY - 1) * cs / 2f);
+            var roofCenter = new Vector3(center.X, height + roofH / 2f, center.Z);
             roofXf.Add(new Transform3D(roofBasis, roofCenter));
             roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
         }

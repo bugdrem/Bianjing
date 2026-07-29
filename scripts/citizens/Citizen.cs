@@ -33,6 +33,8 @@ public enum ActivityType
     Hauling,
     /// <summary>走到地面物资堆拾货入背包。</summary>
     PickingUp,
+    /// <summary>在水井/河岸打水入背包（水仅家用，背回家入库）。</summary>
+    FetchingWater,
 }
 
 /// <summary>居民年龄履历条目：仅记录重大人生事件（迁入/出生/成婚/得子女/分家/迁居/就业变动/丧偶）。</summary>

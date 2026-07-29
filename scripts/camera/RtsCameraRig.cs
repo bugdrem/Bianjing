@@ -5,8 +5,8 @@ namespace Bianjing;
 /// <summary>RTS 相机：WASD/屏幕边缘平移、滚轮缩放、Q/E 或中键拖动旋转，带俯仰与范围限制。</summary>
 public partial class RtsCameraRig : Node3D
 {
-    private const float MinDist = 15f;
-    private const float MaxDist = 300f;
+    private const float MinDist = 6f;
+    private const float MaxDist = 700f; // 世界边长 1024m，拉远能看全大半张地图
     private const float MinPitch = -1.45f;
     private const float MaxPitch = -0.35f;
     private const float EdgeMargin = 8f;
@@ -23,7 +23,7 @@ public partial class RtsCameraRig : Node3D
     {
         _pitchPivot = new Node3D();
         AddChild(_pitchPivot);
-        Cam = new Camera3D { Far = 2000f, Current = true };
+        Cam = new Camera3D { Far = 4000f, Current = true };
         _pitchPivot.AddChild(Cam);
         ApplyTransform();
     }

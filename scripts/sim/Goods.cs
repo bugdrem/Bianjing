@@ -12,6 +12,9 @@ public static class Goods
     public const string Ore = "ore";
     public const string Salt = "salt";
 
+    /// <summary>水：仅供家庭自用（井/河边打水背回家），不设市价、不入铺面备货、不参与买卖。</summary>
+    public const string Water = "water";
+
     // ---- 加工成品（工坊/商铺由原料加工而成，价高于原料）----
     public const string Timber = "timber";     // 木器←柴薪
     public const string Wine = "wine";         // 酒←粮食
@@ -20,6 +23,12 @@ public static class Goods
 
     /// <summary>一担 = 5 份（居民单次搬运量）。</summary>
     public const double LoadUnits = 5;
+
+    /// <summary>食物类货品（家庭口粮储备按此合计；消耗优先级：粮→果→野味）。</summary>
+    public static readonly string[] FoodKinds = { Grain, Fruit, Game };
+
+    /// <summary>是否食物类货品。</summary>
+    public static bool IsFood(string id) => id == Grain || id == Fruit || id == Game;
 
     /// <summary>商铺可专营的货品（工坊固定专营柴薪）。</summary>
     public static readonly string[] ShopSpecialties = { Grain, Fruit, Game };
@@ -73,6 +82,7 @@ public static class Goods
         [Wine] = "酒",
         [Ironware] = "铁器",
         [Cured] = "腌货",
+        [Water] = "水",
     };
 
     public static string NameOf(string id) => DisplayName.GetValueOrDefault(id, id);

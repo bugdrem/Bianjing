@@ -3,14 +3,11 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 地面物资堆占位渲染：小扁方块 MultiMesh，按堆内主要货品配色，
+/// 地面物资堆占位渲染：小扁方块 MultiMesh，按堆内主要货品配色（公用 GoodsColors 色表），
 /// 高度随堆存量微调（一眼看出堆大小）。堆数量少，每帧全量重建即可。
 /// </summary>
 public partial class PileRenderer : Node3D
 {
-    /// <summary>货品配色（未知货品用灰色兜底，mod 货品也能显示）。</summary>
-    private static readonly Color FallbackColor = new(0.6f, 0.6f, 0.6f);
-
     private MultiMeshInstance3D _mm;
 
     public override void _Ready()
@@ -30,15 +27,8 @@ public partial class PileRenderer : Node3D
         AddChild(_mm);
     }
 
-    /// <summary>货品 id → 堆的颜色（粮金黄/柴棕/果红/野味深褐）。</summary>
-    private static Color ColorOf(string goodsId) => goodsId switch
-    {
-        Goods.Grain => new Color(0.85f, 0.72f, 0.3f),
-        Goods.Wood => new Color(0.5f, 0.36f, 0.2f),
-        Goods.Fruit => new Color(0.78f, 0.3f, 0.28f),
-        Goods.Game => new Color(0.42f, 0.26f, 0.22f),
-        _ => FallbackColor,
-    };
+    /// <summary>货品 id → 堆的颜色：改用全局统一色表（与背货块/屋内库存堆同色同货）。</summary>
+    private static Color ColorOf(string goodsId) => GoodsColors.ColorOf(goodsId);
 
     public override void _Process(double delta)
     {
@@ -63,10 +53,10 @@ public partial class PileRenderer : Node3D
                 }
             }
 
-            // 堆越大越高（0.3~0.9m），底面固定 2m 见方
-            float h = 0.3f + 0.6f * Mathf.Min(1f, (float)(p.Inv.Total / ItemPileObj.PileCapacity));
+            // 堆越大越高（0.15~0.5m），底面固定 0.5m 见方（小方块掉落物）
+            float h = 0.15f + 0.35f * Mathf.Min(1f, (float)(p.Inv.Total / ItemPileObj.PileCapacity));
             var pos = MapGrid.CellToWorld(new Vector2I(p.X, p.Y)) + Vector3.Up * (h / 2f);
-            var basis = Basis.Identity.Scaled(new Vector3(2f, h, 2f));
+            var basis = Basis.Identity.Scaled(new Vector3(0.5f, h, 0.5f));
 
             mm.SetInstanceTransform(i, new Transform3D(basis, pos));
             mm.SetInstanceColor(i, ColorOf(domId));

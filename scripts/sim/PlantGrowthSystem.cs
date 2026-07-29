@@ -7,8 +7,8 @@ namespace Bianjing;
 /// <summary>植物生长系统：月结——树木固定生长、成熟大树散播幼体；日结——成树逐日挂果，挂满过熟概率落果成地面果堆。</summary>
 public class PlantGrowthSystem
 {
-    /// <summary>全图植物上限，防止树林无限蔓延吞噬地图。</summary>
-    private const int MaxPlants = 2200;
+    /// <summary>全图植物上限（世界面积扩大四倍后同比上调），防止树林无限蔓延吞噬地图。</summary>
+    private const int MaxPlants = 8800;
     private const float SeedChance = 0.03f;
 
     /// <summary>成树每日挂果增量（份）与挂满后每日落果概率。</summary>
@@ -32,8 +32,8 @@ public class PlantGrowthSystem
             else if (p.Hp < p.MaxHp)
                 p.Hp = Math.Min(p.MaxHp, p.Hp + RegenPerDay);
 
-            if (!p.Mature)
-                continue;
+            if (!p.Mature || !p.IsFruitTree)
+                continue; // 只有果树才挂果，普通树只出木材
             if (p.FruitStock < PlantObj.FruitCap)
             {
                 // 树上果实逐日缓慢增长（未掉落前属于树上仓储）
@@ -51,7 +51,7 @@ public class PlantGrowthSystem
     /// <summary>月结：幼树长大、成熟大树散播幼体。</summary>
     public void TickMonth(GameState gs)
     {
-        var seeds = new List<Vector2I>();
+        var seeds = new List<(Vector2I Cell, bool Fruit)>();
 
         foreach (var p in gs.Plants.Values)
         {
@@ -60,18 +60,18 @@ public class PlantGrowthSystem
 
             if (p.Mature && gs.Plants.Count + seeds.Count < MaxPlants && _rng.NextDouble() < SeedChance)
             {
-                // 成熟大树在紧邻空格散播一株幼体（不侵入坊区规划地）
-                var c = new Vector2I(p.X + _rng.Next(-1, 2), p.Y + _rng.Next(-1, 2));
+                // 成熟大树在 ±4 米内的空格散播一株幼体（与旧版 ±1 格同距；不侵入坊区规划地）
+                var c = new Vector2I(p.X + _rng.Next(-4, 5), p.Y + _rng.Next(-4, 5));
                 if (!MapGrid.InBounds(c))
                     continue;
                 ref var cell = ref gs.Map.CellAt(c);
                 if (cell.IsEmpty && !cell.HasTree && cell.Zone == ZoneType.None)
-                    seeds.Add(c);
+                    seeds.Add((c, p.IsFruitTree)); // 幼体继承母树类型：果树散果树
             }
         }
 
-        foreach (var c in seeds)
-            gs.AddPlant(c, 0);
+        foreach (var (c, fruit) in seeds)
+            gs.AddPlant(c, 0, fruit);
 
         // 幼树逐月长大，需要重绘尺寸
         EventBus.RaiseMapChanged();

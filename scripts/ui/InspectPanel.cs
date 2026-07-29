@@ -229,6 +229,7 @@ public partial class InspectPanel : PanelContainer
         ActivityType.Repairing => "修缮",
         ActivityType.Hauling => "挑担入库",
         ActivityType.PickingUp => "拾取物资",
+        ActivityType.FetchingWater => "打水",
         _ => "不明",
     };
 

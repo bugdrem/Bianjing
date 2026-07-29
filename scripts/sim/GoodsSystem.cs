@@ -12,12 +12,15 @@ namespace Bianjing;
 /// </summary>
 public class GoodsSystem
 {
-    /// <summary>每人每日口粮 / 柴薪消耗（份）。</summary>
+    /// <summary>每人每日口粮 / 柴薪 / 饮水消耗（份）。</summary>
     private const double FoodPerDay = 0.1;
     private const double FuelPerDay = 0.03;
+    private const double WaterPerDay = 0.1;
 
     /// <summary>口粮扣减优先级：先吃主粮，再果品，最后野味。</summary>
     private static readonly string[] FoodOrder = { Goods.Grain, Goods.Fruit, Goods.Game };
+
+    private readonly Random _rng = new();
 
     public void TickDay(GameState gs)
     {
@@ -43,6 +46,9 @@ public class GoodsSystem
                 c.FuelShortDays++;
                 c.Fun = Math.Max(0, c.Fun - 0.5f); // 缺柴：冷灶伤神
             }
+
+            // 饮水：只扣家中存水（水不上市无处可买）；缺水暂不设惩罚，由储备阈值驱动居民去井/河边打水
+            home?.TakeGoods(Goods.Water, WaterPerDay);
 
             ConsumeTierNeeds(gs, c, home, workersOf);
         }
@@ -96,12 +102,16 @@ public class GoodsSystem
             // 产物数据驱动：空串默认产粮（采矿场产矿石、制盐厂产盐）
             string goodsId = string.IsNullOrEmpty(b.Def.ProduceGoods) ? Goods.Grain : b.Def.ProduceGoods;
 
-            // 收成均分散落在占地格（典型案例三：散落地图的物资）
+            // 收成散落在占地格上（典型案例三：散落地图的物资）；
+            // 1m 格下逐格散会生成上百小堆（拾运与渲染都遭殃），改为集中成至多 8 堆随机散在田面
             int cellCount = b.FootX * b.FootY;
-            double per = yield / cellCount;
-            for (int x = b.Origin.X; x < b.Origin.X + b.FootX; x++)
-                for (int y = b.Origin.Y; y < b.Origin.Y + b.FootY; y++)
-                    gs.DropOnGround(new Godot.Vector2I(x, y), goodsId, per);
+            int dropSpots = Math.Min(8, cellCount);
+            double per = yield / dropSpots;
+            for (int i = 0; i < dropSpots; i++)
+            {
+                int dx = _rng.Next(b.FootX), dy = _rng.Next(b.FootY); // 同格重复无妨，DropOnGround 自动并堆
+                gs.DropOnGround(new Godot.Vector2I(b.Origin.X + dx, b.Origin.Y + dy), goodsId, per);
+            }
         }
     }
 

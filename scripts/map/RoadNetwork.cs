@@ -15,10 +15,8 @@ public class RoadNetwork
         _astar.DiagonalMode = AStarGrid2D.DiagonalModeEnum.Never;
         _astar.Update();
 
-        // 初始全部不可通行，铺路后逐格打开
-        for (int x = 0; x < MapGrid.Size; x++)
-            for (int y = 0; y < MapGrid.Size; y++)
-                _astar.SetPointSolid(new Vector2I(x, y), true);
+        // 初始全部不可通行，铺路后逐格打开（1024² 百万点用区域填充，免逐点 interop 开销）
+        _astar.FillSolidRegion(new Rect2I(0, 0, MapGrid.Size, MapGrid.Size), true);
     }
 
     public void SetRoad(Vector2I c, bool isRoad) => _astar.SetPointSolid(c, !isRoad);

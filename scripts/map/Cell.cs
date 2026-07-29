@@ -8,11 +8,10 @@ public enum ZoneType
     Buildable,
 }
 
-/// <summary>道路种类：无/小路/辅路/主路——移速、造价、对邻格吸引力逐档递增。</summary>
+/// <summary>道路种类：无/辅路/主路——移速、造价、对邻格吸引力逐档递增。</summary>
 public enum RoadKind
 {
     None,
-    Small,
     Side,
     Main,
 }

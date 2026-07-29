@@ -4,8 +4,9 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>坊区生长系统（每日结算，日频概率——1x 下一游戏日 ≈ 20 现实秒、一游戏月 ≈ 10 现实分钟）：
-/// 居民在「可建设区」内临路+吸引力达标的空格上自动建房——初生均为住宅；
-/// 住宅逐级升格（容量随等级提升），升级时有概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
+/// 居民在「可建设区」内临路+吸引力达标的空地上自动建房——初生均为住宅；
+/// 住宅容量=房体内部格数，住满后由拥挤事件驱动扩地（见 LifecycleSystem）；升级只影响楼高观感，
+/// 升级时占地够大的住宅有概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
 public class ZoneGrowthSystem
 {
     /// <summary>缺房时每日建一座住宅的概率。</summary>
@@ -51,14 +52,10 @@ public class ZoneGrowthSystem
             {
                 b.Level++;
                 changed = true;
-                if (b.Def.Id == "house")
-                {
-                    // 升级伴随扩建：周边有空地就扩大占地（最大 2×2；兼并邻居留 TODO）
-                    TryExpandHouse(gs, b);
-                    // 只有占地 ≥2 格的住宅才有资格转为商铺/工坊
-                    if (b.FootX * b.FootY >= 2)
-                        TryConvertHouse(gs, b);
-                }
+                // 扩建不再随升级触发（改由住满拥挤事件驱动，见 LifecycleSystem.ResolveHousing）；
+                // 只有占地扩过地（≥ 32 平米）的住宅升级时才有资格转为商铺/工坊
+                if (b.Def.Id == "house" && b.FootX * b.FootY >= 32)
+                    TryConvertHouse(gs, b);
             }
         }
         if (changed)
@@ -97,15 +94,16 @@ public class ZoneGrowthSystem
             gs.ConvertGrown(b, "workshop");
     }
 
-    /// <summary>住宅向紧邻空地扩大占地（最大 2×2）：依次试右列/左列/下行/上行，
-    /// 整条带均为可建设区空地才并入；占领时顺带砍除树木。兼并邻居留 TODO。</summary>
-    private static bool TryExpandHouse(GameState gs, BuildingInstance b)
+    /// <summary>住宅向紧邻空地扩大占地（最大 8×8 米）：依次试右列/左列/下行/上行，
+    /// 整条带均为可建设区空地才并入；占领时顺带砍除树木。由住满拥挤事件调用（公开供 LifecycleSystem）；兼并邻居留 TODO。</summary>
+    public static bool TryExpandHouse(GameState gs, BuildingInstance b)
     {
+        const int MaxSide = 8; // 扩建边长上限（米）
         int fx = b.FootX, fy = b.FootY;
-        if (fx * fy >= 4)
+        if (fx * fy >= MaxSide * MaxSide)
             return false;
 
-        if (fx < 2)
+        if (fx < MaxSide)
         {
             // 右侧加一列；不行则左侧加一列（原点左移）
             if (ClaimStrip(gs, b, new Vector2I(b.Origin.X + fx, b.Origin.Y), 0, 1, fy))
@@ -124,7 +122,7 @@ public class ZoneGrowthSystem
                 return true;
             }
         }
-        if (fy < 2)
+        if (fy < MaxSide)
         {
             // 下侧加一行；不行则上侧加一行（原点上移）
             if (ClaimStrip(gs, b, new Vector2I(b.Origin.X, b.Origin.Y + fy), 1, 0, fx))
@@ -164,8 +162,8 @@ public class ZoneGrowthSystem
         return true;
     }
 
-    /// <summary>在可建设区内挑吸引力最高的合法格生成建筑；无合法格返回 false。
-    /// 只遍历 BuildableCells 增量索引（坊区格数量级远小于全图），大地图下不再全图扫描。</summary>
+    /// <summary>在可建设区内挑吸引力最高的合法落位生成建筑（定义尺寸 4×4 米起）；无合法落位返回 false。
+    /// 只遍历 BuildableCells 增量索引作候选原点（坊区格数量级远小于全图），逐候选验整块占地。</summary>
     private static bool TryGrow(GameState gs, string defId)
     {
         var def = gs.Defs[defId];
@@ -175,15 +173,15 @@ public class ZoneGrowthSystem
 
         foreach (var c in gs.BuildableCells)
         {
-            ref var cell = ref gs.Map.CellAt(c);
-            if (!cell.IsEmpty || cell.HasTree)
+            // 整块占地均为坊区内的无树空地才能落位（以 c 为左上角原点）
+            if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY))
                 continue;
 
-            if (gs.Map.FindAdjacentRoad(c, 1, 1) == null)
+            if (gs.Map.FindAdjacentRoad(c, def.SizeX, def.SizeY) == null)
                 continue;
 
             // 临路本身 +1，加上环境吸引力；达标线为 >= 1（即临路即可起步，衙门/宫殿加速）
-            float score = cell.Desirability + 1f;
+            float score = gs.Map.CellAt(c).Desirability + 1f;
             if (score < 1f)
                 continue;
 
@@ -199,6 +197,24 @@ public class ZoneGrowthSystem
             return false;
 
         gs.PlaceBuilding(def, best);
+        return true;
+    }
+
+    /// <summary>以 origin 为原点的 sx×sy 占地是否全部为可建设区内的无树空地。</summary>
+    private static bool FootprintBuildable(GameState gs, Vector2I origin, int sx, int sy)
+    {
+        for (int x = origin.X; x < origin.X + sx; x++)
+        {
+            for (int y = origin.Y; y < origin.Y + sy; y++)
+            {
+                var c = new Vector2I(x, y);
+                if (!MapGrid.InBounds(c))
+                    return false;
+                ref var cell = ref gs.Map.CellAt(c);
+                if (cell.Zone != ZoneType.Buildable || !cell.IsEmpty || cell.HasTree)
+                    return false;
+            }
+        }
         return true;
     }
 }

@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v10：城市里程碑与科技树（已研成/在研）；早期开发不兼容老档，版本不符拒读。</summary>
-    public const int FormatVersion = 10;
+    /// <summary>v13：果树字段与水需求（旧档无果树全图断果）；早期开发版本不符拒读。</summary>
+    public const int FormatVersion = 13;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>

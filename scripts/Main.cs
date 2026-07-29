@@ -40,6 +40,7 @@ public partial class Main : Node3D
         AddChild(renderer);
         AddChild(new AnimalRenderer());
         AddChild(new PileRenderer()); // 地面物资堆（收成/猎物/落果）
+        AddChild(new BuildingStockRenderer()); // 屋内库存堆（透过半透明房体可见，耗尽才消）
 
         var cameraRig = new RtsCameraRig();
         AddChild(cameraRig);
