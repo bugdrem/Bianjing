@@ -3,20 +3,16 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏时钟：暂停/1x/2x/4x。1x 下约 2 现实小时 = 1 游戏年（一年 = 12月×30日×24时 = 8640 游戏小时，均摊 7200 真实秒）；
-/// 一天 24 小时、一月 30 天、一年 12 月。日常事务按「日」结算，人口老化等大事按「月」结算；
-/// 金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
+/// <summary>游戏时钟：暂停/1x/2x/4x。日历与流速取自 GameBalance.Time（每月 12 天、每天 24 时=12 时辰、每年 12 月）；
+/// 日常事务按「日」结算，人口老化等大事按「月」结算；金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
 public partial class GameClock : Node
 {
-    public const int HoursPerDay = 24;
-    public const int DaysPerMonth = 30;
-    public const int MonthsPerYear = 12;
+    public const int HoursPerDay = GameBalance.Time.HoursPerDay;
+    public const int DaysPerMonth = GameBalance.Time.DaysPerMonth;
+    public const int MonthsPerYear = GameBalance.Time.MonthsPerYear;
 
-    /// <summary>1x 下一游戏年对应的真实秒数（2 现实小时）。</summary>
-    private const float RealSecondsPerYear = 7200f;
-
-    /// <summary>1x 速度下一个游戏小时对应的真实秒数：一年 8640 游戏小时均摊 7200 秒 ≈ 0.83 秒/时。</summary>
-    public const float SecondsPerHour = RealSecondsPerYear / (HoursPerDay * DaysPerMonth * MonthsPerYear);
+    /// <summary>1x 速度下一个游戏小时对应的真实秒数（取自 GameBalance.Time）。</summary>
+    public const float SecondsPerHour = GameBalance.Time.SecondsPerGameHour;
 
     /// <summary>0=暂停，1/2/4=倍速。</summary>
     public int Speed { get; set; } = 1;
@@ -25,6 +21,9 @@ public partial class GameClock : Node
     public int Month { get; private set; } = 1;
     public int Day { get; private set; } = 1;
     public int Hour { get; private set; } = 6;
+
+    /// <summary>开局以来的绝对天数（从 0 起）：供轮休等周期作息计算。</summary>
+    public int AbsoluteDay => ((Year - 1) * MonthsPerYear + (Month - 1)) * DaysPerMonth + (Day - 1);
 
     /// <summary>每过一游戏日触发（日常结算：生长/求职/税赋/物品等）。</summary>
     public event Action DayPassed;

@@ -19,6 +19,10 @@ public partial class GridRenderer : Node3D
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
     private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
 
+    /// <summary>门标记颜色：大门亮金（显眼），后门暗木色（低调）。</summary>
+    private static readonly Color MainDoorColor = new(0.85f, 0.7f, 0.35f);
+    private static readonly Color BackDoorColor = new(0.45f, 0.32f, 0.2f);
+
     /// <summary>建筑主体透明度（能看清屋内居民）。</summary>
     private const float BodyAlpha = 0.55f;
 
@@ -39,6 +43,7 @@ public partial class GridRenderer : Node3D
     private MultiMeshInstance3D _bldgBodies;
     private MultiMeshInstance3D _bldgRoofs;
     private MultiMeshInstance3D _bldgEdges;
+    private MultiMeshInstance3D _doors;
     private MultiMeshInstance3D _zones;
     private MeshInstance3D _gridLines;
 
@@ -93,6 +98,13 @@ public partial class GridRenderer : Node3D
         _bldgEdges = MakeMulti(BuildUnitCubeEdges(), useColors: false);
         _bldgEdges.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_bldgEdges);
+
+        // 建筑的门：小方块标记（大门大而亮金，后门小而暗木），朝向由门内外方向决定
+        var doorMesh = new BoxMesh { Size = Vector3.One };
+        doorMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+        _doors = MakeMulti(doorMesh, useColors: true);
+        _doors.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        AddChild(_doors);
 
         // 坊区色块（半透明，无光照）
         var zoneMesh = new BoxMesh { Size = Vector3.One };
@@ -209,9 +221,18 @@ public partial class GridRenderer : Node3D
                 }
                 else if (cell.HasRoad)
                 {
-                    // 两种道路按种类区分明度与厚度：主路更亮更厚
-                    float h = cell.RoadKind == RoadKind.Main ? 0.24f : 0.2f;
-                    var rc = cell.RoadKind == RoadKind.Main ? RoadColor.Lightened(0.25f) : RoadColor;
+                    // 三类道路按种类区分明度与厚度：主路最亮最厚，小路最暗最薄
+                    float h;
+                    Color rc;
+                    switch (cell.RoadKind)
+                    {
+                        case RoadKind.Main:
+                            h = 0.24f; rc = RoadColor.Lightened(0.25f); break;
+                        case RoadKind.Lane:
+                            h = 0.14f; rc = RoadColor.Darkened(0.2f); break;
+                        default: // Side / 桥面(None)
+                            h = 0.2f; rc = RoadColor; break;
+                    }
                     boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, h, cs)), world + Vector3.Up * (h / 2f)));
                     boxColor.Add(rc);
                 }
@@ -268,6 +289,8 @@ public partial class GridRenderer : Node3D
         var bodyColor = new List<Color>();
         var roofXf = new List<Transform3D>();
         var roofColor = new List<Color>();
+        var doorXf = new List<Transform3D>();
+        var doorColor = new List<Color>();
         const float cs = MapGrid.CellSize;
 
         foreach (var b in gs.Buildings.Values)
@@ -315,10 +338,30 @@ public partial class GridRenderer : Node3D
             var roofCenter = new Vector3(center.X, height + roofH / 2f, center.Z);
             roofXf.Add(new Transform3D(roofBasis, roofCenter));
             roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
+
+            // 门标记：沿占地边界贴墙放置，朝向由门内→门外方向决定（大门大而亮，后门小而暗）
+            gs.EnsureDoors(b);
+            if (b.Doors != null)
+            {
+                foreach (var door in b.Doors)
+                {
+                    var dir = new Vector2I(door.Outside.X - door.Inside.X, door.Outside.Y - door.Inside.Y);
+                    var dirW = new Vector3(dir.X, 0f, dir.Y);
+                    float doorH = door.IsMain ? 1.3f : 0.85f;
+                    float wide = (door.IsMain ? 0.7f : 0.42f) * cs;
+                    const float thick = 0.18f;
+                    // 门面宽度沿墙面（垂直于 dir），厚度沿 dir
+                    var scale = dir.X != 0 ? new Vector3(thick, doorH, wide) : new Vector3(wide, doorH, thick);
+                    var pos = MapGrid.CellToWorld(door.Inside) + dirW * (cs * 0.5f) + Vector3.Up * (doorH / 2f);
+                    doorXf.Add(new Transform3D(Basis.FromScale(scale), pos));
+                    doorColor.Add(door.IsMain ? MainDoorColor : BackDoorColor);
+                }
+            }
         }
 
         FillMultiMesh(_bldgBodies.Multimesh, bodyXf, bodyColor);
         FillMultiMesh(_bldgRoofs.Multimesh, roofXf, roofColor);
+        FillMultiMesh(_doors.Multimesh, doorXf, doorColor);
 
         // 边框与主体同变换（固定深色，无逐实例颜色）
         var mmEdges = _bldgEdges.Multimesh;

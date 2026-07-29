@@ -14,8 +14,8 @@ namespace Bianjing;
 /// </summary>
 public partial class CitizenAgent : Node3D
 {
-    private const float BaseSpeed = 5f;
-    private const float OffRoadFactor = 0.35f; // 脱离道路的减速惩罚
+    private const float BaseSpeed = GameBalance.Movement.BaseSpeed;
+    private const float OffRoadFactor = GameBalance.Movement.OffRoadFactor; // 脱离道路的减速惩罚
     private const float TiredThreshold = 80f;
     private const float BoredThreshold = 25f;
     private const float StayUntilDone = 9999f; // 驻留到条件触发（如下班）而非计时
@@ -311,9 +311,38 @@ public partial class CitizenAgent : Node3D
             return;
         }
 
-        if (C.Fatigue >= TiredThreshold)
+        // 有职者按固定作息（早晨上班、下午下班，每 RestCycleDays 天轮休一天）：作息优先于疲劳——
+        // 上班时段照常上工干活，非班点回家歇息，休息日按面板状态自行安排。
+        if (C.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(C.WorkplaceId, out var wp))
         {
-            // 累了：兴趣太低先闲逛散心，否则回家歇息（进屋歇着，而非站在门口路边）
+            if (IsRestDayToday())
+            {
+                SpendRestDay(gs); // 休息日：按面板属性 在家/闲逛/采集/砍柴
+                return;
+            }
+            if (IsWorkHourNow())
+            {
+                // 修缮房雇工：外出巡修最破旧的公共建筑（而非坐班）
+                if (wp.Def.Id == "repairhouse")
+                {
+                    StartRepairing(gs, wp);
+                    return;
+                }
+                // 农夫：田面有收成堆先去拾担（拾完下一轮决策挑入田仓），否则照常驻留耕作
+                var fieldPile = FindFieldPile(gs, wp);
+                if (fieldPile != null)
+                {
+                    StartActivity(ActivityType.PickingUp, new Vector2I(fieldPile.X, fieldPile.Y), 2f);
+                    return;
+                }
+                // 工坊/商铺：先处理补料/成品外销物流，无事可做才站堂加工
+                if (Goods.IsCraftable(wp.Specialty) && StartCraftLogistics(gs, wp))
+                    return;
+                // 受雇者/店主：进工作地驻留，到点（下午）自然下班
+                StartWorkAt(wp);
+                return;
+            }
+            // 清晨未到点 / 傍晚收工后 / 夜间：兴趣低则出门散心，否则回家歇息
             if (C.Fun < BoredThreshold)
                 StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
             else
@@ -321,26 +350,20 @@ public partial class CitizenAgent : Node3D
             return;
         }
 
-        if (C.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(C.WorkplaceId, out var wp))
+        // 退休者（过退休年龄且已离岗）：富户闲逛、寒门采薪（行为见 SpendRetirement）
+        if (IsRetiredNow())
         {
-            // 修缮房雇工：外出巡修最破旧的公共建筑（而非坐班）
-            if (wp.Def.Id == "repairhouse")
-            {
-                StartRepairing(gs, wp);
-                return;
-            }
-            // 农夫：田面有收成堆先去拾担（拾完下一轮决策挑入田仓），否则照常驻留耕作
-            var fieldPile = FindFieldPile(gs, wp);
-            if (fieldPile != null)
-            {
-                StartActivity(ActivityType.PickingUp, new Vector2I(fieldPile.X, fieldPile.Y), 2f);
-                return;
-            }
-            // 工坊/商铺：先处理补料/成品外销物流，无事可做才站堂加工
-            if (Goods.IsCraftable(wp.Specialty) && StartCraftLogistics(gs, wp))
-                return;
-            // 受雇者/店主：进工作地驻留，疲劳攒满才下班
-            StartWorkAt(wp);
+            SpendRetirement(gs);
+            return;
+        }
+
+        if (C.Fatigue >= TiredThreshold)
+        {
+            // 累了：兴趣太低先闲逛散心，否则回家歇息（进屋歇着，而非站在门口路边）
+            if (C.Fun < BoredThreshold)
+                StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
+            else
+                StartRestHome(gs, 5f);
             return;
         }
 
@@ -428,11 +451,19 @@ public partial class CitizenAgent : Node3D
             _path = null; // 无家可归：原地歇脚
     }
 
-    /// <summary>屋内站位：从门口锚点向建筑中心推进 80%，保证落在建筑占地内（半透明建筑可透视屋内人）。</summary>
-    private static Vector3 IndoorStand(BuildingInstance b)
+    /// <summary>屋内站位：以就近门的门内格为起点向建筑中心推进 80%，保证落在建筑占地内（半透明建筑可透视屋内人）；
+    /// 无门时退回邻路锚点。</summary>
+    private Vector3 IndoorStand(BuildingInstance b)
     {
-        var anchor = GameState.I.Map.FindAdjacentRoad(b.Origin, b.FootX, b.FootY);
-        var anchorWorld = anchor != null ? MapGrid.CellToWorld(anchor.Value) : BuildingCenter(b);
+        var door = NearestDoor(b);
+        Vector3 anchorWorld;
+        if (door.HasValue)
+            anchorWorld = MapGrid.CellToWorld(door.Value.Inside);
+        else
+        {
+            var road = GameState.I.Map.FindAdjacentRoad(b.Origin, b.FootX, b.FootY);
+            anchorWorld = road != null ? MapGrid.CellToWorld(road.Value) : BuildingCenter(b);
+        }
         return anchorWorld.Lerp(BuildingCenter(b), 0.8f);
     }
 
@@ -444,6 +475,98 @@ public partial class CitizenAgent : Node3D
         _activityCell = null;
         _activityAnimalId = -1;
         BuildPathTo(IndoorStand(wp));
+    }
+
+    // ---- 作息：固定上下班 + 轮休 ----
+
+    /// <summary>今日是否为本人的休息日：按绝对天数每 RestCycleDays 天休一天，叠加个体 Id 错峰（不全城同日停工）。</summary>
+    private bool IsRestDayToday()
+        => (_clock.AbsoluteDay + C.Id) % GameBalance.Schedule.RestCycleDays == 0;
+
+    /// <summary>当前是否处于上班时段（早晨上工、下午收工，不含收工时）。</summary>
+    private bool IsWorkHourNow()
+        => _clock.Hour >= GameBalance.Schedule.WorkStartHour && _clock.Hour < GameBalance.Schedule.WorkEndHour;
+
+    /// <summary>当前是否该上工（非休息日且处于上班时段）：驻工下班判定用。</summary>
+    private bool IsWorkTimeNow() => !IsRestDayToday() && IsWorkHourNow();
+
+    /// <summary>休息日安排（有职者轮休当天）：按面板状态择一——
+    /// 太累在家歇，无聊出门闲逛，否则做点轻活（家中缺柴去砍柴，否则采摘果子）补贴家用。</summary>
+    private void SpendRestDay(GameState gs)
+    {
+        if (C.Fatigue >= TiredThreshold)
+        {
+            StartRestHome(gs, 5f);
+            return;
+        }
+        if (C.Fun < BoredThreshold)
+        {
+            StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
+            return;
+        }
+        // 轻活：家中柴薪不足优先砍柴，否则采摘（两者均内含“附近无目标则闲逛”的兑底）
+        if (HomeLowOnWood(gs))
+            StartLogging();
+        else
+            StartGathering();
+    }
+
+    /// <summary>家中柴薪是否低于住户储备目标（休息日砍柴/采摘的取舍依据）。</summary>
+    private bool HomeLowOnWood(GameState gs)
+    {
+        if (!gs.Buildings.TryGetValue(C.HomeId, out var home))
+            return false;
+        int residents = gs.HomeResidents(home.Id);
+        return home.Inv.AmountOf(Goods.Wood) < residents * WoodPerResident;
+    }
+
+    // ---- 退休生活 ----
+
+    /// <summary>是否已退休：过退休年龄且已离岗（无业）的成年人（致仕判定在数据层 JobSystem）。</summary>
+    private bool IsRetiredNow()
+        => C.JobKind == JobKind.None && !C.IsChild && C.AgeYears >= GameBalance.Retire.Age;
+
+    /// <summary>退休生活安排：家中告急仍去补（打水/采购/自采，属“采集等”范畴）；
+    /// 否则：富裕家庭闲逛消遣，寒门则上山采薪采果补贴家用。</summary>
+    private void SpendRetirement(GameState gs)
+    {
+        if (C.Fatigue >= TiredThreshold)
+        {
+            StartRestHome(gs, 5f);
+            return;
+        }
+        if (TryRestockHome(gs)) // 家中食/柴/水告急：退休者仍会去打水/采购/自采
+            return;
+        if (FamilyIsWealthy(gs))
+        {
+            StartLeisure(gs); // 富户：闲逛（预留后期消费娱乐/游山玩水）
+            return;
+        }
+        if (C.Fun < BoredThreshold)
+        {
+            StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
+            return;
+        }
+        StartGathering(); // 寒门：采薪采果（附近无目标则自动闲逛）
+    }
+
+    /// <summary>家庭是否富裕（人均资产高于阀值）：退休后闲逛与采集的分流依据。</summary>
+    private bool FamilyIsWealthy(GameState gs)
+    {
+        double perCapita;
+        if (gs.Families.TryGetValue(C.FamilyId, out var fam) && fam.MemberIds.Count > 0)
+            perCapita = fam.TotalAssets(gs) / fam.MemberIds.Count;
+        else
+            perCapita = C.Money;
+        return perCapita >= GameBalance.Retire.WealthyPerCapitaAssets;
+    }
+
+    /// <summary>闲逛消遣（退休富户/闲人）：当前仅四处闲逛。
+    /// 预留后期接口——去街市消费娱乐（酒肆/勾栏等）或出城探索游山玩水（选目标后 BuildPathTo）。</summary>
+    private void StartLeisure(GameState gs)
+    {
+        // TODO(后期)：根据兴趣/财力选择街市消费娱乐点或城外景致，再导航前往
+        StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
     }
 
     /// <summary>家中储备检查（食物/柴/水任一低于目标一半即触发补货）：
@@ -1243,11 +1366,8 @@ public partial class CitizenAgent : Node3D
         float speedFactor;
         if (inBounds && GameState.I.Map.CellAt(cell).HasRoad)
         {
-            speedFactor = GameState.I.Map.CellAt(cell).RoadKind switch
-            {
-                RoadKind.Main => 1.2f,
-                _ => 1f, // 辅路与桥面（RoadKind.None 但 HasRoad）常速
-            };
+            // 路面按种类快慢（主路快/辅路常速/小路慢/桥面常速），取自 GameBalance.Movement
+            speedFactor = GameBalance.Movement.RoadSpeedFactor(GameState.I.Map.CellAt(cell).RoadKind);
         }
         else
         {
@@ -1281,8 +1401,8 @@ public partial class CitizenAgent : Node3D
             case ActivityType.Repairing:
                 C.Fatigue += 3f * dt;
                 C.Fun -= 0.5f * dt;
-                if (C.Fatigue >= TiredThreshold)
-                    _dwell = 0f; // 下班
+                if (!IsWorkTimeNow())
+                    _dwell = 0f; // 到点下班（傍晚）或轮休日到来
                 break;
             case ActivityType.RestHome:
                 C.Fatigue -= 5f * dt;
@@ -1345,8 +1465,30 @@ public partial class CitizenAgent : Node3D
         return null;
     }
 
-    private static Vector2I? BuildingAnchor(BuildingInstance b) =>
-        GameState.I.Map.FindAdjacentRoad(b.Origin, b.FootX, b.FootY);
+    /// <summary>建筑出入停靠格：就近门的门外格；无门退回邻路锚点。</summary>
+    private Vector2I? BuildingAnchor(BuildingInstance b)
+    {
+        var door = NearestDoor(b);
+        return door?.Outside ?? GameState.I.Map.FindAdjacentRoad(b.Origin, b.FootX, b.FootY);
+    }
+
+    /// <summary>就近选门：按村民当前位置到各门外格的切比雪夫距离取最近门；建筑无门返回 null。</summary>
+    private Door? NearestDoor(BuildingInstance b)
+    {
+        var gs = GameState.I;
+        gs.EnsureDoors(b);
+        if (b.Doors == null || b.Doors.Count == 0)
+            return null;
+        var here = MapGrid.WorldToCell(Position);
+        Door best = b.Doors[0];
+        int bestD = int.MaxValue;
+        foreach (var d in b.Doors)
+        {
+            int dist = Mathf.Max(Mathf.Abs(d.Outside.X - here.X), Mathf.Abs(d.Outside.Y - here.Y));
+            if (dist < bestD) { bestD = dist; best = d; }
+        }
+        return best;
+    }
 
     private static Vector3 BuildingCenter(BuildingInstance b)
     {
@@ -1398,7 +1540,10 @@ public partial class CitizenAgent : Node3D
     private void ApplyLook()
     {
         _lookAgeYears = C.AgeYears;
-        float bodyScale = C.IsChild ? 0.45f + 0.35f * (C.AgeYears / 16f) : 1f;
+        // 体型随年龄线性生长：新生儿 ChildMinScale → 成年门槛达满值 1.0，再乘全局村民模型缩放
+        float grow = Mathf.Min(1f, C.AgeMonths / (GameBalance.Life.AdultAgeYears * 12f));
+        float bodyScale = (GameBalance.Villager.ChildMinScale + (1f - GameBalance.Villager.ChildMinScale) * grow)
+            * GameBalance.Villager.ModelScale;
         _body.Scale = Vector3.One * bodyScale;
 
         bool female = C.Gender == Gender.Female;

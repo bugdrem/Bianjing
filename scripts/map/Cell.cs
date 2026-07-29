@@ -8,12 +8,15 @@ public enum ZoneType
     Buildable,
 }
 
-/// <summary>道路种类：无/辅路/主路——移速、造价、对邻格吸引力逐档递增。</summary>
+/// <summary>道路种类：无/小路/辅路/主路——小路为村民自建住宅四周自动生成（可通行、可作新房临路依据），
+/// 移速最慢且随房屋拆除；辅路/主路由玩家绘制。移速与寻路权重见 GameBalance.Movement。</summary>
 public enum RoadKind
 {
     None,
     Side,
     Main,
+    /// <summary>小路：村民建房自动铺设的窄路，性质同普通道路但移速较慢，随房拆除（共享则保留）。</summary>
+    Lane,
 }
 
 /// <summary>单个地图格子的逻辑数据。</summary>

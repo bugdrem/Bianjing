@@ -138,8 +138,9 @@ public class GameState
         Defs = defs;
     }
 
-    /// <summary>以 center 为中心的方形道路画笔（w×w，宽度随道路种类）：任一格新铺成功即按「每米长度」扣一次造价，
-    /// 已占用格（路/水/建筑）跳过；钱不够时不铺。拖动沿线逐米盖戳，重叠区已铺不重复扣费。返回是否铺下了新格。</summary>
+    /// <summary>以 center 为中心的方形道路画笔（w×w，宽度随道路种类）：按实际新铺格数折算延米计费
+    /// （新格数 ÷ 宽度 = 等效长度，重叠盖戳不再足额重复扣费）；
+    /// 已占用格（路/水/建筑）跳过；钱不够时不铺。返回是否铺下了新格。</summary>
     public bool PlaceRoadStamp(Vector2I center, RoadKind kind)
     {
         int cost = RoadCostOf(kind);
@@ -148,7 +149,7 @@ public class GameState
 
         // 宽度为偶数，偏移范围 -(w-1)/2..w/2 两轴一致（宽 4 时 -1..2）
         int w = RoadWidthOf(kind);
-        bool laid = false;
+        int newCells = 0;
         for (int ox = -((w - 1) / 2); ox <= w / 2; ox++)
         {
             for (int oy = -((w - 1) / 2); oy <= w / 2; oy++)
@@ -157,25 +158,28 @@ public class GameState
                 if (!MapGrid.InBounds(c) || !Map.CellAt(c).IsEmpty)
                     continue;
                 LayRoadCell(c, kind);
-                laid = true;
+                newCells++;
             }
         }
-        if (laid)
+        if (newCells > 0)
         {
-            Money -= cost;
-            Ledger.Add("营造道路", -cost);
+            // 每米单价 × 等效延米数（新格数/宽）：斜拖/重叠盖戳不会多扣
+            double charge = (double)cost * newCells / w;
+            Money -= charge;
+            Ledger.Add("营造道路", -charge);
             EventBus.RaiseStatsChanged();
         }
-        return laid;
+        return newCells > 0;
     }
 
-    /// <summary>以 center 为中心的方形桥梁画笔（4×4 米）：只在无桥的水面格架设，按长度计价同道路。</summary>
+    /// <summary>以 center 为中心的方形桥梁画笔（4×4 米）：只在无桥的水面格架设，
+    /// 按实际新架格数折算延米计价（同道路，重叠盖戳不多扣）。</summary>
     public bool PlaceBridgeStamp(Vector2I center)
     {
         if (!GameSettings.InfiniteMoney && Money < BridgeCost)
             return false;
 
-        bool laid = false;
+        int newCells = 0;
         for (int ox = -((BridgeWidth - 1) / 2); ox <= BridgeWidth / 2; ox++)
         {
             for (int oy = -((BridgeWidth - 1) / 2); oy <= BridgeWidth / 2; oy++)
@@ -188,19 +192,20 @@ public class GameState
                     continue; // 岸上/已有桥的格跳过，桥只跨水
                 cell.HasBridge = true;
                 cell.HasRoad = true;
-                Roads.SetRoad(c, true);
+                Roads.SetRoad(c, true); // 桥面 kind=None：寻路权重同辅路
                 RegisterRoadCell(c);
                 EventBus.RaiseCellChanged(c);
-                laid = true;
+                newCells++;
             }
         }
-        if (laid)
+        if (newCells > 0)
         {
-            Money -= BridgeCost;
-            Ledger.Add("营造桥梁", -BridgeCost);
+            double charge = (double)BridgeCost * newCells / BridgeWidth;
+            Money -= charge;
+            Ledger.Add("营造桥梁", -charge);
             EventBus.RaiseStatsChanged();
         }
-        return laid;
+        return newCells > 0;
     }
 
     /// <summary>铺单格道路（条带内部用，不扣费不广播统计）。</summary>
@@ -211,7 +216,7 @@ public class GameState
         cell.HasRoad = true;
         cell.RoadKind = kind;
         SetZone(c, ZoneType.None);
-        Roads.SetRoad(c, true);
+        Roads.SetRoad(c, true, kind); // 同步寻路权重：主路代价低，居民偏好走主路
         RegisterRoadCell(c);
         EventBus.RaiseCellChanged(c); // 单格变更：只重建所在分块
     }
@@ -253,6 +258,30 @@ public class GameState
         return b;
     }
 
+    /// <summary>村民自建住宅：放置建筑后沿 footprint 外一圈铺设小路（空地→小路，已有道路保留不降级）。
+    /// 由 ZoneGrowthSystem 调用（已保证整块含环在可建设区内）。</summary>
+    public BuildingInstance PlaceGrownWithLanes(BuildingDef def, Vector2I origin)
+    {
+        var b = PlaceBuilding(def, origin);
+        int w = GameBalance.Growth.LaneRing;
+        for (int x = origin.X - w; x < origin.X + def.SizeX + w; x++)
+        {
+            for (int y = origin.Y - w; y < origin.Y + def.SizeY + w; y++)
+            {
+                // 跳过 footprint 内部，只铺四周环
+                if (x >= origin.X && x < origin.X + def.SizeX && y >= origin.Y && y < origin.Y + def.SizeY)
+                    continue;
+                var c = new Vector2I(x, y);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                ref var cell = ref Map.CellAt(c);
+                if (!cell.HasRoad && cell.IsEmpty) // 仅空地铺小路；已有主/辅/桥/小路保留
+                    LayRoadCell(c, RoadKind.Lane);
+            }
+        }
+        return b;
+    }
+
     /// <summary>工商建筑的默认专营货品：商铺/工坊各随机专营一种可加工成品（后期支持多成品）。</summary>
     private static string DefaultSpecialty(BuildingDef def) => def.Id switch
     {
@@ -273,6 +302,7 @@ public class GameState
         b.Def = def;
         b.Specialty = DefaultSpecialty(def);
         b.Abandoned = false;
+        b.Doors = null; // 转业后临路/用途可变，门失效待重算
         EventBus.RaiseMapChanged();
     }
 
@@ -323,17 +353,172 @@ public class GameState
             foreach (var s in pile.Inv.Stacks)
                 owner.StoreGoodsForce(s.GoodsId, s.Amount);
         Map.CellAt(c).BuildingId = buildingId;
+        if (Buildings.TryGetValue(buildingId, out var host))
+            host.Doors = null; // 扩地改变占地边界，门失效待重算
         EventBus.RaiseCellChanged(c);
     }
 
-    /// <summary>拆除建筑实例（手动拆除 / 老化坍塌共用）。</summary>
+    /// <summary>拆除建筑实例（手动拆除 / 老化坍塌共用）：清空占地；grown 住宅顺带清理其小路环——
+    /// 仅移除「不再紧贴任何其它建筑」的独占小路，共享小路保留以免切断邻居通路。</summary>
     public void DemolishBuilding(BuildingInstance b)
     {
-        for (int x = b.Origin.X; x < b.Origin.X + b.FootX; x++)
-            for (int y = b.Origin.Y; y < b.Origin.Y + b.FootY; y++)
+        bool grown = b.Def.Category == "grown";
+        var origin = b.Origin;
+        int fx = b.FootX, fy = b.FootY;
+
+        for (int x = origin.X; x < origin.X + fx; x++)
+            for (int y = origin.Y; y < origin.Y + fy; y++)
                 Map.CellAt(x, y).BuildingId = -1;
         Buildings.Remove(b.Id);
+
+        if (grown)
+        {
+            // footprint 已清空，此时判断小路格是否仍贴着「其它」建筑
+            int w = GameBalance.Growth.LaneRing;
+            for (int x = origin.X - w; x < origin.X + fx + w; x++)
+            {
+                for (int y = origin.Y - w; y < origin.Y + fy + w; y++)
+                {
+                    if (x >= origin.X && x < origin.X + fx && y >= origin.Y && y < origin.Y + fy)
+                        continue;
+                    var c = new Vector2I(x, y);
+                    if (!MapGrid.InBounds(c) || Map.CellAt(c).RoadKind != RoadKind.Lane)
+                        continue;
+                    if (!TouchesAnyBuilding(c))
+                        RemoveLaneCell(c);
+                }
+            }
+        }
+
         EventBus.RaiseMapChanged();
+    }
+
+    /// <summary>某格的 8 邻域内是否存在建筑占地（判断小路是否仍被邻居依赖）。</summary>
+    private bool TouchesAnyBuilding(Vector2I c)
+    {
+        for (int dx = -1; dx <= 1; dx++)
+            for (int dy = -1; dy <= 1; dy++)
+            {
+                if (dx == 0 && dy == 0)
+                    continue;
+                var n = new Vector2I(c.X + dx, c.Y + dy);
+                if (MapGrid.InBounds(n) && Map.CellAt(n).BuildingId >= 0)
+                    return true;
+            }
+        return false;
+    }
+
+    /// <summary>移除一格小路（拆房清理专用）：还原为可建设区空地，便于日后重建。</summary>
+    private void RemoveLaneCell(Vector2I c)
+    {
+        ref var cell = ref Map.CellAt(c);
+        cell.HasRoad = false;
+        cell.RoadKind = RoadKind.None;
+        Roads.SetRoad(c, false);
+        UnregisterRoadCell(c);
+        SetZone(c, ZoneType.Buildable); // 小路原铺在可建设区空地上，拆后复原
+        EventBus.RaiseCellChanged(c);
+    }
+
+    // ---- 建筑的门（懒算缓存，不入存档） ----
+
+    /// <summary>确保建筑的门已计算：Doors 为空（新建/失效/读档）时按当前占地与临路重算并缓存。</summary>
+    public void EnsureDoors(BuildingInstance b)
+    {
+        b.Doors ??= ComputeDoors(b);
+    }
+
+    /// <summary>某格作为门外停靠点的道路等级（大门朝最高等级路）：主路 3 / 辅路 2 / 小路 1 / 桥面 1 / 非路 0。</summary>
+    private int RoadRank(Vector2I c)
+    {
+        if (!MapGrid.InBounds(c))
+            return 0;
+        ref var cell = ref Map.CellAt(c);
+        if (!cell.HasRoad)
+            return 0;
+        return cell.RoadKind switch
+        {
+            RoadKind.Main => 3,
+            RoadKind.Side => 2,
+            RoadKind.Lane => 1,
+            _ => 1, // 桥面（HasRoad 但 RoadKind.None）
+        };
+    }
+
+    /// <summary>切比雪夫距离（格）：门间最小间距判定用。</summary>
+    private static int Chebyshev(Vector2I a, Vector2I b)
+        => System.Math.Max(System.Math.Abs(a.X - b.X), System.Math.Abs(a.Y - b.Y));
+
+    /// <summary>收集一个门候选：仅当外侧格在界内且为可通行道路（含小路/桥面）时成立。</summary>
+    private void AddDoorCand(List<Door> cands, Vector2I inside, Vector2I outside)
+    {
+        if (!MapGrid.InBounds(outside) || !Map.CellAt(outside).HasRoad)
+            return;
+        cands.Add(new Door(inside, outside, false));
+    }
+
+    /// <summary>计算建筑的门：枚举占地四条边上「内侧边界格 → 外侧可通行格」候选，
+    /// 大门取道路等级最高的候选（朝主路），后门数 = max(1, 占地格数 / CellsPerBackDoor)，
+    /// 按最小间距分散在其余临路边（凑不足则逐步放宽间距）；无任何临路候选时返回空列表。</summary>
+    private List<Door> ComputeDoors(BuildingInstance b)
+    {
+        var doors = new List<Door>();
+        var origin = b.Origin;
+        int fx = b.FootX, fy = b.FootY;
+
+        // 四条边逐格收集候选（上/下沿 X，左/右沿 Y）
+        var cands = new List<Door>();
+        for (int x = origin.X; x < origin.X + fx; x++)
+        {
+            AddDoorCand(cands, new Vector2I(x, origin.Y), new Vector2I(x, origin.Y - 1));
+            AddDoorCand(cands, new Vector2I(x, origin.Y + fy - 1), new Vector2I(x, origin.Y + fy));
+        }
+        for (int y = origin.Y; y < origin.Y + fy; y++)
+        {
+            AddDoorCand(cands, new Vector2I(origin.X, y), new Vector2I(origin.X - 1, y));
+            AddDoorCand(cands, new Vector2I(origin.X + fx - 1, y), new Vector2I(origin.X + fx, y));
+        }
+        if (cands.Count == 0)
+            return doors; // 完全被围/无临路：无门，村民走邻路锚点 fallback
+
+        // 按道路等级降序：大门优先挡高等级路，后门亦优先临好路
+        cands.Sort((p, q) => RoadRank(q.Outside).CompareTo(RoadRank(p.Outside)));
+
+        var main = cands[0];
+        main.IsMain = true;
+        doors.Add(main);
+        cands.RemoveAt(0);
+
+        // 后门数随占地面积增长，最少 1 个（小房即 1 个）
+        int backDoors = System.Math.Max(1, fx * fy / GameBalance.Growth.CellsPerBackDoor);
+        int gap = GameBalance.Growth.MinDoorGap;
+        while (doors.Count < 1 + backDoors && cands.Count > 0)
+        {
+            int pick = -1;
+            for (int i = 0; i < cands.Count; i++)
+            {
+                bool ok = true;
+                foreach (var d in doors)
+                    if (Chebyshev(cands[i].Inside, d.Inside) < gap)
+                    {
+                        ok = false;
+                        break;
+                    }
+                if (ok)
+                {
+                    pick = i;
+                    break;
+                }
+            }
+            if (pick < 0)
+            {
+                if (gap > 0) { gap--; continue; } // 间距太宽选不出：放宽再试
+                break; // 间距已放到 0 仍选不出（候选耗尽）
+            }
+            doors.Add(cands[pick]);
+            cands.RemoveAt(pick);
+        }
+        return doors;
     }
 
     // ---- 植物 / 动物 ----

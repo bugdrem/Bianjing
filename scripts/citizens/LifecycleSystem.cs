@@ -63,21 +63,38 @@ public class LifecycleSystem
         bool famine = gs.Food <= 0;
 
         foreach (var c in gs.Citizens.Values)
-        {
-            // 60 岁后死亡率随年龄上升；饥荒额外增加死亡/迁出压力
-            float p = 0f;
-            if (c.AgeYears >= 60)
-                p = 0.002f + (c.AgeYears - 60) * 0.004f;
-            if (famine)
-                p += 0.03f;
-
-            if (_rng.NextDouble() < p)
+            if (_rng.NextDouble() < MonthlyDeathChance(c, famine))
                 dead.Add(c.Id);
-        }
 
         foreach (var id in dead)
             gs.RemoveCitizen(id);
     }
+
+    /// <summary>月死亡概率：任何年龄都有基础底噪，死亡率随年龄按 Gompertz 曲线上升
+    /// （约 55-65 为主要死亡区间），达最大寿数必亡；饥荒额外加压；预留健康值放大接口。</summary>
+    private static float MonthlyDeathChance(Citizen c, bool famine)
+    {
+        int age = c.AgeYears;
+        if (age >= GameBalance.Life.MaxAgeYears)
+            return 1f; // 寿数已尽，必亡
+
+        // 年死亡率 = 基础底噪 + 随龄上升项（陡增起点处为 A，每 55 岁后按尺度指数增长）
+        double annual = GameBalance.Life.BaseAnnualMortality
+            + GameBalance.Life.MortalityAtRamp
+              * Math.Exp((age - GameBalance.Life.MortalityRampAgeYears) / (double)GameBalance.Life.MortalityScaleYears);
+        annual *= HealthMortalityFactor(c); // 预埋：健康值放大死亡率（满健康时为 1）
+        annual = Math.Clamp(annual, 0.0, 1.0);
+
+        double monthly = 1.0 - Math.Pow(1.0 - annual, 1.0 / 12.0); // 年率转月率
+        if (famine)
+            monthly += 0.03;
+        return (float)monthly;
+    }
+
+    /// <summary>预埋接口：健康值对死亡率的放大系数（满值 100 时为 1.0，越低越易亡，封顶 4 倍）。
+    /// 当前无系统削减健康值，故恒为中性；后续健康系统接入后自动生效。</summary>
+    private static double HealthMortalityFactor(Citizen c)
+        => Math.Clamp(1.0 + (100.0 - c.Health) / 100.0, 1.0, 4.0);
 
     /// <summary>住所被拆或从未有住所：全家找空房搬入，找不到累计计时，过久则迁出。</summary>
     private void HandleHomeless(GameState gs)
@@ -179,9 +196,9 @@ public class LifecycleSystem
     private void Marriages(GameState gs)
     {
         var singleMen = gs.Citizens.Values
-            .Where(c => c.Gender == Gender.Male && !c.IsMarried && c.AgeYears >= 18 && c.AgeYears < 50).ToList();
+            .Where(c => c.Gender == Gender.Male && !c.IsMarried && c.AgeYears >= GameBalance.Life.AdultAgeYears && c.AgeYears < GameBalance.Life.MarriageMaxAgeYears).ToList();
         var singleWomen = gs.Citizens.Values
-            .Where(c => c.Gender == Gender.Female && !c.IsMarried && c.AgeYears >= 18 && c.AgeYears < 50).ToList();
+            .Where(c => c.Gender == Gender.Female && !c.IsMarried && c.AgeYears >= GameBalance.Life.AdultAgeYears && c.AgeYears < GameBalance.Life.MarriageMaxAgeYears).ToList();
 
         var occupancy = gs.BuildHomeOccupancy();
 
@@ -227,30 +244,31 @@ public class LifecycleSystem
         man.SpouseId = woman.Id;
         woman.SpouseId = man.Id;
 
-        // 妻子并入丈夫家庭（丈夫无家庭则新建）
+        // 夫妻各记一笔成婚履历（Name 已含姓，不再叠加 Surname）
+        gs.LogLifeEvent(man, $"与 {woman.Name} 成婚");
+        gs.LogLifeEvent(woman, $"与 {man.Name} 成婚");
+
+        // 次子婚嫁：不承祖宅，携妻另立门户迁往新居（长子留守继承家产）；无双床空宅可迁则暂并入夫家，日后由拥挤疏解
+        if (!IsEldestSon(gs, man) && LivesWithParents(gs, man))
+        {
+            var newHome = FindVacantHouse(gs, occupancy, 2);
+            if (newHome != null)
+            {
+                MarryIntoNewHome(gs, man, woman, newHome, occupancy);
+                return;
+            }
+        }
+
+        // 通用：妻子并入丈夫家庭（长子/已自立者留本家；丈夫无家庭则新建）
         if (!gs.Families.TryGetValue(man.FamilyId, out var family))
         {
             family = gs.AddFamily(new Family { HomeId = man.HomeId });
             man.FamilyId = family.Id;
             family.MemberIds.Add(man.Id);
         }
-
-        if (gs.Families.TryGetValue(woman.FamilyId, out var oldFamily))
-        {
-            oldFamily.MemberIds.Remove(woman.Id);
-            family.SharedAssets += oldFamily.SharedAssets / Math.Max(1, oldFamily.MemberIds.Count + 1); // 嫁妆
-            if (oldFamily.MemberIds.Count == 0)
-            {
-                family.SharedAssets += oldFamily.SharedAssets;
-                gs.Families.Remove(oldFamily.Id);
-            }
-        }
+        family.SharedAssets += DetachFromFamily(gs, woman); // 嫁妆：妻子从娘家分得的一份
         woman.FamilyId = family.Id;
         family.MemberIds.Add(woman.Id);
-
-        // 夫妻各记一笔成婚履历（Name 已含姓，不再叠加 Surname）
-        gs.LogLifeEvent(man, $"与 {woman.Name} 成婚");
-        gs.LogLifeEvent(woman, $"与 {man.Name} 成婚");
 
         // 同住：丈夫家有空位则妻子搬来，否则丈夫搬去妻子家
         if (man.HomeId >= 0 && gs.Buildings.TryGetValue(man.HomeId, out var manHouse)
@@ -267,11 +285,75 @@ public class LifecycleSystem
         }
     }
 
+    /// <summary>次子婚后另立门户：夫妻各从原家庭分得一份（次子分产 + 妻子嫁妆），迁入新宅成立新家庭。</summary>
+    private void MarryIntoNewHome(GameState gs, Citizen man, Citizen woman, BuildingInstance newHome, Dictionary<int, int> occupancy)
+    {
+        double portion = DetachFromFamily(gs, man);  // 次子分得的家产份额
+        double dowry = DetachFromFamily(gs, woman);   // 妻子嫁妆
+        var fam = gs.AddFamily(new Family { HomeId = newHome.Id, SharedAssets = portion + dowry });
+        man.FamilyId = fam.Id;
+        woman.FamilyId = fam.Id;
+        fam.MemberIds.Add(man.Id);
+        fam.MemberIds.Add(woman.Id);
+        newHome.Abandoned = false;
+        MoveIn(gs, man, newHome.Id, occupancy);
+        MoveIn(gs, woman, newHome.Id, occupancy);
+        gs.LogLifeEvent(man, "婚后分家，另立门户");
+    }
+
+    /// <summary>从所在家庭剥离一名成员，返回其按人均分得的家产份额（家庭空则解散）。</summary>
+    private static double DetachFromFamily(GameState gs, Citizen c)
+    {
+        if (!gs.Families.TryGetValue(c.FamilyId, out var fam))
+            return 0;
+        fam.MemberIds.Remove(c.Id);
+        double share = fam.SharedAssets / Math.Max(1, fam.MemberIds.Count + 1);
+        fam.SharedAssets -= share;
+        if (fam.MemberIds.Count == 0)
+            gs.Families.Remove(fam.Id);
+        return share;
+    }
+
+    /// <summary>是否为长子（继承人）：在同父或同母的男性兄弟中年龄最长者；
+    /// 无父母记录者（迁入/开基）视为自立门户，返回 true。</summary>
+    private static bool IsEldestSon(GameState gs, Citizen c)
+    {
+        if (c.Gender != Gender.Male)
+            return false;
+        if (c.FatherId < 0 && c.MotherId < 0)
+            return true;
+        foreach (var other in gs.Citizens.Values)
+        {
+            if (other.Id == c.Id || other.Gender != Gender.Male || !AreBrothers(c, other))
+                continue;
+            if (other.AgeMonths > c.AgeMonths)
+                return false; // 有更年长的兄弟：本人非长子
+            if (other.AgeMonths == c.AgeMonths && other.Id < c.Id)
+                return false; // 同龄（如双生）以 Id 定长幼
+        }
+        return true;
+    }
+
+    /// <summary>同父或同母即为兄弟（同一家庭的男性子嗣，用于长幼排序）。</summary>
+    private static bool AreBrothers(Citizen a, Citizen b)
+        => (a.FatherId >= 0 && a.FatherId == b.FatherId)
+        || (a.MotherId >= 0 && a.MotherId == b.MotherId);
+
+    /// <summary>是否仍与父母同户（父或母在世且与本人同家庭）：判断“次子婚后应否搬离本家”。</summary>
+    private static bool LivesWithParents(GameState gs, Citizen c)
+    {
+        if (c.FatherId >= 0 && gs.Citizens.TryGetValue(c.FatherId, out var f) && f.FamilyId == c.FamilyId)
+            return true;
+        if (c.MotherId >= 0 && gs.Citizens.TryGetValue(c.MotherId, out var m) && m.FamilyId == c.FamilyId)
+            return true;
+        return false;
+    }
+
     private void Births(GameState gs)
     {
         var occupancy = gs.BuildHomeOccupancy();
         var mothers = gs.Citizens.Values
-            .Where(c => c.Gender == Gender.Female && c.IsMarried && c.AgeYears >= 18 && c.AgeYears <= 45 && c.HomeId >= 0)
+            .Where(c => c.Gender == Gender.Female && c.IsMarried && c.AgeYears >= GameBalance.Life.FertileMinAgeYears && c.AgeYears <= GameBalance.Life.FertileMaxAgeYears && c.HomeId >= 0)
             .ToList();
 
         foreach (var mother in mothers)
@@ -411,13 +493,23 @@ public class LifecycleSystem
         }
     }
 
-    /// <summary>住户中的成年未婚男（有则触发“独立门户搬出”）。</summary>
+    /// <summary>住户中的成年未婚男（有则触发“独立门户搬出”）：优先迁出次子，长子（继承人）留守祖宅；
+    /// 实在只剩长子时再退而求其次。</summary>
     private static Citizen FindAdultUnmarriedMale(GameState gs, BuildingInstance home)
     {
+        Citizen heir = null;
         foreach (var c in gs.Citizens.Values)
-            if (c.HomeId == home.Id && c.Gender == Gender.Male && c.IsAdult && !c.IsMarried)
-                return c;
-        return null;
+        {
+            if (c.HomeId != home.Id || c.Gender != Gender.Male || !c.IsAdult || c.IsMarried)
+                continue;
+            if (IsEldestSon(gs, c))
+            {
+                heir ??= c; // 长子作兑底，尽量不迁
+                continue;
+            }
+            return c;
+        }
+        return heir;
     }
 
     /// <summary>住户中任一成年人（超员疏解搬家用，不拆未成年人离家）。</summary>

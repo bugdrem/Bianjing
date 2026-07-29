@@ -156,26 +156,29 @@ public static class SaveService
         };
 
         var map = new MapSave();
+
+        // 道路/坊区直接取增量索引（RoadCells/BuildableCells），与架构方向一致；
+        // 全图扫描仅保留给无索引的水面/桥面格
+        foreach (var rc in gs.RoadCells)
+        {
+            map.RoadCells.Add(rc.Y * MapGrid.Size + rc.X);
+            map.RoadKinds.Add((int)gs.Map.CellAt(rc).RoadKind); // 与 RoadCells 一一对应
+        }
+        foreach (var zc in gs.BuildableCells)
+        {
+            map.ZoneCells.Add(zc.Y * MapGrid.Size + zc.X);
+            map.ZoneTypes.Add((int)gs.Map.CellAt(zc).Zone);
+        }
         for (int y = 0; y < MapGrid.Size; y++)
         {
             for (int x = 0; x < MapGrid.Size; x++)
             {
                 ref var cell = ref gs.Map.CellAt(x, y);
                 int index = y * MapGrid.Size + x;
-                if (cell.HasRoad)
-                {
-                    map.RoadCells.Add(index);
-                    map.RoadKinds.Add((int)cell.RoadKind); // 与 RoadCells 一一对应
-                }
                 if (cell.HasWater)
                     map.WaterCells.Add(index);
                 if (cell.HasBridge)
                     map.BridgeCells.Add(index);
-                if (cell.Zone != ZoneType.None)
-                {
-                    map.ZoneCells.Add(index);
-                    map.ZoneTypes.Add((int)cell.Zone);
-                }
             }
         }
 
@@ -309,7 +312,7 @@ public static class SaveService
             cell.HasRoad = true;
             // v9：道路种类与 RoadCells 一一对应（桥面格为 None）
             cell.RoadKind = i < (map.RoadKinds?.Count ?? 0) ? (RoadKind)map.RoadKinds[i] : RoadKind.None;
-            gs.Roads.SetRoad(c, true);
+            gs.Roads.SetRoad(c, true, cell.RoadKind); // 含寻路权重重建（主路代价低）
             gs.RegisterRoadCell(c); // 重建增量道路格索引
         }
         for (int i = 0; i < map.ZoneCells.Count; i++)

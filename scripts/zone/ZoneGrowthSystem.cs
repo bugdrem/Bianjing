@@ -177,7 +177,8 @@ public class ZoneGrowthSystem
             if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY))
                 continue;
 
-            if (gs.Map.FindAdjacentRoad(c, def.SizeX, def.SizeY) == null)
+            // 四周小路环整块须在可建设区内可铺，且至少一格已接入既有道路（临主/辅路或邻居小路，保证连通）
+            if (!RingLayable(gs, c, def.SizeX, def.SizeY))
                 continue;
 
             // 临路本身 +1，加上环境吸引力；达标线为 >= 1（即临路即可起步，衙门/宫殿加速）
@@ -196,7 +197,7 @@ public class ZoneGrowthSystem
         if (!found)
             return false;
 
-        gs.PlaceBuilding(def, best);
+        gs.PlaceGrownWithLanes(def, best);
         return true;
     }
 
@@ -216,5 +217,35 @@ public class ZoneGrowthSystem
             }
         }
         return true;
+    }
+
+    /// <summary>四周一圈小路环是否可铺：每个环格须
+    /// 「已是道路（共享/连接，保留）」或「可建设区内的空地（将铺成小路）」；
+    /// 且至少一格已是道路，确保新住宅经小路接入既有路网（村民靠小路继续外扩）。</summary>
+    private static bool RingLayable(GameState gs, Vector2I origin, int sx, int sy)
+    {
+        int w = GameBalance.Growth.LaneRing;
+        bool touchesRoad = false;
+        for (int x = origin.X - w; x < origin.X + sx + w; x++)
+        {
+            for (int y = origin.Y - w; y < origin.Y + sy + w; y++)
+            {
+                if (x >= origin.X && x < origin.X + sx && y >= origin.Y && y < origin.Y + sy)
+                    continue; // 跳过 footprint 内部
+                var c = new Vector2I(x, y);
+                if (!MapGrid.InBounds(c))
+                    return false;
+                ref var cell = ref gs.Map.CellAt(c);
+                if (cell.HasRoad)
+                {
+                    touchesRoad = true; // 既有道路：作连接点，保留不动
+                    continue;
+                }
+                // 非道路环格须是可建设区内空地（含可砍伐的树），否则整块作废
+                if (cell.Zone != ZoneType.Buildable || !cell.IsEmpty)
+                    return false;
+            }
+        }
+        return touchesRoad;
     }
 }

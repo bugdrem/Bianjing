@@ -13,9 +13,6 @@ namespace Bianjing;
 /// </summary>
 public class JobSystem
 {
-    /// <summary>家产超过此数的老人选择退休颐养。</summary>
-    private const double ElderRetireAssets = 200;
-
     /// <summary>每人每月生活开销。</summary>
     private const double LivingCostPerCapita = 0.8;
 
@@ -43,7 +40,8 @@ public class JobSystem
             {
                 if (filled >= b.Def.JobSlots)
                     break;
-                if (c.HomeId != b.Id || c.IsChild)
+                // 孩童不入职；家族产业内的人可干到 FamilyBusinessAge（比普通雇工晚退），过龄不再拉回
+                if (c.HomeId != b.Id || c.IsChild || c.AgeYears >= GameBalance.Retire.FamilyBusinessAge)
                     continue;
                 // 已在自家上工则计数；在外就业或无业则拉回自家产业
                 if (c.JobKind == JobKind.Employed && c.WorkplaceId == b.Id)
@@ -74,22 +72,30 @@ public class JobSystem
         }
     }
 
-    /// <summary>老人：家产富足则退休，否则继续劳作补贴家用。</summary>
+    /// <summary>退休致仕：到龄退出当前岗位（普通雇工 Retire.Age，店主/家族产业内的人延至 FamilyBusinessAge）；
+    /// 退休后不再受雇，只参与采集等轻活（行为在表现层按家资分流）。</summary>
     private static void Retirement(GameState gs)
     {
         foreach (var c in gs.Citizens.Values)
         {
-            if (!c.IsElder || !c.HasJob)
+            if (c.JobKind != JobKind.Employed)
                 continue;
-            double assets = gs.Families.TryGetValue(c.FamilyId, out var f) ? f.TotalAssets(gs) : c.Money;
-            if (assets >= ElderRetireAssets)
-            {
-                c.JobKind = JobKind.None;
-                c.WorkplaceId = -1;
-                gs.LogLifeEvent(c, "家资殷实，颐养天年");
-            }
+            if (c.AgeYears < RetireAgeFor(c))
+                continue;
+            c.JobKind = JobKind.None;
+            c.WorkplaceId = -1;
+            gs.LogLifeEvent(c, "年届致仕，退居采薪"); // 退休
         }
     }
+
+    /// <summary>本人的退休年龄：店主/家族产业内的人延迟退休。
+    /// 预留：后期可按职业（重体力提前/文职延后）、健康程度、家庭资产进一步微调。</summary>
+    private static int RetireAgeFor(Citizen c)
+        => IsFamilyBusiness(c) ? GameBalance.Retire.FamilyBusinessAge : GameBalance.Retire.Age;
+
+    /// <summary>是否在自家产业上工（店主/家族内人）：工作地即居所（grown 商铺/工坊由本楼居民承担）。</summary>
+    private static bool IsFamilyBusiness(Citizen c)
+        => c.JobKind == JobKind.Employed && c.WorkplaceId >= 0 && c.WorkplaceId == c.HomeId;
 
     /// <summary>
     /// 求职：适龄青年应聘建筑岗位（含修缮房/税所/铸币局/矿盐厂）；无空缺则上山谋生（伐木/采摘/打猎）。
@@ -101,21 +107,14 @@ public class JobSystem
 
         foreach (var c in gs.Citizens.Values)
         {
-            if (c.HasJob || c.IsChild)
+            // 孩童、已有职、以及已过退休年龄者不再受雇（退休者只参与采集等轻活，见表现层）
+            if (c.HasJob || c.IsChild || c.AgeYears >= GameBalance.Retire.Age)
                 continue;
 
             // 主妇：丈夫在业则持家采购
             if (c.Gender == Gender.Female && c.IsMarried
                 && gs.Citizens.TryGetValue(c.SpouseId, out var husband) && husband.HasJob)
                 continue;
-
-            // 老人只有家贫才出山
-            if (c.IsElder)
-            {
-                double assets = gs.Families.TryGetValue(c.FamilyId, out var f) ? f.TotalAssets(gs) : c.Money;
-                if (assets >= ElderRetireAssets / 2)
-                    continue;
-            }
 
             var workplace = FindVacancy(gs, workers);
             if (workplace != null)

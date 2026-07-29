@@ -35,8 +35,9 @@ public class DesirabilitySystem
                 Splat(gs, b, -b.Def.Pollution, b.Def.PollutionRadius);
         }
 
-        // 道路也带来临街吸引力：主路/辅路小量叠加，小路 0；半径 12 米与旧版 3 格（4m 格）等距，
-        // 每格幅度除 16 归一（1m 格密度是旧版 16 倍，不除会把吸引力场吹胀十几倍）；
+        // 道路也带来临街吸引力：主路/辅路小量叠加，桥面（RoadKind.None）不加成；
+        // 半径 12 米与旧版 3 格（4m 格）等距，每格幅度除 16 归一
+        // （1m 格密度是旧版 16 倍，不除会把吸引力场吹胀十几倍）；
         // 只遍历增量维护的道路格列表，大地图下不再全图扫描
         foreach (var rc in gs.RoadCells)
         {

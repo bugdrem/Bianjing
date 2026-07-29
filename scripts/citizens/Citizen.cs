@@ -86,6 +86,10 @@ public class Citizen
     /// <summary>兴趣值 0-100，闲逛/玩耍积攒。</summary>
     public float Fun = 50f;
 
+    /// <summary>健康值 0-100（预埋接口）：默认满值；后续健康系统会随疾病/伤病/营养下降，
+    /// 并经死亡率放大系数影响寿命（见 LifecycleSystem.HealthMortalityFactor）。</summary>
+    public float Health = 100f;
+
     /// <summary>当前活动（表现层同步，读档后恢复）。</summary>
     public ActivityType Activity = ActivityType.RestHome;
 
@@ -120,8 +124,8 @@ public class Citizen
 
     // ---- 派生属性 ----
     public int AgeYears => AgeMonths / 12;
-    public bool IsChild => AgeYears < 16;
-    public bool IsAdult => AgeYears >= 16 && AgeYears < 60;
+    public bool IsChild => AgeYears < GameBalance.Life.AdultAgeYears;
+    public bool IsAdult => AgeYears >= GameBalance.Life.AdultAgeYears && AgeYears < 60;
     public bool IsElder => AgeYears >= 60;
     public bool HasJob => JobKind != JobKind.None;
     public bool IsMarried => SpouseId >= 0;

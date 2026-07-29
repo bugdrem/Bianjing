@@ -166,6 +166,11 @@ public class BuildingInstance : Obj
     public int FootX => SizeX > 0 ? SizeX : Def.SizeX;
     public int FootY => SizeY > 0 ? SizeY : Def.SizeY;
 
+    /// <summary>建筑的门（大门+若干后门）：懒算缓存，不入存档，读档后按当前道路重算；
+    /// 占地/临路变化（扩建/转业/拆邻）时置 null 令其失效，下次访问经 GameState.EnsureDoors 重算。</summary>
+    [JsonIgnore]
+    public List<Door> Doors;
+
     /// <summary>完好度 0-100：人造建筑逐月老化，修缮恢复，归零坍塌。</summary>
     public float Condition = 100f;
     
@@ -240,5 +245,26 @@ public class BuildingInstance : Obj
             int iy = System.Math.Max(1, FootY - (t ? 0 : 1) - (b ? 0 : 1));
             return ix * iy;
         }
+    }
+}
+
+/// <summary>建筑的门：村民经门出入建筑（不走屋墙）。
+/// Inside 为门所属建筑占地内、贴着边界的一格；Outside 为门外相邻的道路/空地（村民停靠点）。</summary>
+public struct Door
+{
+    /// <summary>门内侧格（建筑占地内、贴边界的一格）。</summary>
+    public Godot.Vector2I Inside;
+
+    /// <summary>门外侧格（建筑外相邻格，村民进出停靠点）。</summary>
+    public Godot.Vector2I Outside;
+
+    /// <summary>是否为大门（true=大门朝最高等级路，false=后门）。</summary>
+    public bool IsMain;
+
+    public Door(Godot.Vector2I inside, Godot.Vector2I outside, bool isMain)
+    {
+        Inside = inside;
+        Outside = outside;
+        IsMain = isMain;
     }
 }
