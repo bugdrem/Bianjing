@@ -36,13 +36,14 @@ public class ZoneGrowthSystem
         LevelUps(gs);
     }
 
-    /// <summary>坊区建筑升级：吸引力越高级要求越高，年久失修的不升；住宅升级后有概率转业。</summary>
+    /// <summary>坊区建筑升级：吸引力越高级要求越高，年久失修的不升，里程碑限制最高等级；住宅升级后有概率转业。</summary>
     private void LevelUps(GameState gs)
     {
+        int maxLevel = Milestones.MaxHouseLevel(gs); // 住宅限级随里程碑放开
         bool changed = false;
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.Category != "grown" || b.Level >= b.Def.MaxLevel || b.Condition < 60f)
+            if (b.Def.Category != "grown" || b.Level >= Math.Min(b.Def.MaxLevel, maxLevel) || b.Condition < 60f)
                 continue;
             if (gs.Map.CellAt(b.Origin).Desirability < 1.2f * b.Level)
                 continue;
@@ -50,26 +51,121 @@ public class ZoneGrowthSystem
             {
                 b.Level++;
                 changed = true;
-                // 住宅升级后概率转为商铺/工坊（占地不变，居民保留）
                 if (b.Def.Id == "house")
-                    TryConvertHouse(gs, b);
+                {
+                    // 升级伴随扩建：周边有空地就扩大占地（最大 2×2；兼并邻居留 TODO）
+                    TryExpandHouse(gs, b);
+                    // 只有占地 ≥2 格的住宅才有资格转为商铺/工坊
+                    if (b.FootX * b.FootY >= 2)
+                        TryConvertHouse(gs, b);
+                }
             }
         }
         if (changed)
             EventBus.RaiseMapChanged();
     }
 
-    /// <summary>住宅升级时掷一下是否转业：多数变商铺，少数变工坊，余下仍为住宅。</summary>
+    /// <summary>住宅升级时掷是否转业：受全城工商占比封顶（约十间住宅出两三家），
+    /// 并按临街/环境吸引力加成：越旺的地段越容易开店。</summary>
     private void TryConvertHouse(GameState gs, BuildingInstance b)
     {
+        // 村落阶段不开店：集镇（里程碑 1）起才允许住宅转工商
+        if (gs.MilestoneLevel < 1)
+            return;
+
+        // 全城工商户数封顶 30%：大致对应“10 间住宅中两三个升级成工坊或商铺”
+        int grown = 0, biz = 0;
+        foreach (var g in gs.Buildings.Values)
+        {
+            if (g.Def.Category != "grown")
+                continue;
+            grown++;
+            if (g.Def.Id != "house")
+                biz++;
+        }
+        if (grown > 0 && biz >= grown * 0.3f)
+            return;
+
+        // 临街与周边属性：吸引力（主路/衙署/水井加成，污染减分）越高越容易转业
+        float desir = gs.Map.CellAt(b.Origin).Desirability;
+        double scale = Math.Clamp(0.5 + desir * 0.25, 0.5, 1.5);
+
         double r = _rng.NextDouble();
-        if (r < ShopConvertChance)
+        if (r < ShopConvertChance * scale)
             gs.ConvertGrown(b, "shop");
-        else if (r < ShopConvertChance + WorkshopConvertChance)
+        else if (r < (ShopConvertChance + WorkshopConvertChance) * scale)
             gs.ConvertGrown(b, "workshop");
     }
 
-    /// <summary>在可建设区内挑选吸引力最高的合法格生成建筑；无合法格返回 false。</summary>
+    /// <summary>住宅向紧邻空地扩大占地（最大 2×2）：依次试右列/左列/下行/上行，
+    /// 整条带均为可建设区空地才并入；占领时顺带砍除树木。兼并邻居留 TODO。</summary>
+    private static bool TryExpandHouse(GameState gs, BuildingInstance b)
+    {
+        int fx = b.FootX, fy = b.FootY;
+        if (fx * fy >= 4)
+            return false;
+
+        if (fx < 2)
+        {
+            // 右侧加一列；不行则左侧加一列（原点左移）
+            if (ClaimStrip(gs, b, new Vector2I(b.Origin.X + fx, b.Origin.Y), 0, 1, fy))
+            {
+                b.SizeX = fx + 1;
+                b.SizeY = fy;
+                EventBus.RaiseMapChanged();
+                return true;
+            }
+            if (ClaimStrip(gs, b, new Vector2I(b.Origin.X - 1, b.Origin.Y), 0, 1, fy))
+            {
+                b.Origin = new Vector2I(b.Origin.X - 1, b.Origin.Y);
+                b.SizeX = fx + 1;
+                b.SizeY = fy;
+                EventBus.RaiseMapChanged();
+                return true;
+            }
+        }
+        if (fy < 2)
+        {
+            // 下侧加一行；不行则上侧加一行（原点上移）
+            if (ClaimStrip(gs, b, new Vector2I(b.Origin.X, b.Origin.Y + fy), 1, 0, fx))
+            {
+                b.SizeX = fx;
+                b.SizeY = fy + 1;
+                EventBus.RaiseMapChanged();
+                return true;
+            }
+            if (ClaimStrip(gs, b, new Vector2I(b.Origin.X, b.Origin.Y - 1), 1, 0, fx))
+            {
+                b.Origin = new Vector2I(b.Origin.X, b.Origin.Y - 1);
+                b.SizeX = fx;
+                b.SizeY = fy + 1;
+                EventBus.RaiseMapChanged();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>检查并占用一条带（起点 start，步进 (dx,dy)，共 count 格）：
+    /// 全部为可建设区内的空地才成立，成立即登记归属。</summary>
+    private static bool ClaimStrip(GameState gs, BuildingInstance b, Vector2I start, int dx, int dy, int count)
+    {
+        for (int i = 0; i < count; i++)
+        {
+            var c = new Vector2I(start.X + dx * i, start.Y + dy * i);
+            if (!MapGrid.InBounds(c))
+                return false;
+            var cell = gs.Map.CellAt(c);
+            if (!cell.IsEmpty || cell.Zone != ZoneType.Buildable)
+                return false;
+        }
+        for (int i = 0; i < count; i++)
+            gs.ClaimCellForBuilding(new Vector2I(start.X + dx * i, start.Y + dy * i), b.Id);
+        return true;
+    }
+
+    /// <summary>在可建设区内挑吸引力最高的合法格生成建筑；无合法格返回 false。
+    /// 只遍历 BuildableCells 增量索引（坊区格数量级远小于全图），大地图下不再全图扫描。</summary>
     private static bool TryGrow(GameState gs, string defId)
     {
         var def = gs.Defs[defId];
@@ -77,29 +173,25 @@ public class ZoneGrowthSystem
         Vector2I best = default;
         bool found = false;
 
-        for (int x = 0; x < MapGrid.Size; x++)
+        foreach (var c in gs.BuildableCells)
         {
-            for (int y = 0; y < MapGrid.Size; y++)
+            ref var cell = ref gs.Map.CellAt(c);
+            if (!cell.IsEmpty || cell.HasTree)
+                continue;
+
+            if (gs.Map.FindAdjacentRoad(c, 1, 1) == null)
+                continue;
+
+            // 临路本身 +1，加上环境吸引力；达标线为 >= 1（即临路即可起步，衙门/宫殿加速）
+            float score = cell.Desirability + 1f;
+            if (score < 1f)
+                continue;
+
+            if (score > bestScore)
             {
-                ref var cell = ref gs.Map.CellAt(x, y);
-                if (cell.Zone != ZoneType.Buildable || !cell.IsEmpty || cell.HasTree)
-                    continue;
-
-                var c = new Vector2I(x, y);
-                if (gs.Map.FindAdjacentRoad(c, 1, 1) == null)
-                    continue;
-
-                // 临路本身 +1，加上环境吸引力；达标线为 >= 1（即临路即可起步，衙门/宫殿加速）
-                float score = cell.Desirability + 1f;
-                if (score < 1f)
-                    continue;
-
-                if (score > bestScore)
-                {
-                    bestScore = score;
-                    best = c;
-                    found = true;
-                }
+                bestScore = score;
+                best = c;
+                found = true;
             }
         }
 

@@ -10,9 +10,12 @@ public class DesirabilitySystem
     public DesirabilitySystem()
     {
         EventBus.MapChanged += MarkDirty;
+        EventBus.CellChanged += MarkDirtyCell; // 铺路/拆路等单格变更同样影响吸引力场
     }
 
     private void MarkDirty() => _dirty = true;
+
+    private void MarkDirtyCell(Vector2I _) => _dirty = true;
 
     public void EnsureUpdated(GameState gs)
     {
@@ -31,6 +34,33 @@ public class DesirabilitySystem
             if (b.Def.Pollution > 0f)
                 Splat(gs, b, -b.Def.Pollution, b.Def.PollutionRadius);
         }
+
+        // 道路也带来临街吸引力：主路 +1.0、辅路 +0.4、小路 0（仅对小范围叠加）；
+        // 只遍历增量维护的道路格列表，大地图下不再全图扫描
+        foreach (var rc in gs.RoadCells)
+        {
+            var cell = gs.Map.CellAt(rc);
+            if (!cell.HasRoad)
+                continue;
+            float bonus = cell.RoadKind switch { RoadKind.Main => 1.0f, RoadKind.Side => 0.4f, _ => 0f };
+            if (bonus <= 0f)
+                continue;
+            SplatCell(gs, rc.X, rc.Y, bonus, 3f);
+        }
+    }
+
+    /// <summary>以某格为圆心线性衰减地叠加吸引力（道路用）。</summary>
+    private static void SplatCell(GameState gs, int cx, int cy, float amount, float radius)
+    {
+        int r = Mathf.CeilToInt(radius);
+        for (int x = Mathf.Max(0, cx - r); x <= Mathf.Min(MapGrid.Size - 1, cx + r); x++)
+            for (int y = Mathf.Max(0, cy - r); y <= Mathf.Min(MapGrid.Size - 1, cy + r); y++)
+            {
+                float dist = Mathf.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
+                if (dist > radius)
+                    continue;
+                gs.Map.CellAt(x, y).Desirability += amount * (1f - dist / radius);
+            }
     }
 
     /// <summary>以建筑 footprint 中心为圆心，线性衰减地叠加吸引力。</summary>

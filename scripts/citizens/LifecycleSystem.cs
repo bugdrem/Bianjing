@@ -96,6 +96,7 @@ public class LifecycleSystem
             {
                 MoveIn(gs, c, house.Id, occupancy);
                 c.HomelessMonths = 0;
+                gs.LogLifeEvent(c, "迁居新宅"); // 失宅后觅得新居
             }
             else
             {
@@ -104,7 +105,13 @@ public class LifecycleSystem
         }
 
         foreach (var c in homeless.Where(c => c.HomelessMonths > EmigrateAfterHomelessMonths).ToList())
+        {
+            // 带上未成年子女一同迁出，不留孤幼滞留城中
+            foreach (var childId in c.ChildrenIds.ToList())
+                if (gs.Citizens.TryGetValue(childId, out var child) && child.IsChild)
+                    gs.RemoveCitizen(childId);
             gs.RemoveCitizen(c.Id);
+        }
     }
 
     /// <summary>迁入：优先两人小家庭（夫妻），偶有单身流民（每日判定，有空床才成行）。</summary>
@@ -141,6 +148,7 @@ public class LifecycleSystem
             c.FamilyId = family.Id;
             family.MemberIds.Add(c.Id);
             MoveIn(gs, c, house.Id, occupancy);
+            gs.LogLifeEvent(c, "携眷迁入汴京");
         }
     }
 
@@ -151,6 +159,7 @@ public class LifecycleSystem
         single.FamilyId = family.Id;
         family.MemberIds.Add(single.Id);
         MoveIn(gs, single, house.Id, occupancy);
+        gs.LogLifeEvent(single, "只身迁入汴京");
     }
 
     private Citizen NewAdult(GameState gs, Gender gender)
@@ -183,10 +192,34 @@ public class LifecycleSystem
             if (_rng.NextDouble() >= MarriageChancePerDay)
                 continue;
 
-            var woman = singleWomen[_rng.Next(singleWomen.Count)];
+            // 排除近亲：同家庭、直系、同胞均不得婚配（最多试八人，无合适对象则本日作罢）
+            Citizen woman = null;
+            for (int attempt = 0; attempt < 8 && singleWomen.Count > 0; attempt++)
+            {
+                var candidate = singleWomen[_rng.Next(singleWomen.Count)];
+                if (CloseKin(man, candidate))
+                    continue;
+                woman = candidate;
+                break;
+            }
+            if (woman == null)
+                continue;
+
             singleWomen.Remove(woman);
             Marry(gs, man, woman, occupancy);
         }
+    }
+
+    /// <summary>是否近亲：同家庭 / 父女母子 / 同父或同母。</summary>
+    private static bool CloseKin(Citizen a, Citizen b)
+    {
+        if (a.FamilyId >= 0 && a.FamilyId == b.FamilyId)
+            return true;
+        if (a.ChildrenIds.Contains(b.Id) || b.ChildrenIds.Contains(a.Id))
+            return true;
+        if ((a.FatherId >= 0 && a.FatherId == b.FatherId) || (a.MotherId >= 0 && a.MotherId == b.MotherId))
+            return true;
+        return false;
     }
 
     private void Marry(GameState gs, Citizen man, Citizen woman, Dictionary<int, int> occupancy)
@@ -214,6 +247,10 @@ public class LifecycleSystem
         }
         woman.FamilyId = family.Id;
         family.MemberIds.Add(woman.Id);
+
+        // 夫妻各记一笔成婚履历（Name 已含姓，不再叠加 Surname）
+        gs.LogLifeEvent(man, $"与 {woman.Name} 成婚");
+        gs.LogLifeEvent(woman, $"与 {man.Name} 成婚");
 
         // 同住：丈夫家有空位则妻子搬来，否则丈夫搬去妻子家
         if (man.HomeId >= 0 && gs.Buildings.TryGetValue(man.HomeId, out var manHouse)
@@ -262,6 +299,12 @@ public class LifecycleSystem
             if (gs.Families.TryGetValue(mother.FamilyId, out var family))
                 family.MemberIds.Add(child.Id);
             MoveIn(gs, child, mother.HomeId, occupancy);
+
+            // 孩子记出生，父母各记得子/得女
+            gs.LogLifeEvent(child, $"生于{HomeName(gs, mother.HomeId)}");
+            string kidWord = gender == Gender.Male ? "得子" : "得女";
+            gs.LogLifeEvent(father, $"{kidWord} {child.Name}");
+            gs.LogLifeEvent(mother, $"{kidWord} {child.Name}");
         }
     }
 
@@ -343,13 +386,18 @@ public class LifecycleSystem
                 if (newHome != null)
                     LeaveForNewHome(gs, male, newHome, occupancy);
             }
-            else if (b.Level < b.Def.MaxLevel && b.Condition >= 60f)
+            else if (b.Level < EffectiveMaxLevel(gs, b) && b.Condition >= 60f)
             {
-                // 候选 C：无成年未婚男则升级扩建增容（后期改为占用邻格的大房屋）
+                // 候选 C：无成年未婚男则升级扩建增容（受里程碑限级；后期改为占用邻格的大房屋）
                 b.Level++;
+                EventBus.RaiseMapChanged(); // 楼高变化即时重绘
             }
         }
     }
+
+    /// <summary>当前里程碑下的住宅有效最高等级（非住宅 grown 建筑同受限）。</summary>
+    private static int EffectiveMaxLevel(GameState gs, BuildingInstance b) =>
+        Math.Min(b.Def.MaxLevel, Milestones.MaxHouseLevel(gs));
 
     /// <summary>住户中的成年未婚男（有则触发“独立门户搬出”）。</summary>
     private static Citizen FindAdultUnmarriedMale(GameState gs, BuildingInstance home)
@@ -377,9 +425,14 @@ public class LifecycleSystem
         fam.MemberIds.Add(c.Id);
         newHome.Abandoned = false;
         MoveIn(gs, c, newHome.Id, occupancy);
+        gs.LogLifeEvent(c, "成年分家，另立门户");
     }
 
     // ---- 工具 ----
+
+    /// <summary>住宅名（出生履历用）：建筑已失则笼统称“家中”。</summary>
+    private static string HomeName(GameState gs, int homeId) =>
+        gs.Buildings.TryGetValue(homeId, out var b) ? $"{b.Def.Name}（{b.X},{b.Y}）" : "家中";
 
     /// <summary>找有空床位的住处：民居优先，其次前店后宅/工坊宿舍等一切可住建筑；excludeId 排除自身。</summary>
     private static BuildingInstance FindVacantHouse(GameState gs, Dictionary<int, int> occupancy, int needBeds, int excludeId = -1)

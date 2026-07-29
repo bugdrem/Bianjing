@@ -15,13 +15,23 @@ public class PlantGrowthSystem
     private const double FruitPerDay = 0.1;
     private const double DropChance = 0.1;
 
+    /// <summary>砍伐伤恢复：连续无人砍伐达到延迟天数后，每日回血至满。</summary>
+    private const int RegenDelayDays = 3;
+    private const float RegenPerDay = 2f;
+
     private readonly Random _rng = new();
 
-    /// <summary>日结：挂果生长与过熟落果（典型案例四→案例三的转化）。</summary>
+    /// <summary>日结：挂果生长与过熟落果（典型案例四→案例三的转化）；另处理砍伐伤的逐日恢复。</summary>
     public void TickDay(GameState gs)
     {
         foreach (var p in gs.Plants.Values)
         {
+            // 砍伐伤恢复：一段时间没人砍才慢慢回血（被砍即重新计时，见 DamageTree）
+            if (p.IdleDays < RegenDelayDays)
+                p.IdleDays++;
+            else if (p.Hp < p.MaxHp)
+                p.Hp = Math.Min(p.MaxHp, p.Hp + RegenPerDay);
+
             if (!p.Mature)
                 continue;
             if (p.FruitStock < PlantObj.FruitCap)
@@ -45,11 +55,10 @@ public class PlantGrowthSystem
 
         foreach (var p in gs.Plants.Values)
         {
-            if (p.GrowthMonths < PlantObj.MatureMonths)
-            {
-                p.GrowthMonths++;
-            }
-            else if (gs.Plants.Count + seeds.Count < MaxPlants && _rng.NextDouble() < SeedChance)
+            // 树龄持续累积：成熟前驱动尺寸生长，成熟后驱动血量上限缓涨（越老涨得越慢）
+            p.GrowthMonths++;
+
+            if (p.Mature && gs.Plants.Count + seeds.Count < MaxPlants && _rng.NextDouble() < SeedChance)
             {
                 // 成熟大树在紧邻空格散播一株幼体（不侵入坊区规划地）
                 var c = new Vector2I(p.X + _rng.Next(-1, 2), p.Y + _rng.Next(-1, 2));

@@ -35,6 +35,17 @@ public enum ActivityType
     PickingUp,
 }
 
+/// <summary>居民年龄履历条目：仅记录重大人生事件（迁入/出生/成婚/得子女/分家/迁居/就业变动/丧偶）。</summary>
+public class LifeEvent
+{
+    /// <summary>事件发生的游戏年月。</summary>
+    public int Year;
+    public int Month;
+
+    /// <summary>事件描述（中文短句，直接用于面板展示）。</summary>
+    public string Text = "";
+}
+
 /// <summary>
 /// 真实居民：从迁入/出生到迁出/死亡的完整生命周期个体。
 /// 纯数据类（不含 Godot 类型），可直接 JSON 序列化入存档；
@@ -93,6 +104,9 @@ public class Citizen
     /// <summary>连续缺粮/缺柴天数（家中无存货且买不到，需求面板展示）。</summary>
     public int FoodShortDays;
     public int FuelShortDays;
+
+    /// <summary>年龄履历（重大事件按时间正序追加，随存档保存，上限见 GameState.LogLifeEvent）。</summary>
+    public List<LifeEvent> LifeEvents = new();
 
     /// <summary>mod / 未来系统扩展字段。</summary>
     public Dictionary<string, string> Extra = new();

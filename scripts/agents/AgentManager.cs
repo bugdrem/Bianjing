@@ -22,7 +22,11 @@ public partial class AgentManager : Node
     private readonly Dictionary<int, CitizenAgent> _agents = new();
     private readonly Dictionary<Vector2I, List<CitizenAgent>> _buckets = new();
 
-    private List<Vector2I> _roadCells;
+    // ---- 选中居民目标路线（浅绿色线，随移动实时缩短）----
+    private int _selectedId = -1;
+    private MeshInstance3D _pathLine;
+    private ImmediateMesh _pathMesh;
+    private StandardMaterial3D _pathMat;
 
     /// <summary>全部在场代理（点选拾取用）。</summary>
     public IEnumerable<CitizenAgent> Agents => _agents.Values;
@@ -37,7 +41,20 @@ public partial class AgentManager : Node
         EventBus.CitizenAdded += OnCitizenAdded;
         EventBus.CitizenRemoved += OnCitizenRemoved;
         EventBus.GameLoaded += RebuildAll;
-        EventBus.MapChanged += InvalidateRoads;
+        EventBus.CitizenSelected += OnCitizenSelected;
+
+        // 路线网格常驻，无选中/无路径时隐藏；关深度测试使指引线穿透建筑/树木也可见
+        _pathMesh = new ImmediateMesh();
+        _pathMat = new StandardMaterial3D
+        {
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            AlbedoColor = new Color(0.55f, 1f, 0.65f, 0.85f),
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            NoDepthTest = true,
+            RenderPriority = 10,
+        };
+        _pathLine = new MeshInstance3D { Mesh = _pathMesh, Visible = false };
+        AddChild(_pathLine);
 
         RebuildAll();
     }
@@ -47,10 +64,10 @@ public partial class AgentManager : Node
         EventBus.CitizenAdded -= OnCitizenAdded;
         EventBus.CitizenRemoved -= OnCitizenRemoved;
         EventBus.GameLoaded -= RebuildAll;
-        EventBus.MapChanged -= InvalidateRoads;
+        EventBus.CitizenSelected -= OnCitizenSelected;
     }
 
-    /// <summary>每帧重建空间哈希桶（父节点 _Process 先于子节点执行，代理拿到的是本帧数据）。</summary>
+    /// <summary>每帧重建空间哈希桶（父节点 _Process 先于子节点执行，代理拿到的是本帧数据）；末尾重绘选中居民路线。</summary>
     public override void _Process(double delta)
     {
         _buckets.Clear();
@@ -61,6 +78,36 @@ public partial class AgentManager : Node
                 _buckets[cell] = list = new List<CitizenAgent>();
             list.Add(agent);
         }
+
+        UpdatePathLine();
+    }
+
+    private void OnCitizenSelected(int id) => _selectedId = id;
+
+    /// <summary>重绘选中居民的剩余目标路线：从代理当前位置依次连到尚未走过的路径点；
+    /// 无选中、代理不在场（超上限只模拟不上屏）或无路径时隐藏。</summary>
+    private void UpdatePathLine()
+    {
+        if (_selectedId < 0 || !_agents.TryGetValue(_selectedId, out var agent)
+            || agent.PathPoints == null || agent.PathIndex >= agent.PathPoints.Count)
+        {
+            _pathMesh.ClearSurfaces();
+            _pathLine.Visible = false;
+            return;
+        }
+
+        const float y = 0.5f; // 抬到路面（顶 0.2）与桥面（顶约 0.43）之上，否则沿路的线会被路面埋没
+        _pathMesh.ClearSurfaces();
+        _pathMesh.SurfaceBegin(Mesh.PrimitiveType.LineStrip, _pathMat);
+        var start = agent.Position;
+        _pathMesh.SurfaceAddVertex(new Vector3(start.X, y, start.Z));
+        for (int i = agent.PathIndex; i < agent.PathPoints.Count; i++)
+        {
+            var p = agent.PathPoints[i];
+            _pathMesh.SurfaceAddVertex(new Vector3(p.X, y, p.Z));
+        }
+        _pathMesh.SurfaceEnd();
+        _pathLine.Visible = true;
     }
 
     /// <summary>
@@ -121,29 +168,17 @@ public partial class AgentManager : Node
         foreach (var agent in _agents.Values)
             agent.QueueFree();
         _agents.Clear();
-        InvalidateRoads();
 
         foreach (var c in GameState.I.Citizens.Values)
             OnCitizenAdded(c);
     }
 
-    private void InvalidateRoads() => _roadCells = null;
-
-    /// <summary>随机道路格（缓存，道路变化时失效重建）。</summary>
+    /// <summary>随机道路格：直接取自 GameState 增量维护的道路格列表，无需全图扫描重建缓存。</summary>
     public Vector2I? RandomRoadCell(Random rng)
     {
-        if (_roadCells == null)
-        {
-            _roadCells = new List<Vector2I>();
-            var gs = GameState.I;
-            for (int x = 0; x < MapGrid.Size; x++)
-                for (int y = 0; y < MapGrid.Size; y++)
-                    if (gs.Map.CellAt(x, y).HasRoad)
-                        _roadCells.Add(new Vector2I(x, y));
-        }
-
-        if (_roadCells.Count == 0)
+        var roads = GameState.I.RoadCells;
+        if (roads.Count == 0)
             return null;
-        return _roadCells[rng.Next(_roadCells.Count)];
+        return roads[rng.Next(roads.Count)];
     }
 }

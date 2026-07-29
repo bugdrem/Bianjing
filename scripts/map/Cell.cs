@@ -8,10 +8,22 @@ public enum ZoneType
     Buildable,
 }
 
+/// <summary>道路种类：无/小路/辅路/主路——移速、造价、对邻格吸引力逐档递增。</summary>
+public enum RoadKind
+{
+    None,
+    Small,
+    Side,
+    Main,
+}
+
 /// <summary>单个地图格子的逻辑数据。</summary>
 public struct Cell
 {
     public bool HasRoad;
+
+    /// <summary>道路种类（仅普通道路有意义；桥面 HasRoad 为真但种类为 None）。</summary>
+    public RoadKind RoadKind;
 
     /// <summary>是否有河水（不可建造，架桥除外）。</summary>
     public bool HasWater;

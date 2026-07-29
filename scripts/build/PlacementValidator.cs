@@ -5,12 +5,12 @@ namespace Bianjing;
 /// <summary>建造合法性校验。</summary>
 public static class PlacementValidator
 {
-    public static bool CanPlaceRoad(GameState gs, Vector2I c)
+    public static bool CanPlaceRoad(GameState gs, Vector2I c, RoadKind kind = RoadKind.Side)
     {
         if (!MapGrid.InBounds(c))
             return false;
         ref var cell = ref gs.Map.CellAt(c);
-        return cell.IsEmpty && (GameSettings.InfiniteMoney || gs.Money >= GameState.RoadCost);
+        return cell.IsEmpty && (GameSettings.InfiniteMoney || gs.Money >= GameState.RoadCostOf(kind));
     }
 
     /// <summary>桥梁：只能架在没有桥的水面上。</summary>
@@ -22,9 +22,13 @@ public static class PlacementValidator
         return cell.HasWater && !cell.HasBridge && (GameSettings.InfiniteMoney || gs.Money >= GameState.BridgeCost);
     }
 
-    /// <summary>建筑：占地全部为空格、在界内、至少一边临路（连通性）、钱够。</summary>
+    /// <summary>建筑：里程碑已解锁、占地全部为空格、在界内、至少一边临路（连通性）、钱够。</summary>
     public static bool CanPlaceBuilding(GameState gs, BuildingDef def, Vector2I origin, bool checkCost = true)
     {
+        // 里程碑未到不可建（菜单置灰外的双重保险，防热键/mod 绕过）
+        if (def.MilestoneRequired > gs.MilestoneLevel)
+            return false;
+
         for (int x = origin.X; x < origin.X + def.SizeX; x++)
         {
             for (int y = origin.Y; y < origin.Y + def.SizeY; y++)

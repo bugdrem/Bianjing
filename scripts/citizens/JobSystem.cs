@@ -24,9 +24,40 @@ public class JobSystem
     public void TickDay(GameState gs)
     {
         CleanInvalidJobs(gs);
+        StaffHomeBusinesses(gs); // 工坊/商铺岗位优先由本楼居民承担
         Retirement(gs);
         SeekJobs(gs);
         HouseholdSpending(gs);
+    }
+
+    /// <summary>居住者承担自家产业：工坊/商铺（grown + 有岗位）的岗位优先由本楼居民填。
+    /// 本楼居民若在外就业则辞外职回自家上工；孩童不入职。</summary>
+    private static void StaffHomeBusinesses(GameState gs)
+    {
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Def.Category != "grown" || b.Def.JobSlots <= 0)
+                continue;
+            int filled = 0;
+            foreach (var c in gs.Citizens.Values)
+            {
+                if (filled >= b.Def.JobSlots)
+                    break;
+                if (c.HomeId != b.Id || c.IsChild)
+                    continue;
+                // 已在自家上工则计数；在外就业或无业则拉回自家产业
+                if (c.JobKind == JobKind.Employed && c.WorkplaceId == b.Id)
+                {
+                    filled++;
+                    continue;
+                }
+                if (c.JobKind == JobKind.Employed && c.WorkplaceId != b.Id)
+                    gs.LogLifeEvent(c, $"辞去外职，回自家{b.Def.Name}营生"); // 辞外职也是大事，记一笔
+                c.JobKind = JobKind.Employed;
+                c.WorkplaceId = b.Id;
+                filled++;
+            }
+        }
     }
 
     /// <summary>工作单位被拆则失业。</summary>
@@ -38,6 +69,7 @@ public class JobSystem
             {
                 c.JobKind = JobKind.None;
                 c.WorkplaceId = -1;
+                gs.LogLifeEvent(c, "工作地已失，失去生计");
             }
         }
     }
@@ -54,6 +86,7 @@ public class JobSystem
             {
                 c.JobKind = JobKind.None;
                 c.WorkplaceId = -1;
+                gs.LogLifeEvent(c, "家资殷实，颐养天年");
             }
         }
     }
@@ -90,12 +123,14 @@ public class JobSystem
                 c.JobKind = JobKind.Employed;
                 c.WorkplaceId = workplace.Id;
                 workers[workplace.Id] = workers.GetValueOrDefault(workplace.Id) + 1;
+                gs.LogLifeEvent(c, $"受雇于{workplace.Def.Name}（{workplace.X},{workplace.Y}）");
             }
             else if (_rng.NextDouble() < 0.6)
             {
                 // 上山谋生：伐木/采摘/打猎（创业开店由坊区生长承接，后续版本个体化）
                 c.JobKind = JobKind.Logger;
                 c.WorkplaceId = -1;
+                gs.LogLifeEvent(c, "进山伐木采猎谋生");
             }
         }
     }
@@ -109,11 +144,12 @@ public class JobSystem
         return workers;
     }
 
+    /// <summary>寻找空缺岗位：官营建筑面向全城招工；工坊/商铺等 grown 产业岗位专留给本楼居民（见 StaffHomeBusinesses），不对外招。</summary>
     private static BuildingInstance FindVacancy(GameState gs, Dictionary<int, int> workers)
     {
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.JobSlots <= 0)
+            if (b.Def.JobSlots <= 0 || b.Def.Category == "grown")
                 continue;
             if (workers.GetValueOrDefault(b.Id) < b.Def.JobSlots)
                 return b;

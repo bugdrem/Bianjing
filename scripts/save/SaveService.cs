@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v6：住宅容量（一格 4~6 人）、建筑废弃标志、住宅自生长与升级转业语义变更；早期开发不兼容老档，版本不符拒读。</summary>
-    public const int FormatVersion = 6;
+    /// <summary>v10：城市里程碑与科技树（已研成/在研）；早期开发不兼容老档，版本不符拒读。</summary>
+    public const int FormatVersion = 10;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -103,7 +103,22 @@ public static class SaveService
 
     // ---- 保存 ----
 
-    public static void Save(GameClock clock, string slot, string saveName)
+    /// <summary>保存到指定槽；磁盘/序列化异常不崩游戏，返回是否成功。</summary>
+    public static bool Save(GameClock clock, string slot, string saveName)
+    {
+        try
+        {
+            SaveCore(clock, slot, saveName);
+            return true;
+        }
+        catch (Exception e)
+        {
+            GD.PushWarning($"保存存档 {slot} 失败：{e.Message}");
+            return false;
+        }
+    }
+
+    private static void SaveCore(GameClock clock, string slot, string saveName)
     {
         var gs = GameState.I;
         string dir = SlotDir(slot);
@@ -134,6 +149,10 @@ public static class SaveService
             TaxLevels = new Dictionary<string, int>(gs.Taxes.Levels),
             LedgerCur = new Dictionary<string, double>(gs.Ledger.Current),
             LedgerPrev = new Dictionary<string, double>(gs.Ledger.Previous),
+            MilestoneLevel = gs.MilestoneLevel,
+            Techs = new List<string>(gs.TechsUnlocked),
+            ResearchTechId = gs.ResearchTechId,
+            ResearchDays = gs.ResearchDays,
         };
 
         var map = new MapSave();
@@ -144,7 +163,10 @@ public static class SaveService
                 ref var cell = ref gs.Map.CellAt(x, y);
                 int index = y * MapGrid.Size + x;
                 if (cell.HasRoad)
+                {
                     map.RoadCells.Add(index);
+                    map.RoadKinds.Add((int)cell.RoadKind); // 与 RoadCells 一一对应
+                }
                 if (cell.HasWater)
                     map.WaterCells.Add(index);
                 if (cell.HasBridge)
@@ -166,6 +188,7 @@ public static class SaveService
                 BuiltYear = b.BuiltYear, BuiltMonth = b.BuiltMonth,
                 Specialty = b.Specialty, Inv = b.Inv, MonthsSinceHarvest = b.MonthsSinceHarvest,
                 Abandoned = b.Abandoned,
+                SizeX = b.SizeX, SizeY = b.SizeY,
             });
 
         var citizens = new List<Citizen>(gs.Citizens.Values);
@@ -193,7 +216,21 @@ public static class SaveService
 
     // ---- 读取 ----
 
+    /// <summary>读档：任何异常（损坏档/磁盘错误）均不崩游戏，返回 false 由界面提示。</summary>
     public static bool Load(GameClock clock, string slot)
+    {
+        try
+        {
+            return LoadCore(clock, slot);
+        }
+        catch (Exception e)
+        {
+            GD.PushWarning($"读取存档 {slot} 失败：{e.Message}");
+            return false;
+        }
+    }
+
+    private static bool LoadCore(GameClock clock, string slot)
     {
         string dir = SlotDir(slot);
         if (!File.Exists(Path.Combine(dir, "data.mdb")))
@@ -257,18 +294,29 @@ public static class SaveService
             },
             CurYear = meta.Year,
             CurMonth = meta.Month,
+            MilestoneLevel = world.MilestoneLevel,
+            ResearchTechId = world.ResearchTechId ?? "",
+            ResearchDays = world.ResearchDays,
         };
+        foreach (var id in world.Techs ?? new List<string>())
+            gs.TechsUnlocked.Add(id);
 
-        foreach (int index in map.RoadCells)
+        for (int i = 0; i < map.RoadCells.Count; i++)
         {
+            int index = map.RoadCells[i];
             var c = new Vector2I(index % MapGrid.Size, index / MapGrid.Size);
-            gs.Map.CellAt(c).HasRoad = true;
+            ref var cell = ref gs.Map.CellAt(c);
+            cell.HasRoad = true;
+            // v9：道路种类与 RoadCells 一一对应（桥面格为 None）
+            cell.RoadKind = i < (map.RoadKinds?.Count ?? 0) ? (RoadKind)map.RoadKinds[i] : RoadKind.None;
             gs.Roads.SetRoad(c, true);
+            gs.RegisterRoadCell(c); // 重建增量道路格索引
         }
         for (int i = 0; i < map.ZoneCells.Count; i++)
         {
             int index = map.ZoneCells[i];
-            gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).Zone = (ZoneType)map.ZoneTypes[i];
+            // 经 SetZone 写入，同步重建坊区候选集索引
+            gs.SetZone(new Vector2I(index % MapGrid.Size, index / MapGrid.Size), (ZoneType)map.ZoneTypes[i]);
         }
         foreach (int index in map.WaterCells ?? new List<int>())
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasWater = true;
@@ -312,10 +360,13 @@ public static class SaveService
                 Inv = bs.Inv ?? new Inventory(),
                 MonthsSinceHarvest = bs.MonthsSinceHarvest,
                 Abandoned = bs.Abandoned,
+                SizeX = bs.SizeX,
+                SizeY = bs.SizeY,
             };
             gs.Buildings[b.Id] = b;
-            for (int x = bs.X; x < bs.X + def.SizeX; x++)
-                for (int y = bs.Y; y < bs.Y + def.SizeY; y++)
+            // 按实例占地标格（住宅扩建后大于定义占地）
+            for (int x = bs.X; x < bs.X + b.FootX; x++)
+                for (int y = bs.Y; y < bs.Y + b.FootY; y++)
                     gs.Map.CellAt(x, y).BuildingId = b.Id;
         }
 

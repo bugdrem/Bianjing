@@ -23,6 +23,7 @@ public partial class BuildMenu : PanelContainer
 
     private readonly BuildController _build;
     private HBoxContainer _itemRow;
+    private string _currentGroup = ""; // 当前展开的分组（里程碑晋级时刷新解锁态）
 
     public BuildMenu(BuildController build)
     {
@@ -60,6 +61,17 @@ public partial class BuildMenu : PanelContainer
 
         // 默认展开首个分类，避免上排空白
         ShowGroup(BaseGroups[0].Key);
+
+        // 里程碑晋级：刷新当前分组，新解锁的建筑按钮即时点亮
+        EventBus.MilestoneReached += OnMilestone;
+    }
+
+    public override void _ExitTree() => EventBus.MilestoneReached -= OnMilestone;
+
+    private void OnMilestone(int _)
+    {
+        if (_currentGroup != "")
+            ShowGroup(_currentGroup);
     }
 
     /// <summary>分类顺序：基础分组固定在前，mod 自定义组（组名不在基础组内）按组内最小 MenuOrder 追加在末尾。</summary>
@@ -77,23 +89,40 @@ public partial class BuildMenu : PanelContainer
         return result;
     }
 
-    /// <summary>切换上排为指定分组的可建项：基础设施组附带道路/桥梁/树木内置模式。</summary>
+    /// <summary>切换上排为指定分组的可建项：基础设施组附带道路/桥梁/树木内置模式；
+    /// 里程碑未到的建筑置灰并标注所需城市等级。</summary>
     private void ShowGroup(string key)
     {
+        _currentGroup = key;
         ClearItems();
 
         if (key == "infrastructure")
         {
-            AddButton(_itemRow, $"道路 {GameState.RoadCost}", () => _build.SetRoadMode());
+            AddButton(_itemRow, $"主路 {GameState.RoadCostOf(RoadKind.Main)}", () => _build.SetRoadMode(RoadKind.Main));
+            AddButton(_itemRow, $"辅路 {GameState.RoadCostOf(RoadKind.Side)}", () => _build.SetRoadMode(RoadKind.Side));
+            AddButton(_itemRow, $"小路 {GameState.RoadCostOf(RoadKind.Small)}", () => _build.SetRoadMode(RoadKind.Small));
             AddButton(_itemRow, $"桥梁 {GameState.BridgeCost}", () => _build.SetBridgeMode());
             AddButton(_itemRow, "树木", () => _build.SetTreeMode());
         }
 
+        int milestone = GameState.I.MilestoneLevel;
         foreach (var def in GameState.I.Defs.Values
             .Where(d => d.MenuOrder > 0 && GroupOf(d) == key)
             .OrderBy(d => d.MenuOrder))
         {
             var captured = def; // 闭包捕获当前定义
+            if (captured.MilestoneRequired > milestone)
+            {
+                // 未解锁：置灰展示所需里程碑，玩家一眼知道升到什么城市才能建
+                var btn = new Button
+                {
+                    Text = $"{captured.Name}（需{Milestones.NameOf(captured.MilestoneRequired)}）",
+                    Disabled = true,
+                    TooltipText = $"人口达 {Milestones.Of(captured.MilestoneRequired).PopulationRequired} 晋级后解锁",
+                };
+                _itemRow.AddChild(btn);
+                continue;
+            }
             AddButton(_itemRow, $"{captured.Name} {captured.Cost}", () => _build.SetBuildingMode(captured));
         }
     }

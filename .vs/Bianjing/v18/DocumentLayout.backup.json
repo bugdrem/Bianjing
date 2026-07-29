@@ -3,8 +3,16 @@
   "WorkspaceRootPath": "D:\\Godot\\Bianjing\\",
   "Documents": [
     {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\main.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\main.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
       "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\map\\cell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
       "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:scripts\\map\\cell.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}"
+    },
+    {
+      "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\bianjing.csproj||{04B8AB82-A572-4FEF-95CE-5222444B6B64}|",
+      "RelativeMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|solutionrelative:bianjing.csproj||{04B8AB82-A572-4FEF-95CE-5222444B6B64}|"
     },
     {
       "AbsoluteMoniker": "D:0:0:{1416B7F9-12A9-4C2B-96A1-D3FFC8C3A640}|Bianjing.csproj|d:\\godot\\bianjing\\scripts\\build\\buildcontroller.cs||{A6C744A8-0E4A-4FC6-886A-064283054674}",
@@ -105,8 +113,36 @@
               "Name": "ST:132:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
             },
             {
+              "$type": "Bookmark",
+              "Name": "ST:0:0:{1c4feeaa-4718-4aa9-859d-94ce25d182ba}"
+            },
+            {
               "$type": "Document",
-              "DocumentIndex": 1,
+              "DocumentIndex": 0,
+              "Title": "Main.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\Main.cs",
+              "RelativeDocumentMoniker": "scripts\\Main.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\Main.cs",
+              "RelativeToolTip": "scripts\\Main.cs",
+              "ViewState": "AgIAAA4AAAAAAAAAAAAIwBUAAAAAAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-28T07:00:00.708Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 2,
+              "Title": "Bianjing",
+              "DocumentMoniker": "D:\\GODOT\\BIANJING\\Bianjing.csproj",
+              "RelativeDocumentMoniker": "Bianjing.csproj",
+              "ToolTip": "D:\\GODOT\\BIANJING\\Bianjing.csproj",
+              "RelativeToolTip": "Bianjing.csproj",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000758|",
+              "WhenOpened": "2026-07-28T02:56:50.777Z"
+            },
+            {
+              "$type": "Document",
+              "DocumentIndex": 3,
               "Title": "BuildController.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\build\\BuildController.cs",
               "RelativeDocumentMoniker": "scripts\\build\\BuildController.cs",
@@ -114,21 +150,19 @@
               "RelativeToolTip": "scripts\\build\\BuildController.cs",
               "ViewState": "AgIAAEUBAAAAAAAAAAAqwE8BAAAYAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-27T09:23:31.417Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-27T09:23:31.417Z"
             },
             {
               "$type": "Document",
-              "DocumentIndex": 0,
+              "DocumentIndex": 1,
               "Title": "Cell.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\map\\Cell.cs",
               "RelativeDocumentMoniker": "scripts\\map\\Cell.cs",
               "ToolTip": "D:\\Godot\\Bianjing\\scripts\\map\\Cell.cs",
               "RelativeToolTip": "scripts\\map\\Cell.cs",
-              "ViewState": "AgIAAAAAAAAAAAAAAAAAAA4AAAAAAAAAAAAAAA==",
+              "ViewState": "AgIAAAAAAAAAAAAAAAAAAAQAAAABAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-27T09:18:09.585Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-27T09:18:09.585Z"
             }
           ]
         }

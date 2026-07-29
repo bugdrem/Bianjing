@@ -3,7 +3,7 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>顶栏：钱/粮/人口/日期 + 时间控制、政策与存读档按钮。数据每帧轮询刷新；点击钱可查收支明细。</summary>
+/// <summary>顶栏：钱/粮/人口/里程碑/日期 + 时间控制、政策与研习、存读档按钮。数据每帧轮询刷新；点击钱可查收支明细。</summary>
 public partial class TopBar : PanelContainer
 {
     private readonly GameClock _clock;
@@ -11,19 +11,21 @@ public partial class TopBar : PanelContainer
     private readonly Action _onLoad;
     private readonly Action _onPolicy;
     private readonly Action _onFinance;
+    private readonly Action _onTech;
 
     private Button _money;
     private Label _food;
     private Label _pop;
     private Label _date;
 
-    public TopBar(GameClock clock, Action onSave, Action onLoad, Action onPolicy, Action onFinance)
+    public TopBar(GameClock clock, Action onSave, Action onLoad, Action onPolicy, Action onFinance, Action onTech)
     {
         _clock = clock;
         _onSave = onSave;
         _onLoad = onLoad;
         _onPolicy = onPolicy;
         _onFinance = onFinance;
+        _onTech = onTech;
     }
 
     public override void _Ready()
@@ -51,6 +53,7 @@ public partial class TopBar : PanelContainer
 
         box.AddChild(new VSeparator());
         AddActionButton(box, "政策", _onPolicy);
+        AddActionButton(box, "研习", _onTech);
         AddActionButton(box, "保存", _onSave);
         AddActionButton(box, "读档", _onLoad);
     }
@@ -84,6 +87,7 @@ public partial class TopBar : PanelContainer
         _food.Text = $"粮 {gs.Food:F0}";
         _pop.Text = $"人口 {gs.Population}";
         string speedText = _clock.Speed == 0 ? "已暂停" : $"{_clock.Speed}x";
-        _date.Text = $"{gs.CityName}  第{_clock.Year}年 {_clock.Month}月 {_clock.Day}日 {_clock.Shichen}  [{speedText}]";
+        string rank = Milestones.NameOf(gs.MilestoneLevel); // 当前城市里程碑称号
+        _date.Text = $"{gs.CityName}【{rank}】 第{_clock.Year}年 {_clock.Month}月 {_clock.Day}日 {_clock.Shichen}  [{speedText}]";
     }
 }

@@ -29,13 +29,14 @@ public class EconomySystem
         EventBus.RaiseStatsChanged();
     }
 
-    /// <summary>铸币：铸币局每名在岗工匠每日铸钱入官库（数据驱动自 buildings.json）。</summary>
+    /// <summary>铸币：铸币局每名在岗工匠每日铸钱入官库（数据驱动自 buildings.json，冶铸科技加成）。</summary>
     private static void MintCoins(GameState gs)
     {
         double minted = 0;
         foreach (var c in gs.Citizens.Values)
             if (c.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(c.WorkplaceId, out var wp))
                 minted += wp.Def.MintPerWorkerDay;
+        minted *= gs.TechFactor("mint");
         if (minted <= 0)
             return;
         gs.Money += minted;

@@ -78,6 +78,9 @@ public class BuildingDef
     /// <summary>建造菜单所属分组：infrastructure(基础设施)/public(公共设施)/official(官府设施)；空串默认归官府设施。mod 可填自定义组名（未知组自动追加在末尾）。</summary>
     public string MenuGroup { get; set; } = "";
 
+    /// <summary>解锁所需城市里程碑等级（0 开局即可建）：菜单置灰展示、放置校验同受此限。</summary>
+    public int MilestoneRequired { get; set; }
+
     [JsonIgnore]
     public Godot.Color GodotColor => new(Color);
 
@@ -94,9 +97,14 @@ public class BuildingDef
     {
         var dict = new Dictionary<string, BuildingDef>();
 
-        // 1) 基础定义：随游戏发行，位于 res://data/buildings.json
+        // 1) 基础定义：随游戏发行，位于 res://data/buildings.json（缺失时报错而非直接崩溃）
         using (var f = Godot.FileAccess.Open("res://data/buildings.json", Godot.FileAccess.ModeFlags.Read))
-            MergeInto(dict, f.GetAsText());
+        {
+            if (f != null)
+                MergeInto(dict, f.GetAsText());
+            else
+                Godot.GD.PushError("缺少 res://data/buildings.json，建筑定义为空。");
+        }
 
         // 2) 建筑 mod：游戏根目录 mods/<模组名>/buildings.json，按目录名升序加载，
         //    同 id 覆盖基础定义、新 id 直接追加——玩家放入文件夹即生效，无需改代码。
@@ -150,6 +158,14 @@ public class BuildingInstance : Obj
     /// <summary>建筑等级 1..MaxLevel，等级越高可居住人数越多。</summary>
     public int Level = 1;
 
+    /// <summary>实例占地（grown 住宅升级可扩大占地）：0 表示沿用 Def.SizeX/SizeY（官营建筑与旧档默认）。</summary>
+    public int SizeX;
+    public int SizeY;
+
+    /// <summary>当前实际占地（优先实例值，否则用定义值）。</summary>
+    public int FootX => SizeX > 0 ? SizeX : Def.SizeX;
+    public int FootY => SizeY > 0 ? SizeY : Def.SizeY;
+
     /// <summary>完好度 0-100：人造建筑逐月老化，修缮恢复，归零坍塌。</summary>
     public float Condition = 100f;
     
@@ -198,6 +214,16 @@ public class BuildingInstance : Obj
         set { X = value.X; Y = value.Y; }
     }
 
-    /// <summary>当前等级的可居住人数。</summary>
-    public int HousingCapacity => Def.CapacityAt(Level);
+    /// <summary>当前等级的可居住人数（占地扩大时按格数额外增容）。</summary>
+    public int HousingCapacity
+    {
+        get
+        {
+            int baseCap = Def.CapacityAt(Level);
+            int cells = FootX * FootY;
+            int defCells = Def.SizeX * Def.SizeY;
+            // 扩地增容：每多一格按基础容量等比增加（占地翻倍则容量翻倍）
+            return defCells > 0 ? baseCap * cells / defCells : baseCap;
+        }
+    }
 }

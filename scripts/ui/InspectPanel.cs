@@ -14,6 +14,9 @@ public partial class InspectPanel : PanelContainer
 
     private Label _title;
     private Label _body;
+    private Button _bioToggle;
+    private Label _bioBody;
+    private bool _bioExpanded; // 年龄履历默认折叠
     private float _refresh;
 
     private int _citizenId = -1;
@@ -48,13 +51,29 @@ public partial class InspectPanel : PanelContainer
         _body = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
         _body.AddThemeFontSizeOverride("font_size", 13);
         box.AddChild(_body);
+
+        // 年龄履历折叠区（仅居民页可见，默认收起）
+        _bioToggle = new Button { Flat = true, Alignment = HorizontalAlignment.Left };
+        _bioToggle.AddThemeFontSizeOverride("font_size", 13);
+        _bioToggle.Pressed += () =>
+        {
+            _bioExpanded = !_bioExpanded;
+            Refresh();
+        };
+        box.AddChild(_bioToggle);
+
+        _bioBody = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, Visible = false };
+        _bioBody.AddThemeFontSizeOverride("font_size", 12);
+        box.AddChild(_bioBody);
     }
 
     public void ShowCitizen(Citizen c)
     {
         _citizenId = c.Id;
         _buildingId = -1;
+        _bioExpanded = false; // 换人重置为折叠
         Visible = true;
+        EventBus.RaiseCitizenSelected(c.Id);
         Refresh();
     }
 
@@ -63,6 +82,7 @@ public partial class InspectPanel : PanelContainer
         _buildingId = b.Id;
         _citizenId = -1;
         Visible = true;
+        EventBus.RaiseCitizenSelected(-1);
         Refresh();
     }
 
@@ -71,6 +91,7 @@ public partial class InspectPanel : PanelContainer
         Visible = false;
         _citizenId = -1;
         _buildingId = -1;
+        EventBus.RaiseCitizenSelected(-1);
     }
 
     public override void _Process(double delta)
@@ -107,7 +128,7 @@ public partial class InspectPanel : PanelContainer
 
     private void RenderCitizen(GameState gs, Citizen c)
     {
-        _title.Text = $"{c.Surname}{c.Name}";
+        _title.Text = c.Name; // Name 已含姓，不叠加 Surname
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"{(c.Gender == Gender.Female ? "女" : "男")}  {c.AgeYears}岁  {c.GetIdentity(gs)}");
@@ -139,12 +160,37 @@ public partial class InspectPanel : PanelContainer
         sb.AppendLine(c.FuelShortDays > 0 ? $"已缺柴 {c.FuelShortDays} 天" : "柴薪无虞");
 
         _body.Text = sb.ToString().TrimEnd();
+        RenderBiography(c);
+    }
+
+    /// <summary>年龄履历折叠段：收起时只显示条数，展开后倒序（最新在前）列出重大事件。</summary>
+    private void RenderBiography(Citizen c)
+    {
+        _bioToggle.Visible = true;
+        _bioToggle.Text = _bioExpanded ? "▾ 年龄履历" : $"▸ 年龄履历（{c.LifeEvents.Count} 条）";
+        _bioBody.Visible = _bioExpanded;
+        if (!_bioExpanded)
+            return;
+
+        if (c.LifeEvents.Count == 0)
+        {
+            _bioBody.Text = "（尚无大事记）";
+            return;
+        }
+
+        var sb = new System.Text.StringBuilder();
+        for (int i = c.LifeEvents.Count - 1; i >= 0; i--)
+        {
+            var e = c.LifeEvents[i];
+            sb.AppendLine($"第{e.Year}年{e.Month}月　{e.Text}");
+        }
+        _bioBody.Text = sb.ToString().TrimEnd();
     }
 
     private static string FamilyLine(GameState gs, Citizen c)
     {
         string spouse = c.SpouseId >= 0 && gs.Citizens.TryGetValue(c.SpouseId, out var s)
-            ? $"配偶 {s.Surname}{s.Name}" : (c.IsChild ? "" : "未婚");
+            ? $"配偶 {s.Name}" : (c.IsChild ? "" : "未婚");
         string kids = c.ChildrenIds.Count > 0 ? $"子女 {c.ChildrenIds.Count} 人" : "";
         string line = string.Join("，", new[] { spouse, kids }.Where(x => x != ""));
         return line == "" ? "孑然一身" : line;
@@ -192,6 +238,10 @@ public partial class InspectPanel : PanelContainer
     {
         _title.Text = b.Def.Name;
 
+        // 建筑页隐藏居民专属的履历折叠区
+        _bioToggle.Visible = false;
+        _bioBody.Visible = false;
+
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"等级 {b.Level}/{b.Def.MaxLevel}  完好 {b.Condition:F0}%");
         sb.AppendLine($"建于：{(b.BuiltYear > 0 ? $"第{b.BuiltYear}年 {b.BuiltMonth}月" : "不详")}");
@@ -206,9 +256,9 @@ public partial class InspectPanel : PanelContainer
         foreach (var c in gs.Citizens.Values)
         {
             if (c.HomeId == b.Id)
-                residents.Add($"{c.Surname}{c.Name}");
+                residents.Add(c.Name);
             if (c.WorkplaceId == b.Id && c.JobKind == JobKind.Employed)
-                workers.Add($"{c.Surname}{c.Name}");
+                workers.Add(c.Name);
         }
         if (b.HousingCapacity > 0)
         {

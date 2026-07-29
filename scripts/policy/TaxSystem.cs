@@ -11,10 +11,10 @@ public class TaxSystem
     /// <summary>每项重税每月造成的民怨（成人兴趣值扣减）。</summary>
     private const float HeavyTaxFunPenalty = 2f;
 
-    /// <summary>每日征税：月基数 ÷ 30，逐税种记入账本；税所在岗吏员提供全局加成。</summary>
+    /// <summary>每日征税：月基数 ÷ 30，逐税种记入账本；税所在岗吏员与钱法科技提供全局加成。</summary>
     public void TickDay(GameState gs)
     {
-        double boost = TaxBoost(gs);
+        double boost = TaxBoost(gs) * gs.TechFactor("tax");
         foreach (var def in TaxDefs.All)
         {
             int level = gs.Taxes.LevelOf(def.Id);

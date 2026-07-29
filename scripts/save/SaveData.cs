@@ -45,12 +45,24 @@ public class WorldSave
     /// <summary>v3 起：官库账本（本月/上月分类流水）。</summary>
     public Dictionary<string, double> LedgerCur = new();
     public Dictionary<string, double> LedgerPrev = new();
+
+    /// <summary>v10：城市里程碑等级。</summary>
+    public int MilestoneLevel;
+
+    /// <summary>v10：已研成科技 id 列表与在研项目（id + 已投入天数）。</summary>
+    public List<string> Techs = new();
+    public string ResearchTechId = "";
+    public double ResearchDays;
 }
 
 /// <summary>地图数据：各类地表格用一维索引（y*Size+x）紧凑存储。</summary>
 public class MapSave
 {
     public List<int> RoadCells = new();
+
+    /// <summary>v9：与 RoadCells 一一对应的道路种类（(int)RoadKind）。</summary>
+    public List<int> RoadKinds = new();
+
     public List<int> ZoneCells = new();
     public List<int> ZoneTypes = new();
     public List<int> WaterCells = new();
@@ -76,4 +88,8 @@ public class BuildingSave
 
     /// <summary>v6：废弃标志（无人居住的 grown 建筑）。</summary>
     public bool Abandoned;
+
+    /// <summary>v9：实例占地（住宅扩建；0 表示沿用定义占地）。</summary>
+    public int SizeX;
+    public int SizeY;
 }

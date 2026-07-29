@@ -20,8 +20,14 @@ public partial class CitizenAgent : Node3D
     private const float BoredThreshold = 25f;
     private const float StayUntilDone = 9999f; // 驻留到条件触发（如下班）而非计时
     private const float LaneJitterRange = 1.2f; // 车道偏移幅度（路格宽 4m，偏移后仍在路面内）
+    private const float ChopDamage = 25f; // 每斧砍伐伤害（幼树一斧倒，老树需多斧）
+    private const double WoodPerHp = Goods.LoadUnits / (double)ChopDamage; // 血量→柴薪折算：一斧 25 血恰好一担
 
     public Citizen C { get; }
+
+    /// <summary>剩余路径只读视图（选中居民目标路线绘制用）：null 即当前无路线。</summary>
+    public IReadOnlyList<Vector3> PathPoints => _path;
+    public int PathIndex => _pathIndex;
 
     private readonly GameClock _clock;
     private readonly AgentManager _manager;
@@ -43,6 +49,11 @@ public partial class CitizenAgent : Node3D
     private Vector2I? _activityCell; // 当前活动目标格（伐木/采摘/拾堆结算用）
     private int _activityAnimalId = -1; // 打猎目标动物 Id
     private int _haulBuildingId = -1; // 挑担目的地建筑（自家或田仓）
+    private int _supplyBuildingId = -1; // 为该工坊/商铺采集或采买原料，取到后送入其库
+    private string _buyGoodsId = ""; // 前往来源建筑要买的原料
+    private int _buySourceId = -1; // 买原料的来源建筑 Id
+    private string _consignGoodsId = ""; // 工坊成品外销寄卖中的货品（送达时由铺面付货款）
+    private Vector2I? _chopAgain; // 上一斧未砍倒的树：下轮决策继续砍同一棵
     private bool _fieldHarvest; // 背上的货是自家田里拾的收成（优先挑入田仓而非回家）
     private Vector3 _laneJitter; // 个人固定车道偏移，避免全员踩路心叠成一条线
     private int _lookAgeYears = -1;
@@ -139,6 +150,18 @@ public partial class CitizenAgent : Node3D
         if (C.AgeYears != _lookAgeYears)
             ApplyLook();
 
+        // 为自家产业采得的原料（背不为空）：优先挑回该工坊/商铺入库，而非回家
+        if (!C.Pack.IsEmpty && _supplyBuildingId >= 0)
+        {
+            if (gs.Buildings.TryGetValue(_supplyBuildingId, out var sup))
+            {
+                _haulBuildingId = sup.Id;
+                StartActivity(ActivityType.Hauling, BuildingAnchor(sup) ?? sup.Origin, 2f);
+                return;
+            }
+            _supplyBuildingId = -1;
+        }
+
         // 背包有货：田里拾的收成先挑入田仓；否则家里放得下先搬回家，再不行挑去专营铺子卖掉
         if (!C.Pack.IsEmpty)
         {
@@ -169,13 +192,25 @@ public partial class CitizenAgent : Node3D
             return;
         }
 
+        // 上一斧没砍倒：原地继续砍同一棵树（直到砍倒或树已不在）
+        if (_chopAgain != null)
+        {
+            var stump = _chopAgain.Value;
+            _chopAgain = null;
+            if (gs.Map.CellAt(stump).HasTree)
+            {
+                StartActivity(ActivityType.Logging, stump, 4f);
+                return;
+            }
+        }
+
         if (C.Fatigue >= TiredThreshold)
         {
-            // 累了：兴趣太低先闲逛散心，否则回家歇息
+            // 累了：兴趣太低先闲逛散心，否则回家歇息（进屋歇着，而非站在门口路边）
             if (C.Fun < BoredThreshold)
                 StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
             else
-                StartActivity(ActivityType.RestHome, HomeAnchor(), 5f);
+                StartRestHome(gs, 5f);
             return;
         }
 
@@ -194,6 +229,9 @@ public partial class CitizenAgent : Node3D
                 StartActivity(ActivityType.PickingUp, new Vector2I(fieldPile.X, fieldPile.Y), 2f);
                 return;
             }
+            // 工坊/商铺：先处理补料/成品外销物流，无事可做才站堂加工
+            if (Goods.IsCraftable(wp.Specialty) && StartCraftLogistics(gs, wp))
+                return;
             // 受雇者/店主：进工作地驻留，疲劳攒满才下班
             StartWorkAt(wp);
             return;
@@ -218,7 +256,7 @@ public partial class CitizenAgent : Node3D
             if (_rng.NextDouble() < 0.5)
                 StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
             else
-                StartActivity(ActivityType.RestHome, HomeAnchor(), 4f);
+                StartRestHome(gs, 4f);
             return;
         }
 
@@ -241,18 +279,36 @@ public partial class CitizenAgent : Node3D
         BuildPathTo(MapGrid.CellToWorld(targetCell.Value));
     }
 
-    /// <summary>受雇者上班/修缮匠巡修：站进目标建筑门口（锚点与建筑中心之间），驻留至疲劳攻顶。</summary>
+    /// <summary>回家歇息：目标是屋内站位（而非邻路锚点），无家则原地待着。</summary>
+    private void StartRestHome(GameState gs, float dwellSeconds)
+    {
+        C.Activity = ActivityType.RestHome;
+        _dwell = dwellSeconds;
+        _activityCell = null;
+        _activityAnimalId = -1;
+
+        if (gs.Buildings.TryGetValue(C.HomeId, out var home))
+            BuildPathTo(IndoorStand(home));
+        else
+            _path = null; // 无家可归：原地歇脚
+    }
+
+    /// <summary>屋内站位：从门口锚点向建筑中心推进 80%，保证落在建筑占地内（半透明建筑可透视屋内人）。</summary>
+    private static Vector3 IndoorStand(BuildingInstance b)
+    {
+        var anchor = GameState.I.Map.FindAdjacentRoad(b.Origin, b.FootX, b.FootY);
+        var anchorWorld = anchor != null ? MapGrid.CellToWorld(anchor.Value) : BuildingCenter(b);
+        return anchorWorld.Lerp(BuildingCenter(b), 0.8f);
+    }
+
+    /// <summary>受雇者上班/修缮匠巡修：站进目标建筑内部，驻留至疲劳攻顶。</summary>
     private void StartWorkAt(BuildingInstance wp, ActivityType activity = ActivityType.Working)
     {
         C.Activity = activity;
         _dwell = StayUntilDone;
         _activityCell = null;
         _activityAnimalId = -1;
-
-        var anchor = GameState.I.Map.FindAdjacentRoad(wp.Origin, wp.Def.SizeX, wp.Def.SizeY);
-        var anchorWorld = anchor != null ? MapGrid.CellToWorld(anchor.Value) : BuildingCenter(wp);
-        var stand = anchorWorld.Lerp(BuildingCenter(wp), 0.45f);
-        BuildPathTo(stand);
+        BuildPathTo(IndoorStand(wp));
     }
 
     /// <summary>山民谋生三选一：伐木 / 林中采摘 / 打猎。</summary>
@@ -265,6 +321,129 @@ public partial class CitizenAgent : Node3D
             StartGathering();
         else
             StartHunting();
+    }
+
+    // ---- 工坊/商铺物流：补料与成品外销 ----
+
+    /// <summary>采买判定半径：此范围内有备货的市集/铺面就去买，否则自主采集。</summary>
+    private const int BuySearchRadius = 40;
+
+    /// <summary>工坊/商铺雇工的物流决策：
+    /// 1) 工坊成品攒够一担 → 挑去商铺寄卖（商铺自产自销不外运）；
+    /// 2) 任一配方原料不足一担 → 外出取料（市集近且有货则买，否则上山自采）；
+    /// 都不需要则返回 false，站堂加工。</summary>
+    private bool StartCraftLogistics(GameState gs, BuildingInstance wp)
+    {
+        string spec = wp.Specialty;
+
+        // 成品外销：仅工坊需要（商铺兼具交易功能，成品就地上柜）
+        if (wp.Def.Id == "workshop" && wp.Inv.AmountOf(spec) >= Goods.LoadUnits && C.Pack.Free > 0)
+        {
+            var shop = FindCraftShop(gs, spec);
+            if (shop != null)
+            {
+                double got = wp.TakeGoods(spec, C.Pack.Free);
+                if (got > 0)
+                {
+                    C.Pack.Store(spec, got);
+                    _supplyBuildingId = -1; // 外销而非补料
+                    _consignGoodsId = spec; // 送达时按基价向铺面收货款
+                    _haulBuildingId = shop.Id;
+                    StartActivity(ActivityType.Hauling, BuildingAnchor(shop) ?? shop.Origin, 2f);
+                    return true;
+                }
+            }
+        }
+
+        // 补料：任一原料低于一担就去取
+        foreach (var raw in Goods.InputsOf(spec))
+        {
+            if (wp.Inv.AmountOf(raw) >= Goods.LoadUnits)
+                continue;
+            if (DispatchAcquire(gs, wp, raw))
+                return true;
+        }
+        return false;
+    }
+
+    /// <summary>取料：附近（BuySearchRadius 内）有备货充足的市集/铺面则前往采买，
+    /// 否则可野外采集的原料（柴/果/野味）上山自采；粮/矿/盐无货源时只能等。</summary>
+    private bool DispatchAcquire(GameState gs, BuildingInstance wp, string raw)
+    {
+        var source = FindStockedSource(gs, raw, wp);
+        if (source != null)
+        {
+            _supplyBuildingId = wp.Id;
+            _buyGoodsId = raw;
+            _buySourceId = source.Id;
+            StartActivity(ActivityType.Shopping, BuildingAnchor(source) ?? source.Origin, 2f);
+            return true;
+        }
+
+        // 自主收集：只有山野里有的原料才能采
+        if (raw == Goods.Wood)
+        {
+            _supplyBuildingId = wp.Id;
+            StartLogging();
+            return true;
+        }
+        if (raw == Goods.Fruit)
+        {
+            _supplyBuildingId = wp.Id;
+            StartGathering();
+            return true;
+        }
+        if (raw == Goods.Game)
+        {
+            _supplyBuildingId = wp.Id;
+            StartHunting();
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>附近有该原料备货（≥一担）的合法货源：市集/商铺/官营产业（农田矿盐等），市集加权优先；
+    /// 住宅家底与同行工坊的备料不是商品，不得买走。</summary>
+    private static BuildingInstance FindStockedSource(GameState gs, string raw, BuildingInstance wp)
+    {
+        BuildingInstance best = null;
+        float bestDist = float.MaxValue;
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Id == wp.Id || b.Inv.AmountOf(raw) < Goods.LoadUnits)
+                continue;
+            // 只从在卖的地方买：市集、商铺、官营产业；住宅、其他工坊的存货排除
+            bool sells = b.Def.Id == "market" || b.Def.Id == "shop" || b.Def.Category == "official";
+            if (!sells)
+                continue;
+            float dist = (b.Origin - wp.Origin).Length();
+            if (dist > BuySearchRadius)
+                continue;
+            // 市集加权优先（同距离下先选市集）
+            if (b.Def.Id == "market")
+                dist *= 0.5f;
+            if (dist < bestDist)
+            {
+                bestDist = dist;
+                best = b;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>找成品外销目的地：专营同货的商铺优先，其次市集（通吃各货），都要有库容；
+    /// 不往专营别的货的商铺送（居民只从专营铺/市集买，错配入库会成永久死库存）。</summary>
+    private static BuildingInstance FindCraftShop(GameState gs, string goodsId)
+    {
+        BuildingInstance best = null;
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Def.Id != "shop" || b.Specialty != goodsId || b.StorageFree < 1)
+                continue;
+            if (best == null || b.StorageFree > best.StorageFree)
+                best = b;
+        }
+        return best ?? FindMarket(gs, needFree: true);
     }
 
     /// <summary>伐木：找最近的树走过去砍；无树可砍则闲逛等待。</summary>
@@ -337,9 +516,17 @@ public partial class CitizenAgent : Node3D
         switch (C.Activity)
         {
             case ActivityType.Logging:
-                // 砍倒一棵树得一担柴，直接入背包
-                if (_activityCell != null && gs.ChopTree(_activityCell.Value))
-                    C.Pack.Store(Goods.Wood, Goods.LoadUnits);
+                // 一斧扣树血，血量对应木材产量：砍掉多少血就得多少柴（老树血厚出柴多，需多斧多趟）；
+                // 每斧伤害受背包余量限制免得浪费，血尽树倒消失，未倒且背得下则下轮继续砍同一棵
+                if (_activityCell != null && C.Pack.Free > 0)
+                {
+                    float want = (float)Math.Min(ChopDamage, C.Pack.Free / WoodPerHp);
+                    float dealt = gs.DamageTree(_activityCell.Value, want, out bool felled);
+                    if (dealt > 0f)
+                        C.Pack.Store(Goods.Wood, dealt * WoodPerHp);
+                    if (!felled && C.Pack.Free > 0 && gs.Map.CellAt(_activityCell.Value).HasTree)
+                        _chopAgain = _activityCell;
+                }
                 break;
             case ActivityType.Gathering:
                 // 从树上摘果：背包能装多少摘多少，树上存量相应减少
@@ -352,11 +539,13 @@ public partial class CitizenAgent : Node3D
                 }
                 break;
             case ActivityType.Hunting:
-                // 猎物倒地化为野味堆，猎人当场拾入背包（装不下的留在原地待拾）
+                // 猎物倒地化为野味堆，猎人当场拾入背包；动物已游远（超 2 格）则视为脱逃，不得隔空击杀
                 if (_activityAnimalId >= 0 && gs.Animals.TryGetValue(_activityAnimalId, out var prey))
                 {
                     var kill = new Vector2I(prey.X, prey.Y);
-                    if (gs.HarvestAnimal(prey.Id))
+                    var self = MapGrid.WorldToCell(Position);
+                    bool inReach = Math.Max(Math.Abs(kill.X - self.X), Math.Abs(kill.Y - self.Y)) <= 2;
+                    if (inReach && gs.HarvestAnimal(prey.Id))
                         gs.PickupPile(kill, C.Pack);
                 }
                 break;
@@ -368,26 +557,65 @@ public partial class CitizenAgent : Node3D
                     _fieldHarvest = !C.Pack.IsEmpty && IsOnWorkplaceField(gs, _activityCell.Value);
                 }
                 break;
+            case ActivityType.Shopping:
+                // 工坊/商铺采买原料：按基价买一担背走（雇工垫付、量力而行），货款付给货源方（雇工分账/官库入账）；普通采买无需结算
+                if (_supplyBuildingId >= 0 && _buyGoodsId != ""
+                    && gs.Buildings.TryGetValue(_buySourceId, out var src))
+                {
+                    double price = Goods.PriceOf(_buyGoodsId);
+                    double afford = price > 0 ? Math.Max(0, C.Money) / price : C.Pack.Free;
+                    double got = src.TakeGoods(_buyGoodsId, Math.Min(C.Pack.Free, afford));
+                    if (got > 0)
+                    {
+                        C.Pack.Store(_buyGoodsId, got);
+                        double pay = price * got;
+                        C.Money -= pay;
+                        gs.PayToBuilding(src, pay); // 钱货两让：卖方真收到钱
+                    }
+                }
+                _buyGoodsId = "";
+                _buySourceId = -1;
+                break;
             case ActivityType.Trading:
                 if (!C.Pack.IsEmpty)
                     SellPack(gs);
                 break;
             case ActivityType.Hauling:
-                // 挑到目的地入库（装不下的留在背包，下次决策转去市集）
+                // 挑到目的地入库；寄卖单据入库量由铺面付货款（雇工凑钱/官库拨付）
                 if (gs.Buildings.TryGetValue(_haulBuildingId, out var dest))
                 {
+                    double stored = 0;
                     foreach (var s in C.Pack.Stacks.ToArray())
-                        C.Pack.Take(s.GoodsId, dest.StoreGoods(s.GoodsId, s.Amount));
+                    {
+                        double put = dest.StoreGoods(s.GoodsId, s.Amount);
+                        if (put > 0 && s.GoodsId == _consignGoodsId)
+                            gs.PayFromBuilding(dest, C, Goods.PriceOf(s.GoodsId) * put); // 成品卖给商铺：铺面付款
+                        C.Pack.Take(s.GoodsId, put);
+                        stored += put;
+                    }
                     if (C.Pack.IsEmpty)
                         _fieldHarvest = false; // 收成已入仓，回到日常循环
+                    if (stored <= 0 && _supplyBuildingId >= 0)
+                        _supplyBuildingId = -1; // 本坊满仓一份也入不了：放弃补料，免得原地挑担死循环
                 }
+                if (C.Pack.IsEmpty)
+                    _supplyBuildingId = -1; // 补料已送达
+                _consignGoodsId = "";
                 _haulBuildingId = -1;
                 break;
             case ActivityType.Working:
-                // 下工即结：当班工钱（月俸/30）入账；农夫田仓有存粮就挑一担带走（回家或上市）
+                // 下工即结：官营岗位当班工钱（月俸/30）由官库实付记账；
+                // 工商自营岗位不发固定工钱（收入来自售货分账与寄卖货款，钱不凭空生）；
+                // 农夫田仓有存粮就挑一担带走（回家或上市，视作官仓实物俸的一部分）
                 if (gs.Buildings.TryGetValue(C.WorkplaceId, out var work))
                 {
-                    C.Money += work.Def.Salary / GameClock.DaysPerMonth;
+                    if (work.Def.Category == "official")
+                    {
+                        double pay = work.Def.Salary / GameClock.DaysPerMonth;
+                        C.Money += pay;
+                        gs.Money -= pay;
+                        gs.Ledger.Add("雇工俸禄", -pay);
+                    }
                     if (work.Def.HarvestMonths > 0 && C.Pack.IsEmpty)
                     {
                         double got = work.TakeGoods(Goods.Grain, C.Pack.Free);
@@ -416,29 +644,44 @@ public partial class CitizenAgent : Node3D
     {
         if (C.JobKind != JobKind.Employed || !gs.Buildings.TryGetValue(C.WorkplaceId, out var wp))
             return false;
-        return c.X >= wp.Origin.X && c.X < wp.Origin.X + wp.Def.SizeX
-            && c.Y >= wp.Origin.Y && c.Y < wp.Origin.Y + wp.Def.SizeY;
+        return c.X >= wp.Origin.X && c.X < wp.Origin.X + wp.FootX
+            && c.Y >= wp.Origin.Y && c.Y < wp.Origin.Y + wp.FootY;
     }
 
     /// <summary>找工作建筑占地格上的收成堆（农夫拾运用）。</summary>
     private static ItemPileObj FindFieldPile(GameState gs, BuildingInstance wp)
     {
-        for (int x = wp.Origin.X; x < wp.Origin.X + wp.Def.SizeX; x++)
-            for (int y = wp.Origin.Y; y < wp.Origin.Y + wp.Def.SizeY; y++)
+        for (int x = wp.Origin.X; x < wp.Origin.X + wp.FootX; x++)
+            for (int y = wp.Origin.Y; y < wp.Origin.Y + wp.FootY; y++)
                 if (gs.Piles.TryGetValue(GameState.CellIndex(new Vector2I(x, y)), out var pile))
                     return pile;
         return null;
     }
 
-    /// <summary>把背包里的货逐堆卖掉：优先专营铺、其次市集（通吃各货）收多少入库多少，剩余散卖给行商，一律按基价结钱。</summary>
+    /// <summary>把背包里的货逐堆卖掉：优先专营铺、其次市集；只按铺面实际收下的份额由买方付款（钱不凭空生），
+    /// 卖不掉的就地卸成物资堆（堆满则烂掉），免得背着死循环。</summary>
     private void SellPack(GameState gs)
     {
         foreach (var s in C.Pack.Stacks.ToArray())
         {
             var shop = FindTradeShop(gs, s.GoodsId, needFree: true) ?? FindMarket(gs, needFree: true);
-            shop?.StoreGoods(s.GoodsId, s.Amount); // 铺面/市集能入库的部分上架（供他人购买），其余离场
-            C.Money += Goods.PriceOf(s.GoodsId) * s.Amount;
-            C.Pack.Take(s.GoodsId, s.Amount);
+            double amount = s.Amount;
+            if (shop != null)
+            {
+                double accepted = shop.StoreGoods(s.GoodsId, amount);
+                if (accepted > 0)
+                {
+                    gs.PayFromBuilding(shop, C, Goods.PriceOf(s.GoodsId) * accepted); // 铺面能付多少付多少
+                    C.Pack.Take(s.GoodsId, accepted);
+                    amount -= accepted;
+                }
+            }
+            if (amount > 0)
+            {
+                // 无铺可收：就地卸货成堆（谁都能拾），背包腾空回到日常循环
+                C.Pack.Take(s.GoodsId, amount);
+                gs.DropOnGround(MapGrid.WorldToCell(Position), s.GoodsId, amount);
+            }
         }
     }
 
@@ -594,10 +837,24 @@ public partial class CitizenAgent : Node3D
 
     private void MoveAlongPath(float dt)
     {
-        // 道路优先：脚下无路时大幅减速（脱路惩罚）
+        // 道路优先：脚下无路时大幅减速（脱路惩罚）；路面按种类快慢（主路快/辅路常速/小路略慢）
         var cell = MapGrid.WorldToCell(Position);
-        bool onRoad = MapGrid.InBounds(cell) && GameState.I.Map.CellAt(cell).HasRoad;
-        float step = BaseSpeed * (onRoad ? 1f : OffRoadFactor) * dt;
+        bool inBounds = MapGrid.InBounds(cell);
+        float speedFactor;
+        if (inBounds && GameState.I.Map.CellAt(cell).HasRoad)
+        {
+            speedFactor = GameState.I.Map.CellAt(cell).RoadKind switch
+            {
+                RoadKind.Main => 1.2f,
+                RoadKind.Small => 0.9f,
+                _ => 1f, // 辅路与桥面（RoadKind.None 但 HasRoad）常速
+            };
+        }
+        else
+        {
+            speedFactor = OffRoadFactor;
+        }
+        float step = BaseSpeed * speedFactor * dt;
 
         while (step > 0f && _path != null)
         {
@@ -687,12 +944,12 @@ public partial class CitizenAgent : Node3D
     }
 
     private static Vector2I? BuildingAnchor(BuildingInstance b) =>
-        GameState.I.Map.FindAdjacentRoad(b.Origin, b.Def.SizeX, b.Def.SizeY);
+        GameState.I.Map.FindAdjacentRoad(b.Origin, b.FootX, b.FootY);
 
     private static Vector3 BuildingCenter(BuildingInstance b)
     {
         var a = MapGrid.CellToWorld(b.Origin);
-        var c = MapGrid.CellToWorld(new Vector2I(b.Origin.X + b.Def.SizeX - 1, b.Origin.Y + b.Def.SizeY - 1));
+        var c = MapGrid.CellToWorld(new Vector2I(b.Origin.X + b.FootX - 1, b.Origin.Y + b.FootY - 1));
         return (a + c) * 0.5f;
     }
 

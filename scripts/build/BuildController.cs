@@ -68,7 +68,14 @@ public partial class BuildController : Node
 
     public void SetModeNone() => SwitchMode(BuildMode.None);
 
-    public void SetRoadMode() => SwitchMode(BuildMode.Road);
+    /// <summary>当前道路铺设种类（由建造栏选择）。</summary>
+    private RoadKind _roadKind = RoadKind.Side;
+
+    public void SetRoadMode(RoadKind kind = RoadKind.Side)
+    {
+        _roadKind = kind;
+        SwitchMode(BuildMode.Road);
+    }
 
     public void SetBridgeMode() => SwitchMode(BuildMode.Bridge);
 
@@ -203,11 +210,11 @@ public partial class BuildController : Node
 
     // ---- 放置操作 ----
 
-    private static void TryPlaceRoad(Vector2I c)
+    private void TryPlaceRoad(Vector2I c)
     {
         var gs = GameState.I;
-        if (PlacementValidator.CanPlaceRoad(gs, c))
-            gs.PlaceRoad(c);
+        if (PlacementValidator.CanPlaceRoad(gs, c, _roadKind))
+            gs.PlaceRoad(c, _roadKind);
     }
 
     private static void TryPlaceBridge(Vector2I c)
@@ -237,7 +244,7 @@ public partial class BuildController : Node
                 var c = new Vector2I(x, y);
                 if (!PlacementValidator.CanZone(gs, c))
                     continue;
-                gs.Map.CellAt(c).Zone = _zone;
+                gs.SetZone(c, _zone); // 经索引写入，坊区候选集同步维护
                 changed = true;
             }
         }
@@ -263,7 +270,7 @@ public partial class BuildController : Node
         {
             case BuildMode.Road:
                 SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * 0.15f, new Vector3(cs, 0.3f, cs),
-                    PlacementValidator.CanPlaceRoad(gs, _hover) ? ValidColor : InvalidColor);
+                    PlacementValidator.CanPlaceRoad(gs, _hover, _roadKind) ? ValidColor : InvalidColor);
                 break;
 
             case BuildMode.Bridge:

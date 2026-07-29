@@ -19,7 +19,8 @@ public abstract class Obj
     public Dictionary<string, string> Extra = new();
 }
 
-/// <summary>植物实体：固定生长，成熟后向周围散播幼体；成树逐日挂果，过熟掉落成地面果堆（PlantGrowthSystem 驱动）。</summary>
+/// <summary>植物实体：固定生长，成熟后向周围散播幼体；成树逐日挂果，过熟掉落成地面果堆（PlantGrowthSystem 驱动）。
+/// 砍伐为血量制：每斧扣血而非一击砍倒，无人砍伐一段时间后逐日回血。</summary>
 public class PlantObj : Obj
 {
     /// <summary>长成大树所需月数。</summary>
@@ -28,16 +29,30 @@ public class PlantObj : Obj
     /// <summary>挂果上限（份）：树上未掉落的果实也是一类仓储（典型案例四）。</summary>
     public const double FruitCap = 3;
 
-    /// <summary>生长月龄（每月 +1，达到 MatureMonths 即成熟）。</summary>
+    /// <summary>新芽基础血量与随龄增量上限（渐进上界 BaseHp+HpGainCap）。</summary>
+    public const float BaseHp = 20f;
+    public const float HpGainCap = 80f;
+
+    /// <summary>生长月龄（每月 +1，达到 MatureMonths 即成熟；成熟后继续累积作树龄，驱动血量缓涨）。</summary>
     public int GrowthMonths;
 
     /// <summary>树上挂果存量（份）：成树逐日增长，采摘消耗，挂满过熟概率掉落地面。</summary>
     public double FruitStock;
 
+    /// <summary>当前砍伐血量（新植时由 AddPlant 补满至 MaxHp）。</summary>
+    public float Hp = BaseHp;
+
+    /// <summary>距上次被砍的天数：达到恢复延迟后逐日回血（被砍即清零）。</summary>
+    public int IdleDays;
+
     public bool Mature => GrowthMonths >= MatureMonths;
 
     /// <summary>生长进度 0-1（渲染尺寸用）。</summary>
     public float GrowthRatio => GrowthMonths >= MatureMonths ? 1f : (float)GrowthMonths / MatureMonths;
+
+    /// <summary>满血上限：随树龄增长但增速递减（米氏式渐进，永不超过 BaseHp+HpGainCap）：
+    /// 0月=20，1年≈47，2年=60，5年≈77，20年≈93。</summary>
+    public float MaxHp => BaseHp + HpGainCap * GrowthMonths / (GrowthMonths + 24f);
 }
 
 /// <summary>动物实体：在树林附近随机活动与繁育（WildlifeSystem 驱动），可被猎人捕获。</summary>

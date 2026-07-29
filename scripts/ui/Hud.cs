@@ -17,6 +17,7 @@ public partial class Hud : CanvasLayer
 
     private InspectPanel _inspect;
     private FinancePanel _finance;
+    private TechPanel _tech;
 
     public Hud(BuildController build, GameClock clock, Action onSave, Action onLoad)
     {
@@ -30,12 +31,18 @@ public partial class Hud : CanvasLayer
     {
         var policy = new PolicyPanel();
         _finance = new FinancePanel();
+        _tech = new TechPanel();
         _inspect = new InspectPanel();
-        AddChild(new TopBar(_clock, _onSave, _onLoad, policy.Toggle, _finance.Toggle));
+        AddChild(new TopBar(_clock, _onSave, _onLoad, policy.Toggle, _finance.Toggle, _tech.Toggle));
         AddChild(new BuildMenu(_build));
         AddChild(policy);
         AddChild(_finance);
+        AddChild(_tech);
         AddChild(_inspect);
+
+        // 里程碑晋级与科技研成：右下角弹报（复用格子信息条）
+        EventBus.MilestoneReached += OnMilestone;
+        EventBus.TechUnlocked += OnTechUnlocked;
 
         _cellInfo = new Label
         {
@@ -58,6 +65,25 @@ public partial class Hud : CanvasLayer
         _fps.SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopRight);
         _fps.Position += new Vector2(-12, 44);
         AddChild(_fps);
+    }
+
+    public override void _ExitTree()
+    {
+        EventBus.MilestoneReached -= OnMilestone;
+        EventBus.TechUnlocked -= OnTechUnlocked;
+    }
+
+    private void OnMilestone(int level)
+    {
+        var def = Milestones.Of(level);
+        ShowCellInfo($"城市晋级为【{def.Name}】！官库拨款 {def.Reward} 贯，新建筑已解锁");
+    }
+
+    private void OnTechUnlocked(string techId)
+    {
+        var def = TechDefs.Find(techId);
+        if (def != null)
+            ShowCellInfo($"【{def.Name}】研成：{def.Description}");
     }
 
     public void ShowCellInfo(string text)

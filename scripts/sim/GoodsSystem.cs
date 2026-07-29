@@ -43,6 +43,34 @@ public class GoodsSystem
                 c.FuelShortDays++;
                 c.Fun = Math.Max(0, c.Fun - 0.5f); // 缺柴：冷灶伤神
             }
+
+            ConsumeTierNeeds(gs, c, home, workersOf);
+        }
+    }
+
+    /// <summary>里程碑分级需求（只限成人）：县城要副食、州城要酒馔、京城要器用——
+    /// 候选货品任一满足即可，家中无存则上市购买（成品消费端由此打通），断供扣兴致。</summary>
+    private static void ConsumeTierNeeds(GameState gs, Citizen c, BuildingInstance home,
+        Dictionary<int, List<Citizen>> workersOf)
+    {
+        if (c.IsChild)
+            return;
+        foreach (var need in Milestones.TierNeeds)
+        {
+            if (gs.MilestoneLevel < need.MilestoneRequired)
+                break; // TierNeeds 按里程碑升序排列，后面的更不满足
+            double left = need.PerDay;
+            foreach (var id in need.GoodsIds)
+            {
+                if (home != null)
+                    left -= home.TakeGoods(id, left);
+                if (left > 0.0001)
+                    left -= BuyGoods(gs, c, id, left, workersOf);
+                if (left <= 0.0001)
+                    break;
+            }
+            if (left > 0.0001)
+                c.Fun = Math.Max(0, c.Fun - need.FunPenalty); // 断供：日子没滋味
         }
     }
 
@@ -61,7 +89,7 @@ public class GoodsSystem
             b.MonthsSinceHarvest = 0;
 
             int workers = workersOf.TryGetValue(b.Id, out var list) ? list.Count : 0;
-            double yield = workers * b.Def.YieldPerWorker;
+            double yield = workers * b.Def.YieldPerWorker * gs.TechFactor("harvest"); // 农学科技加成
             if (yield <= 0)
                 continue;
 
@@ -69,10 +97,10 @@ public class GoodsSystem
             string goodsId = string.IsNullOrEmpty(b.Def.ProduceGoods) ? Goods.Grain : b.Def.ProduceGoods;
 
             // 收成均分散落在占地格（典型案例三：散落地图的物资）
-            int cellCount = b.Def.SizeX * b.Def.SizeY;
+            int cellCount = b.FootX * b.FootY;
             double per = yield / cellCount;
-            for (int x = b.Origin.X; x < b.Origin.X + b.Def.SizeX; x++)
-                for (int y = b.Origin.Y; y < b.Origin.Y + b.Def.SizeY; y++)
+            for (int x = b.Origin.X; x < b.Origin.X + b.FootX; x++)
+                for (int y = b.Origin.Y; y < b.Origin.Y + b.FootY; y++)
                     gs.DropOnGround(new Godot.Vector2I(x, y), goodsId, per);
         }
     }

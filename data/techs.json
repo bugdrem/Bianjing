@@ -1,0 +1,30 @@
+[
+  { "id": "quyuanli",  "name": "曲辕犁",   "mode": "passive", "milestoneRequired": 1,
+    "description": "改良耕具，深耕省力，粮田收成增加一成半",
+    "effects": { "harvest": 0.15 } },
+
+  { "id": "niangjiu",  "name": "酿酒秘方", "mode": "active",  "milestoneRequired": 1,
+    "costMoney": 300, "researchDays": 30,
+    "description": "延请酒匠改良曲蘖，工坊加工产量增加一成",
+    "effects": { "craft": 0.1 } },
+
+  { "id": "shuili",    "name": "水利灌溉", "mode": "passive", "milestoneRequired": 2,
+    "prerequisites": [ "quyuanli" ],
+    "description": "修渠引水灌田，粮田收成再增两成",
+    "effects": { "harvest": 0.2 } },
+
+  { "id": "huozi",     "name": "活字印刷", "mode": "active",  "milestoneRequired": 2,
+    "costMoney": 400, "researchDays": 45,
+    "description": "刊印工艺图谱流布坊间，各坊加工产量增加两成",
+    "effects": { "craft": 0.2 } },
+
+  { "id": "guanye",    "name": "官冶铸术", "mode": "passive", "milestoneRequired": 3,
+    "description": "官营冶坊工法精进，铸币产出增加两成半",
+    "effects": { "mint": 0.25 } },
+
+  { "id": "jiaozi",    "name": "交子钱法", "mode": "active",  "milestoneRequired": 3,
+    "prerequisites": [ "huozi" ],
+    "costMoney": 600, "researchDays": 60,
+    "description": "发行纸币便利商贸，全城税入增加一成半",
+    "effects": { "tax": 0.15 } }
+]

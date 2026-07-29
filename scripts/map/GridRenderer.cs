@@ -3,8 +3,12 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>方块占位渲染层：道路/水面用 MultiMesh 方块，建筑为半透明方块+边框+斜屋顶（可透视屋内人数），
-/// 树木用锥体，坊区用半透明色块，另含建造网格线。</summary>
+/// <summary>
+/// 方块占位渲染层（分块增量重建，为大地图铺路）：
+/// 地表（水/桥/道路）与树木按 64×64 格分块，每块独立 MultiMesh——铺路/砍树只重建所在块；
+/// 建筑（半透明方块+边框+斜屋顶）与坊区色块数量有限，仍整层重建；
+/// 全图事件（读档/月度生长）才全量重建。另含建造网格线。
+/// </summary>
 public partial class GridRenderer : Node3D
 {
     private static readonly Color RoadColor = new(0.25f, 0.25f, 0.28f);
@@ -17,29 +21,55 @@ public partial class GridRenderer : Node3D
     /// <summary>建筑主体透明度（能看清屋内居民）。</summary>
     private const float BodyAlpha = 0.55f;
 
-    private MultiMeshInstance3D _boxes;
+    /// <summary>分块边长（格）：128 图 2×2 块，1024 图 16×16 块，单块重建量恒定。</summary>
+    private const int ChunkCells = 64;
+
+    /// <summary>单个地表分块：地形方块 + 树木两套 MultiMesh。</summary>
+    private class Chunk
+    {
+        public MultiMeshInstance3D Boxes;
+        public MultiMeshInstance3D Trees;
+        public bool Dirty = true;
+    }
+
+    private int _chunksPerSide;
+    private Chunk[] _chunks;
+
     private MultiMeshInstance3D _bldgBodies;
     private MultiMeshInstance3D _bldgRoofs;
     private MultiMeshInstance3D _bldgEdges;
-    private MultiMeshInstance3D _trees;
     private MultiMeshInstance3D _zones;
     private MeshInstance3D _gridLines;
-    private bool _dirty = true;
+
+    private bool _buildingsDirty = true;
+    private bool _zonesDirty = true;
+
+    // 共享网格资源：所有分块复用同一份 Mesh，只是各自实例化
+    private BoxMesh _boxMesh;
+    private CylinderMesh _treeMesh;
 
     public override void _Ready()
     {
-        var opaqueMesh = new BoxMesh { Size = Vector3.One };
-        opaqueMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
-        _boxes = new MultiMeshInstance3D
+        _boxMesh = new BoxMesh { Size = Vector3.One };
+        _boxMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+
+        _treeMesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 1.1f, Height = 3f };
+        _treeMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+
+        // 地表/树木分块阵列
+        _chunksPerSide = (MapGrid.Size + ChunkCells - 1) / ChunkCells;
+        _chunks = new Chunk[_chunksPerSide * _chunksPerSide];
+        for (int i = 0; i < _chunks.Length; i++)
         {
-            Multimesh = new MultiMesh
+            var chunk = new Chunk
             {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                UseColors = true,
-                Mesh = opaqueMesh,
-            },
-        };
-        AddChild(_boxes);
+                Boxes = MakeMulti(_boxMesh, useColors: true),
+                Trees = MakeMulti(_treeMesh, useColors: true),
+            };
+            AddChild(chunk.Boxes);
+            AddChild(chunk.Trees);
+            _chunks[i] = chunk;
+        }
 
         // 建筑主体：半透明方块，可透视屋内居民
         var bodyMesh = new BoxMesh { Size = Vector3.One };
@@ -48,58 +78,22 @@ public partial class GridRenderer : Node3D
             VertexColorUseAsAlbedo = true,
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
         };
-        _bldgBodies = new MultiMeshInstance3D
-        {
-            Multimesh = new MultiMesh
-            {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                UseColors = true,
-                Mesh = bodyMesh,
-            },
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        };
+        _bldgBodies = MakeMulti(bodyMesh, useColors: true);
+        _bldgBodies.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_bldgBodies);
 
         // 斜屋顶：不透明三棱柱，脊线沿建筑长边
         var roofMesh = new PrismMesh { Size = Vector3.One };
         roofMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
-        _bldgRoofs = new MultiMeshInstance3D
-        {
-            Multimesh = new MultiMesh
-            {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                UseColors = true,
-                Mesh = roofMesh,
-            },
-        };
+        _bldgRoofs = MakeMulti(roofMesh, useColors: true);
         AddChild(_bldgRoofs);
 
         // 建筑边框：单位立方体 12 条棱线，随主体同变换缩放
-        _bldgEdges = new MultiMeshInstance3D
-        {
-            Multimesh = new MultiMesh
-            {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                Mesh = BuildUnitCubeEdges(),
-            },
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        };
+        _bldgEdges = MakeMulti(BuildUnitCubeEdges(), useColors: false);
+        _bldgEdges.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_bldgEdges);
 
-        // 树木：绿色锥体占位
-        var treeMesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 1.1f, Height = 3f };
-        treeMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
-        _trees = new MultiMeshInstance3D
-        {
-            Multimesh = new MultiMesh
-            {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                UseColors = true,
-                Mesh = treeMesh,
-            },
-        };
-        AddChild(_trees);
-
+        // 坊区色块（半透明，无光照）
         var zoneMesh = new BoxMesh { Size = Vector3.One };
         zoneMesh.Material = new StandardMaterial3D
         {
@@ -107,59 +101,94 @@ public partial class GridRenderer : Node3D
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         };
-        _zones = new MultiMeshInstance3D
-        {
-            Multimesh = new MultiMesh
-            {
-                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
-                UseColors = true,
-                Mesh = zoneMesh,
-            },
-            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
-        };
+        _zones = MakeMulti(zoneMesh, useColors: true);
+        _zones.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_zones);
 
         BuildGridLines();
 
-        EventBus.MapChanged += MarkDirty;
-        EventBus.ZonesChanged += MarkDirty;
+        EventBus.MapChanged += MarkAllDirty;
+        EventBus.ZonesChanged += MarkZonesDirty;
+        EventBus.CellChanged += OnCellChanged;
     }
 
     public override void _ExitTree()
     {
-        EventBus.MapChanged -= MarkDirty;
-        EventBus.ZonesChanged -= MarkDirty;
+        EventBus.MapChanged -= MarkAllDirty;
+        EventBus.ZonesChanged -= MarkZonesDirty;
+        EventBus.CellChanged -= OnCellChanged;
     }
 
-    private void MarkDirty() => _dirty = true;
+    private static MultiMeshInstance3D MakeMulti(Mesh mesh, bool useColors) => new()
+    {
+        Multimesh = new MultiMesh
+        {
+            TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+            UseColors = useColors,
+            Mesh = mesh,
+        },
+    };
+
+    /// <summary>全图变更（读档/月度生长/建筑增减）：全部分块 + 建筑 + 坊区一起重建。</summary>
+    private void MarkAllDirty()
+    {
+        foreach (var chunk in _chunks)
+            chunk.Dirty = true;
+        _buildingsDirty = true;
+        _zonesDirty = true;
+    }
+
+    private void MarkZonesDirty() => _zonesDirty = true;
+
+    /// <summary>单格变更（铺路/砍树/拆除/扩地）：只重建所在分块；格上坊区色可能被覆盖，坊区层一并刷新。</summary>
+    private void OnCellChanged(Vector2I c)
+    {
+        int cx = c.X / ChunkCells, cy = c.Y / ChunkCells;
+        if (cx >= 0 && cx < _chunksPerSide && cy >= 0 && cy < _chunksPerSide)
+            _chunks[cy * _chunksPerSide + cx].Dirty = true;
+        _zonesDirty = true; // 坊区色块层便宜，跟随刷新
+    }
 
     public void SetGridVisible(bool visible) => _gridLines.Visible = visible;
 
     public override void _Process(double delta)
     {
-        if (!_dirty)
-            return;
-        _dirty = false;
-        Rebuild();
+        for (int i = 0; i < _chunks.Length; i++)
+        {
+            if (!_chunks[i].Dirty)
+                continue;
+            _chunks[i].Dirty = false;
+            RebuildChunk(i);
+        }
+        if (_zonesDirty)
+        {
+            _zonesDirty = false;
+            RebuildZones();
+        }
+        if (_buildingsDirty)
+        {
+            _buildingsDirty = false;
+            RebuildBuildings();
+        }
     }
 
-    private void Rebuild()
+    /// <summary>重建单个分块：块内地形方块（水/桥/路）与树木。</summary>
+    private void RebuildChunk(int index)
     {
         var gs = GameState.I;
+        int cx = index % _chunksPerSide, cy = index / _chunksPerSide;
+        int x0 = cx * ChunkCells, y0 = cy * ChunkCells;
+        int x1 = Mathf.Min(x0 + ChunkCells, MapGrid.Size);
+        int y1 = Mathf.Min(y0 + ChunkCells, MapGrid.Size);
+
         var boxXf = new List<Transform3D>();
         var boxColor = new List<Color>();
-        var bodyXf = new List<Transform3D>();
-        var bodyColor = new List<Color>();
-        var roofXf = new List<Transform3D>();
-        var roofColor = new List<Color>();
         var treeXf = new List<Transform3D>();
-        var zoneXf = new List<Transform3D>();
-        var zoneColor = new List<Color>();
 
         const float cs = MapGrid.CellSize;
-        for (int x = 0; x < MapGrid.Size; x++)
+        for (int x = x0; x < x1; x++)
         {
-            for (int y = 0; y < MapGrid.Size; y++)
+            for (int y = y0; y < y1; y++)
             {
                 ref var cell = ref gs.Map.CellAt(x, y);
                 var world = MapGrid.CellToWorld(new Vector2I(x, y));
@@ -176,37 +205,79 @@ public partial class GridRenderer : Node3D
                 }
                 else if (cell.HasRoad)
                 {
-                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, 0.2f, cs)), world + Vector3.Up * 0.1f));
-                    boxColor.Add(RoadColor);
+                    // 三种道路按种类区分明度与厚度：主路最亮最厚，小路最暗最薄
+                    float h = cell.RoadKind switch { RoadKind.Main => 0.24f, RoadKind.Side => 0.2f, _ => 0.16f };
+                    var rc = cell.RoadKind switch
+                    {
+                        RoadKind.Main => RoadColor.Lightened(0.25f),
+                        RoadKind.Small => RoadColor.Darkened(0.25f),
+                        _ => RoadColor,
+                    };
+                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, h, cs)), world + Vector3.Up * (h / 2f)));
+                    boxColor.Add(rc);
                 }
-                else if (cell.Zone != ZoneType.None && cell.BuildingId < 0)
+
+                // 树木：植物实体驱动，尺寸随生长进度放大（块内格→实体查询，重建量与块大小成正比）
+                if (cell.HasTree && gs.Plants.TryGetValue(GameState.CellIndex(new Vector2I(x, y)), out var p))
                 {
-                    zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * 0.05f));
-                    zoneColor.Add(BuildableZoneColor);
+                    // 位置/大小用格坐标伪随机扰动，避免排队感
+                    float jx = ((x * 73 + y * 31) % 7 - 3) * 0.15f;
+                    float jz = ((x * 41 + y * 57) % 7 - 3) * 0.15f;
+                    float s = (0.8f + ((x * 13 + y * 17) % 5) * 0.1f) * (0.35f + 0.65f * p.GrowthRatio);
+                    treeXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, s, s)), world + new Vector3(jx, 1.5f * s, jz)));
                 }
             }
         }
 
-        // 树木：植物实体驱动，尺寸随生长进度放大
-        foreach (var p in gs.Plants.Values)
+        var chunk = _chunks[index];
+        FillMultiMesh(chunk.Boxes.Multimesh, boxXf, boxColor);
+
+        chunk.Trees.Multimesh.InstanceCount = treeXf.Count;
+        for (int i = 0; i < treeXf.Count; i++)
         {
-            int x = p.X, y = p.Y;
-            var world = MapGrid.CellToWorld(new Vector2I(x, y));
-            // 位置/大小用格坐标伪随机扰动，避免排队感
-            float jx = ((x * 73 + y * 31) % 7 - 3) * 0.15f;
-            float jz = ((x * 41 + y * 57) % 7 - 3) * 0.15f;
-            float s = (0.8f + ((x * 13 + y * 17) % 5) * 0.1f) * (0.35f + 0.65f * p.GrowthRatio);
-            treeXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, s, s)), world + new Vector3(jx, 1.5f * s, jz)));
+            chunk.Trees.Multimesh.SetInstanceTransform(i, treeXf[i]);
+            chunk.Trees.Multimesh.SetInstanceColor(i, TreeColor);
         }
+    }
+
+    /// <summary>重建坊区色块层：只遍历坊区候选集（增量索引），非全图扫描。</summary>
+    private void RebuildZones()
+    {
+        var gs = GameState.I;
+        var zoneXf = new List<Transform3D>();
+        var zoneColor = new List<Color>();
+        const float cs = MapGrid.CellSize;
+
+        foreach (var c in gs.BuildableCells)
+        {
+            ref var cell = ref gs.Map.CellAt(c);
+            if (cell.BuildingId >= 0)
+                continue; // 已被建筑占用的坊区格不画色块
+            var world = MapGrid.CellToWorld(c);
+            zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * 0.05f));
+            zoneColor.Add(BuildableZoneColor);
+        }
+        FillMultiMesh(_zones.Multimesh, zoneXf, zoneColor);
+    }
+
+    /// <summary>重建建筑层（主体/屋顶/边框）：建筑数量级远小于格数，整层重建足够便宜。</summary>
+    private void RebuildBuildings()
+    {
+        var gs = GameState.I;
+        var bodyXf = new List<Transform3D>();
+        var bodyColor = new List<Color>();
+        var roofXf = new List<Transform3D>();
+        var roofColor = new List<Color>();
+        const float cs = MapGrid.CellSize;
 
         foreach (var b in gs.Buildings.Values)
         {
             var origin = MapGrid.CellToWorld(b.Origin);
             // 等级越高楼越高；年久失修则发暗
             float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
-            float w = b.Def.SizeX * cs * 0.92f;
-            float d = b.Def.SizeY * cs * 0.92f;
-            var center = origin + new Vector3((b.Def.SizeX - 1) * cs / 2f, height / 2f, (b.Def.SizeY - 1) * cs / 2f);
+            float w = b.FootX * cs * 0.92f;
+            float d = b.FootY * cs * 0.92f;
+            var center = origin + new Vector3((b.FootX - 1) * cs / 2f, height / 2f, (b.FootY - 1) * cs / 2f);
             var color = b.Def.GodotColor;
             if (b.Condition < 50f)
                 color = color.Darkened(0.35f * (1f - b.Condition / 50f));
@@ -220,31 +291,22 @@ public partial class GridRenderer : Node3D
 
             // 斜屋顶：脊线沿长边，稍出檐
             float roofH = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
-            var roofBasis = b.Def.SizeX >= b.Def.SizeY
+            var roofBasis = b.FootX >= b.FootY
                 ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * 1.06f, roofH, w * 1.06f))
                 : Basis.FromScale(new Vector3(w * 1.06f, roofH, d * 1.06f));
-            var roofCenter = origin + new Vector3((b.Def.SizeX - 1) * cs / 2f, height + roofH / 2f, (b.Def.SizeY - 1) * cs / 2f);
+            var roofCenter = origin + new Vector3((b.FootX - 1) * cs / 2f, height + roofH / 2f, (b.FootY - 1) * cs / 2f);
             roofXf.Add(new Transform3D(roofBasis, roofCenter));
             roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
         }
 
-        FillMultiMesh(_boxes.Multimesh, boxXf, boxColor);
         FillMultiMesh(_bldgBodies.Multimesh, bodyXf, bodyColor);
         FillMultiMesh(_bldgRoofs.Multimesh, roofXf, roofColor);
-        FillMultiMesh(_zones.Multimesh, zoneXf, zoneColor);
 
         // 边框与主体同变换（固定深色，无逐实例颜色）
         var mmEdges = _bldgEdges.Multimesh;
         mmEdges.InstanceCount = bodyXf.Count;
         for (int i = 0; i < bodyXf.Count; i++)
             mmEdges.SetInstanceTransform(i, bodyXf[i]);
-
-        _trees.Multimesh.InstanceCount = treeXf.Count;
-        for (int i = 0; i < treeXf.Count; i++)
-        {
-            _trees.Multimesh.SetInstanceTransform(i, treeXf[i]);
-            _trees.Multimesh.SetInstanceColor(i, TreeColor);
-        }
     }
 
     private static void FillMultiMesh(MultiMesh mm, List<Transform3D> xforms, List<Color> colors)

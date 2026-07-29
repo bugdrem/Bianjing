@@ -15,8 +15,11 @@ public partial class Main : Node3D
     private EconomySystem _economy;
     private MaintenanceSystem _maintenance;
     private GoodsSystem _goods;
+    private CraftingSystem _crafting;
     private PlantGrowthSystem _plants;
     private WildlifeSystem _wildlife;
+    private MilestoneSystem _milestones;
+    private TechSystem _techs;
     private Hud _hud;
     private GameMenu _menu;
 
@@ -54,8 +57,11 @@ public partial class Main : Node3D
         _economy = new EconomySystem();
         _maintenance = new MaintenanceSystem();
         _goods = new GoodsSystem();
+        _crafting = new CraftingSystem();
         _plants = new PlantGrowthSystem();
         _wildlife = new WildlifeSystem();
+        _milestones = new MilestoneSystem();
+        _techs = new TechSystem();
 
         var build = new BuildController(cameraRig, renderer);
         AddChild(build);
@@ -88,8 +94,11 @@ public partial class Main : Node3D
         _economy.TickDay(gs);
         _maintenance.TickDay(gs);
         _goods.TickDay(gs);
+        _crafting.TickDay(gs); // 工坊/商铺把原料加工成成品
         _plants.TickDay(gs); // 挂果生长与落果
         _wildlife.TickDay(gs);
+        _milestones.TickDay(gs); // 人口达标即晋级（解锁建筑/需求/限级）
+        _techs.TickDay(gs); // 被动科技自动研成 + 主动项目逐日推进
     }
 
     /// <summary>每月结算：大事（老化生死/重税民怨/植物生长/动物繁育）与账本轮转。</summary>
@@ -113,8 +122,10 @@ public partial class Main : Node3D
         if (_autoSaveTimer < GameSettings.AutoSaveMinutes * 60f)
             return;
         _autoSaveTimer = 0f;
-        SaveService.Save(_clock, SaveService.AutoSlot, "自动保存");
-        _hud.ShowCellInfo("已自动保存");
+        if (SaveService.Save(_clock, SaveService.AutoSlot, "自动保存"))
+            _hud.ShowCellInfo("已自动保存");
+        else
+            _hud.ShowCellInfo("自动保存失败（详见日志）");
     }
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
@@ -147,8 +158,10 @@ public partial class Main : Node3D
 
     private void SaveNamed(string saveName)
     {
-        SaveService.Save(_clock, SaveService.SlotFor(saveName), saveName);
-        _hud.ShowCellInfo($"已保存：{saveName}");
+        if (SaveService.Save(_clock, SaveService.SlotFor(saveName), saveName))
+            _hud.ShowCellInfo($"已保存：{saveName}");
+        else
+            _hud.ShowCellInfo($"保存失败：{saveName}（详见日志）");
     }
 
     private bool LoadSlot(string slot) => SaveService.Load(_clock, slot);
@@ -163,8 +176,10 @@ public partial class Main : Node3D
 
     private void SaveGame()
     {
-        SaveService.Save(_clock, SaveService.QuickSlot, "快速存档");
-        _hud.ShowCellInfo("已快速保存 (F5)");
+        if (SaveService.Save(_clock, SaveService.QuickSlot, "快速存档"))
+            _hud.ShowCellInfo("已快速保存 (F5)");
+        else
+            _hud.ShowCellInfo("快速保存失败（详见日志）");
     }
 
     private void LoadGame()
