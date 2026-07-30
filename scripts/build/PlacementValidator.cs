@@ -12,6 +12,9 @@ public static class PlacementValidator
         if (!MapGrid.InBounds(c))
             return false;
         ref var cell = ref gs.Map.CellAt(c);
+        // 跨水：无桥的水面格可自动架同宽小桥（预览显示可放），按桥价校验余额
+        if (cell.HasWater)
+            return !cell.HasBridge && (GameSettings.InfiniteMoney || gs.Money >= GameState.BridgeCost);
         if (!cell.IsEmpty)
             return false;
         if (!SlopeWalkable(gs, c)) // 陡壁不可铺路（坡度≤上限才能修路供村民翻山）

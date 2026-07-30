@@ -70,6 +70,10 @@ public class MapSave
     public List<int> ZoneCells = new();
     public List<int> ZoneTypes = new();
     public List<int> WaterCells = new();
+
+    /// <summary>v19：与 WaterCells 一一对应的水流方向（(byte)Cell.FlowDir，0=静水/湖）。</summary>
+    public List<int> WaterFlow = new();
+
     public List<int> BridgeCells = new();
 
     /// <summary>v16：地形高度稀疏表——只存“偏离默认值（水面 0 / 陆地基准层）”的格：

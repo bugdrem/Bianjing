@@ -30,6 +30,10 @@ public struct Cell
     /// <summary>是否有河水（不可建造，架桥除外）。</summary>
     public bool HasWater;
 
+    /// <summary>水流方向（仅河/溪有意义，湖泊为静水 0）：0=静水，1-8 为八方向（1=东,顺时针到 8=东北），
+    /// 见 RiverGenerator.EncodeFlow。仅世界生成期赋值、随存档保存，供未来水流表现/生态取用。</summary>
+    public byte FlowDir;
+
     /// <summary>是否有桥（架在水上，等效道路可通行）。</summary>
     public bool HasBridge;
 

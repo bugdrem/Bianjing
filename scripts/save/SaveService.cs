@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v18：新增王爷府（开局首建、全局唯一）与首建门槛；旧城无府会被锁死营造，故拒读旧档。</summary>
-    public const int FormatVersion = 18;
+    /// <summary>v19：水系重制为树状水系（干流+支流树+扭曲大湖/湖中岛）并新增水流方向；地形新增连绵山脉。旧档无流向数据，拒读。</summary>
+    public const int FormatVersion = 19;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -229,7 +229,10 @@ public static class SaveService
                 ref var cell = ref gs.Map.CellAt(x, y);
                 int index = y * MapGrid.Size + x;
                 if (cell.HasWater)
+                {
                     map.WaterCells.Add(index);
+                    map.WaterFlow.Add(cell.FlowDir); // 与 WaterCells 一一对应
+                }
                 if (cell.HasBridge)
                     map.BridgeCells.Add(index);
                 // 高度稀疏存“偏离默认值”的格（水面默认 0 / 陆地默认基准层）：
@@ -396,8 +399,15 @@ public static class SaveService
             // 经 SetZone 写入，同步重建坊区候选集索引
             gs.SetZone(new Vector2I(index % MapGrid.Size, index / MapGrid.Size), (ZoneType)map.ZoneTypes[i]);
         }
-        foreach (int index in map.WaterCells ?? new List<int>())
-            gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasWater = true;
+        var waterCells = map.WaterCells ?? new List<int>();
+        var waterFlow = map.WaterFlow ?? new List<int>();
+        for (int i = 0; i < waterCells.Count; i++)
+        {
+            int index = waterCells[i];
+            ref var wcell = ref gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size);
+            wcell.HasWater = true;
+            wcell.FlowDir = i < waterFlow.Count ? (byte)waterFlow[i] : (byte)0; // v19：流向随档恢复
+        }
         foreach (int index in map.BridgeCells ?? new List<int>())
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasBridge = true; // HasRoad 已由 RoadCells 恢复
 

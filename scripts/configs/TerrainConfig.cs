@@ -30,11 +30,34 @@ public static class TerrainConfig
     /// <summary>缓丘噪声波长（米）：越大丘体越宽缓。</summary>
     public const int HillWavelength = 48;
 
+    // ---- 连绵山脉（起伏的山脊线，比缓丘高、削壁后仍可走）----
+
+    /// <summary>山脉数量范围（条脊线）。</summary>
+    public const int MinRanges = 2;
+    public const int MaxRanges = 4;
+
+    /// <summary>山脊单条长度范围（米）：逐米蠕蜒推进。</summary>
+    public const int RangeLenMin = 120;
+    public const int RangeLenMax = 300;
+
+    /// <summary>山脊半宽（米）：脊线两侧隔此距离内隆起，越远越低。</summary>
+    public const int RangeHalfWidth = 14;
+
+    /// <summary>山脊附加高度范围（层，叠在基准之上）：峰高 = 基准 + 此值；上限低于 PillarLayerMin 以保留可侵蚀空间。</summary>
+    public const int RangeExtraMin = 3;
+    public const int RangeExtraMax = 5;
+
+    /// <summary>山脊推进方向每步抑动幅度（弧度）：越大脊线越曲折。</summary>
+    public const double RangeWaver = 0.28;
+
+    /// <summary>山脊沿脊线的高低起伏波长（米）：令山脊“连绵起伏”而非等高。</summary>
+    public const int RangeUndulateWave = 40;
+
     // ---- 桂林石峰（孤峰柱，陡壁不可攀）----
 
     /// <summary>石峰数量范围（座）。</summary>
-    public const int MinPillars = 8;
-    public const int MaxPillars = 14;
+    public const int MinPillars = 10;
+    public const int MaxPillars = 18;
 
     /// <summary>石峰半径范围（米）。</summary>
     public const int PillarMinRadius = 5;
@@ -82,4 +105,9 @@ public static class TerrainConfig
 
     /// <summary>层数 → 世界海拔高度（米）：以陆地基准层为原点——平原(BaseLayers)=0 米，水面(0 层)=-0.5 米，缓丘/石峰在其上。</summary>
     public static float LayerToWorldY(int layer) => (layer - BaseLayers) * LayerHeight;
+
+    // ---- 平地占比保障 ----
+
+    /// <summary>平地（非水、高度=基准层）占全图的最低比例：生成收尾若不足此值，按“从山缘逐层侵蚀”削回到达标（MountainGenerator.EnforceFlatRatio）。</summary>
+    public const float FlatLandTarget = 0.5f;
 }

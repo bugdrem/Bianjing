@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace Bianjing;
@@ -6,18 +7,24 @@ namespace Bianjing;
 /// <summary>
 /// 新地图地形成形（河后树前运行一次，高度随存档保存）：
 /// ① 基准抬升——全部陆地抬到 TerrainConfig.BaseLayers（1 米），水面/河床保持 0 层（最低水面 0 米）；
-/// ② 平原缓丘——value noise 高于阈值处隆起 0~HillAmplitudeLayers 层，再削壁保证缓丘处处可走（展示平原高低差）；
-/// ③ 桂林石峰——若干孤峰柱（超椭圆剖面：顶平壁陡），随机高度/半径，陡壁天然不可攀（Traversable 拦截），
-///    峰上由 TreeGenerator 保底落树。避水：石峰与缓丘都不占水面。
+/// ② 连绵山脉——若干条蠕蜒脊线，沿脊高低起伏、两侧 falloff，成“连绵起伏”的中高山体；
+/// ③ 平原缓丘——value noise 高于阈值处隆起 0~HillAmplitudeLayers 层；
+/// ④ 削壁——保证缓丘/山脉处处可走（展示平原高低差）；
+/// ⑤ 桂林石峰——若干孤峰柱（超椭圆剖面：顶平壁陡），陡壁天然不可攀；
+/// ⑥ 平地保障——若平地占比不足 FlatLandTarget，从山缘逐层侵蚀削回达标（保护石峰不动）。
+/// 避水：缓丘/山脉/石峰都不占水面。
 /// </summary>
 public static class MountainGenerator
 {
     public static void Raise(MapGrid map, Random rng)
     {
         RaiseBaseline(map);
+        RaiseRanges(map, rng);  // 连绵山脉先立，缓丘可在其上叠纹理
         RaiseHills(map, rng);
-        SmoothCliffs(map);      // 只平滑到此为止的"可走地形"（基准+缓丘），石峰在其后叠加、保留陡壁
+        SmoothCliffs(map);      // 只平滑至此为止的“可走地形”（基准+山脉+缓丘），石峰在其后叠加、保留陡壁
         RaisePillars(map, rng);
+        EnforceFlatRatio(map);  // 从山缘逐层侵蚀，保证平地 ≥ FlatLandTarget（保护石峰）
+        SmoothCliffs(map);      // 修复侵蚀可能造成的陡台阶（此时已保护石峰，只降不升不降低平地占比）
     }
 
     /// <summary>① 基准抬升：陆地一律抬到基准层，水面/河床保持 0 层（水面即全图最低处）。</summary>
@@ -32,7 +39,59 @@ public static class MountainGenerator
             }
     }
 
-    /// <summary>② 平原缓丘：双八度 value noise（与树木密度场同款手法），阈上部分映射为 1~HillAmplitudeLayers 层附加高度；
+    /// <summary>② 连绵山脉：若干条蠕蜒脊线，沿脊线高度随正弦起伏（连绵而非等高），脊线两侧按二次 falloff 降到平地；
+    /// 峰高上限低于 PillarLayerMin，既比缓丘高又留出可侵蚀空间，削壁后成可走的起伏山体。</summary>
+    private static void RaiseRanges(MapGrid map, Random rng)
+    {
+        int count = TerrainConfig.MinRanges + rng.Next(TerrainConfig.MaxRanges - TerrainConfig.MinRanges + 1);
+        for (int i = 0; i < count; i++)
+        {
+            double px = 40 + rng.Next(MapGrid.Size - 80);
+            double py = 40 + rng.Next(MapGrid.Size - 80);
+            double angle = rng.NextDouble() * Math.PI * 2;
+            int length = TerrainConfig.RangeLenMin + rng.Next(TerrainConfig.RangeLenMax - TerrainConfig.RangeLenMin + 1);
+            double phase = rng.NextDouble() * Math.PI * 2;
+            int peakMax = TerrainConfig.RangeExtraMin + rng.Next(TerrainConfig.RangeExtraMax - TerrainConfig.RangeExtraMin + 1);
+
+            for (int step = 0; step < length; step++)
+            {
+                px += Math.Cos(angle);
+                py += Math.Sin(angle);
+                if (px < 2 || py < 2 || px > MapGrid.Size - 3 || py > MapGrid.Size - 3)
+                    break;
+                // 沿脊线起伏：峰高在 [1, peakMax] 间随 step 正弦波动，令山脉连绵起伏
+                double undu = 0.5 + 0.5 * Math.Sin(step * 2 * Math.PI / TerrainConfig.RangeUndulateWave + phase);
+                int peak = Math.Max(1, Mathf.RoundToInt(peakMax * (0.45f + 0.55f * (float)undu)));
+                RaiseRidgeBand(map, (int)px, (int)py, peak);
+                angle += (rng.NextDouble() - 0.5) * TerrainConfig.RangeWaver;
+            }
+        }
+    }
+
+    /// <summary>山脊横断面：以 (cx,cy) 为脊心，半宽 RangeHalfWidth 内按二次 falloff 抬高（中心 peak → 缘 0），不占水面。</summary>
+    private static void RaiseRidgeBand(MapGrid map, int cx, int cy, int peak)
+    {
+        int hw = TerrainConfig.RangeHalfWidth;
+        for (int ox = -hw; ox <= hw; ox++)
+            for (int oy = -hw; oy <= hw; oy++)
+            {
+                var c = new Vector2I(cx + ox, cy + oy);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                ref var cell = ref map.CellAt(c);
+                if (cell.HasWater)
+                    continue;
+                float d = new Vector2(ox, oy).Length() / hw;
+                if (d > 1f)
+                    continue;
+                int extra = Mathf.RoundToInt(peak * (1f - d) * (1f - d)); // 二次 falloff 更圆润
+                if (extra <= 0)
+                    continue;
+                cell.Height = Math.Max(cell.Height, TerrainConfig.BaseLayers + extra);
+            }
+    }
+
+    /// <summary>③ 平原缓丘：双八度 value noise（与树木密度场同款手法），阈上部分映射为 1~HillAmplitudeLayers 层附加高度；
     /// 随机高低差由噪声天然提供，后续削壁把偶发陡沿压回可走坡度。</summary>
     private static void RaiseHills(MapGrid map, Random rng)
     {
@@ -112,8 +171,8 @@ public static class MountainGenerator
                 for (int y = 0; y < MapGrid.Size; y++)
                 {
                     ref var cell = ref map.CellAt(x, y);
-                    if (cell.HasWater || cell.Height <= TerrainConfig.BaseLayers)
-                        continue; // 水面与基准平地无壁可削
+                    if (cell.HasWater || cell.Height <= TerrainConfig.BaseLayers || cell.Height >= TerrainConfig.PillarLayerMin)
+                        continue; // 水面与基准平地无壁可削；石峰（≥PillarLayerMin）保留陡壁不参与平滑
                     int minN = MinNeighborHeight(map, x, y);
                     if (cell.Height - minN > maxDiff)
                     {
@@ -153,6 +212,68 @@ public static class MountainGenerator
         while (TerrainConfig.SlopeDegForLayerDiff(d + 1) <= TerrainConfig.MaxWalkSlopeDeg)
             d++;
         return d;
+    }
+
+    /// <summary>⑥ 平地保障：若平地（非水、高度=基准层）占比不足 FlatLandTarget，就从山缘（有更低邻格的非平地）
+    /// 逐轮降一层，把丘山自外向内蠕食至达标。保护石峰（≥PillarLayerMin）不动；只降高度、不造坑。</summary>
+    private static void EnforceFlatRatio(MapGrid map)
+    {
+        int total = MapGrid.Size * MapGrid.Size;
+        int target = (int)(total * TerrainConfig.FlatLandTarget);
+        int guard = 0;
+        while (guard++ < 64)
+        {
+            if (CountFlat(map) >= target)
+                return;
+            // 快照待降格（非水、高于基准、低于石峰阈、且存在更低邻格），同批降一层，避免边降边影响判定
+            var toLower = new List<int>();
+            for (int y = 0; y < MapGrid.Size; y++)
+                for (int x = 0; x < MapGrid.Size; x++)
+                {
+                    ref var cell = ref map.CellAt(x, y);
+                    if (cell.HasWater || cell.Height <= TerrainConfig.BaseLayers || cell.Height >= TerrainConfig.PillarLayerMin)
+                        continue;
+                    if (HasLowerNeighbor(map, x, y, cell.Height))
+                        toLower.Add(y * MapGrid.Size + x);
+                }
+            if (toLower.Count == 0)
+                return; // 无可侵蚀（剩下皆为石峰），已尽力
+            foreach (int idx in toLower)
+                map.CellAt(idx % MapGrid.Size, idx / MapGrid.Size).Height--;
+        }
+    }
+
+    /// <summary>平地格数（非水、高度恰为基准层）。</summary>
+    private static int CountFlat(MapGrid map)
+    {
+        int flat = 0;
+        for (int x = 0; x < MapGrid.Size; x++)
+            for (int y = 0; y < MapGrid.Size; y++)
+            {
+                ref var cell = ref map.CellAt(x, y);
+                if (!cell.HasWater && cell.Height == TerrainConfig.BaseLayers)
+                    flat++;
+            }
+        return flat;
+    }
+
+    /// <summary>八邻中是否存在高度严格低于 h 的格（含水面 0 层）：据此判定丘山“边缘”。</summary>
+    private static bool HasLowerNeighbor(MapGrid map, int x, int y, int h)
+    {
+        for (int ox = -1; ox <= 1; ox++)
+            for (int oy = -1; oy <= 1; oy++)
+            {
+                if (ox == 0 && oy == 0)
+                    continue;
+                var n = new Vector2I(x + ox, y + oy);
+                if (!MapGrid.InBounds(n))
+                    continue;
+                ref var cell = ref map.CellAt(n);
+                int nh = cell.HasWater ? 0 : cell.Height;
+                if (nh < h)
+                    return true;
+            }
+        return false;
     }
 
     // ---- value noise 工具（与 TreeGenerator 同款手法，本文件自持一份免跨类耦合）----

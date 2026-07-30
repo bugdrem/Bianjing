@@ -142,38 +142,58 @@ public class GameState
         Defs = defs;
     }
 
-    /// <summary>以 center 为中心的方形道路画笔（w×w，宽度随道路种类）：按实际新铺格数折算延米计费
-    /// （新格数 ÷ 宽度 = 等效长度，重叠盖戳不再足额重复扣费）；
-    /// 已占用格（路/水/建筑）跳过；钱不够时不铺。返回是否铺下了新格。</summary>
+    /// <summary>以 center 为中心的方形道路画笔（w×w，宽度随道路种类）：陆地空格铺路，
+    /// 遇水面格自动架一座与路同宽的小桥（辅路w2、主路w4）——“和道路同步”，拖拉一次画成不断档；
+    /// 岸上路段按道路单价、跨水桥段按桥梁单价，各按等效延米（新格数÷宽）计费（重叠盖戳不多扣）；
+    /// 已占用格（路/已有桥/建筑）跳过；钱不够时不铺。返回是否铺下了新格。</summary>
     public bool PlaceRoadStamp(Vector2I center, RoadKind kind)
     {
-        int cost = RoadCostOf(kind);
-        if (!GameSettings.InfiniteMoney && Money < cost)
+        int roadCost = RoadCostOf(kind);
+        if (!GameSettings.InfiniteMoney && Money < roadCost)
             return false;
 
         // 宽度为偶数，偏移范围 -(w-1)/2..w/2 两轴一致（宽 4 时 -1..2）
         int w = RoadWidthOf(kind);
-        int newCells = 0;
+        int newRoadCells = 0, newBridgeCells = 0;
         for (int ox = -((w - 1) / 2); ox <= w / 2; ox++)
         {
             for (int oy = -((w - 1) / 2); oy <= w / 2; oy++)
             {
                 var c = center + new Vector2I(ox, oy);
-                if (!MapGrid.InBounds(c) || !Map.CellAt(c).IsEmpty)
+                if (!MapGrid.InBounds(c))
                     continue;
-                LayRoadCell(c, kind);
-                newCells++;
+                ref var cell = ref Map.CellAt(c);
+                if (cell.HasWater)
+                {
+                    // 路跨水：在无桥的水面格架同宽小桥（已有桥则跳过）
+                    if (cell.HasBridge)
+                        continue;
+                    LayBridgeCell(c);
+                    newBridgeCells++;
+                }
+                else if (cell.IsEmpty)
+                {
+                    LayRoadCell(c, kind);
+                    newRoadCells++;
+                }
+                // 其它（已有路/建筑）跳过
             }
         }
-        if (newCells > 0)
+        if (newRoadCells > 0)
         {
-            // 每米单价 × 等效延米数（新格数/宽）：斜拖/重叠盖戳不会多扣
-            double charge = (double)cost * newCells / w;
+            double charge = (double)roadCost * newRoadCells / w; // 新格数/宽 = 等效延米，斜拖/重叠不多扣
             Money -= charge;
             Ledger.Add("营造道路", -charge);
-            EventBus.RaiseStatsChanged();
         }
-        return newCells > 0;
+        if (newBridgeCells > 0)
+        {
+            double charge = (double)BridgeCost * newBridgeCells / w; // 跨水段按桥梁单价
+            Money -= charge;
+            Ledger.Add("营造桥梁", -charge);
+        }
+        if (newRoadCells > 0 || newBridgeCells > 0)
+            EventBus.RaiseStatsChanged();
+        return newRoadCells > 0 || newBridgeCells > 0;
     }
 
     /// <summary>以 center 为中心的方形桥梁画笔（4×4 米）：只在无桥的水面格架设，
@@ -194,11 +214,7 @@ public class GameState
                 ref var cell = ref Map.CellAt(c);
                 if (!cell.HasWater || cell.HasBridge)
                     continue; // 岸上/已有桥的格跳过，桥只跨水
-                cell.HasBridge = true;
-                cell.HasRoad = true;
-                Roads.SetRoad(c, true); // 桥面 kind=None：寻路权重同辅路
-                RegisterRoadCell(c);
-                EventBus.RaiseCellChanged(c);
+                LayBridgeCell(c);
                 newCells++;
             }
         }
@@ -210,6 +226,17 @@ public class GameState
             EventBus.RaiseStatsChanged();
         }
         return newCells > 0;
+    }
+
+    /// <summary>架单格桥面（水面格，等效辅路可通行；条带内部用，不扣费不广播统计）。</summary>
+    private void LayBridgeCell(Vector2I c)
+    {
+        ref var cell = ref Map.CellAt(c);
+        cell.HasBridge = true;
+        cell.HasRoad = true;
+        Roads.SetRoad(c, true); // 桥面 kind=None：寻路权重同辅路
+        RegisterRoadCell(c);
+        EventBus.RaiseCellChanged(c);
     }
 
     /// <summary>铺单格道路（条带内部用，不扣费不广播统计）。</summary>
