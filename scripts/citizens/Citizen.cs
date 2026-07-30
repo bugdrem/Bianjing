@@ -124,9 +124,9 @@ public class Citizen
 
     // ---- 派生属性 ----
     public int AgeYears => AgeMonths / 12;
-    public bool IsChild => AgeYears < GameBalance.Life.AdultAgeYears;
-    public bool IsAdult => AgeYears >= GameBalance.Life.AdultAgeYears && AgeYears < 60;
-    public bool IsElder => AgeYears >= 60;
+    public bool IsChild => AgeYears < LifeConfig.AdultAgeYears;
+    public bool IsAdult => AgeYears >= LifeConfig.AdultAgeYears && AgeYears < LifeConfig.ElderAgeYears;
+    public bool IsElder => AgeYears >= LifeConfig.ElderAgeYears;
     public bool HasJob => JobKind != JobKind.None;
     public bool IsMarried => SpouseId >= 0;
 

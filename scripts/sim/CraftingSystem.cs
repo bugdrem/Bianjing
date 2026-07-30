@@ -11,8 +11,8 @@ namespace Bianjing;
 /// </summary>
 public class CraftingSystem
 {
-    /// <summary>每名在岗工人每日加工产量（份）。</summary>
-    private const double CraftPerWorkerDay = 0.8;
+    /// <summary>每名在岗工人每日加工产量（份）：转发自 EconomyConfig。</summary>
+    private static double CraftPerWorkerDay => EconomyConfig.CraftPerWorkerDay;
 
     public void TickDay(GameState gs)
     {

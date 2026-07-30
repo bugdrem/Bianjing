@@ -9,8 +9,11 @@ namespace Bianjing;
 /// 收合期间新公告在按钮上累计未读数，展开即清零。</summary>
 public partial class NewsPanel : VBoxContainer
 {
-    /// <summary>列表最多渲染条数（数据层另有 200 条上限，展示端再截一刀防长文卡顿）。</summary>
-    private const int MaxShown = 100;
+    /// <summary>列表最多渲染条数（数据层另有 200 条上限，展示端只取最新 99 条）。</summary>
+    private const int MaxShown = 99;
+
+    /// <summary>公告栏固定宽度（像素）：长文在栏内自动换行，不撑宽面板。</summary>
+    private const float PanelWidth = 340f;
 
     private PanelContainer _panel;
     private Label _body;
@@ -42,14 +45,18 @@ public partial class NewsPanel : VBoxContainer
         title.AddThemeFontSizeOverride("font_size", 16);
         box.AddChild(title);
 
-        // 滚动区：正文单 Label 逐行拼接（新在前），自动换行
-        var scroll = new ScrollContainer { CustomMinimumSize = new Vector2(320, 260) };
+        // 滚动区：固定宽高，禁横向滚动——长文在定宽内自动换行，面板宽度不随内容撑开
+        var scroll = new ScrollContainer
+        {
+            CustomMinimumSize = new Vector2(PanelWidth, 260),
+            HorizontalScrollMode = ScrollContainer.ScrollMode.Disabled,
+        };
         box.AddChild(scroll);
 
         _body = new Label
         {
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
-            CustomMinimumSize = new Vector2(300, 0),
+            SizeFlagsHorizontal = SizeFlags.ExpandFill, // 铺满定宽滚动区以触发换行
         };
         _body.AddThemeFontSizeOverride("font_size", 13);
         scroll.AddChild(_body);

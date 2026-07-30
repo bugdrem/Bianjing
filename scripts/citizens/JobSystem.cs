@@ -13,8 +13,8 @@ namespace Bianjing;
 /// </summary>
 public class JobSystem
 {
-    /// <summary>每人每月生活开销。</summary>
-    private const double LivingCostPerCapita = 0.8;
+    /// <summary>每人每月生活开销：转发自 JobsConfig。</summary>
+    private static double LivingCostPerCapita => JobsConfig.LivingCostPerCapita;
 
     private readonly Random _rng = new();
 
@@ -42,7 +42,7 @@ public class JobSystem
                 if (filled >= b.Def.JobSlots)
                     break;
                 // 孩童不入职；家族产业内的人可干到 FamilyBusinessAge（比普通雇工晚退），过龄不再拉回
-                if (c.HomeId != b.Id || c.IsChild || c.AgeYears >= GameBalance.Retire.FamilyBusinessAge)
+                if (c.HomeId != b.Id || c.IsChild || c.AgeYears >= RetireConfig.FamilyBusinessAge)
                     continue;
                 // 已在自家上工则计数；在外就业或无业则拉回自家产业
                 if (c.JobKind == JobKind.Employed && c.WorkplaceId == b.Id)
@@ -110,7 +110,7 @@ public class JobSystem
     /// <summary>本人的退休年龄：店主/家族产业内的人延迟退休。
     /// 预留：后期可按职业（重体力提前/文职延后）、健康程度、家庭资产进一步微调。</summary>
     private static int RetireAgeFor(Citizen c)
-        => IsFamilyBusiness(c) ? GameBalance.Retire.FamilyBusinessAge : GameBalance.Retire.Age;
+        => IsFamilyBusiness(c) ? RetireConfig.FamilyBusinessAge : RetireConfig.Age;
 
     /// <summary>是否在自家产业上工（店主/家族内人）：工作地即居所（grown 商铺/工坊由本楼居民承担）。</summary>
     private static bool IsFamilyBusiness(Citizen c)
@@ -127,7 +127,7 @@ public class JobSystem
         foreach (var c in gs.Citizens.Values)
         {
             // 孩童、已有职、以及已过退休年龄者不再受雇（退休者只参与采集等轻活，见表现层）
-            if (c.HasJob || c.IsChild || c.AgeYears >= GameBalance.Retire.Age)
+            if (c.HasJob || c.IsChild || c.AgeYears >= RetireConfig.Age)
                 continue;
 
             // 主妇：丈夫在业则持家采购
@@ -143,7 +143,7 @@ public class JobSystem
                 workers[workplace.Id] = workers.GetValueOrDefault(workplace.Id) + 1;
                 gs.LogLifeEvent(c, $"受雇于{workplace.Def.Name}（{workplace.X},{workplace.Y}）");
             }
-            else if (_rng.NextDouble() < 0.6)
+            else if (_rng.NextDouble() < JobsConfig.JoblessForageChance)
             {
                 // 上山谋生：伐木/采摘/打猎（创业开店由坊区生长承接，后续版本个体化）
                 c.JobKind = JobKind.Logger;

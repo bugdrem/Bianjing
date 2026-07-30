@@ -11,17 +11,14 @@ namespace Bianjing;
 /// </summary>
 public class MaintenanceSystem
 {
-    private const float AgingPerMonth = 0.7f;
-    /// <summary>每名修缮匠每月修复量。</summary>
-    private const float RepairPerWorker = 25f;
-    /// <summary>每名修缮匠每月官府料钱。</summary>
-    private const double RepairWorkerCost = 1.0;
-    /// <summary>居住者集资每月修复量。</summary>
-    private const float ResidentRepairAmount = 5f;
-    /// <summary>每位居住者每月修缮摊派。</summary>
-    private const double RepairFeePerResident = 0.15;
+    // 全部调参转发自 MaintenanceConfig（调参集中在 configs 目录）
+    private static float AgingPerMonth => MaintenanceConfig.AgingPerMonth;
+    private static float RepairPerWorker => MaintenanceConfig.RepairPerWorker;
+    private static double RepairWorkerCost => MaintenanceConfig.RepairWorkerCost;
+    private static float ResidentRepairAmount => MaintenanceConfig.ResidentRepairAmount;
+    private static double RepairFeePerResident => MaintenanceConfig.RepairFeePerResident;
 
-    private const int Days = GameClock.DaysPerMonth;
+    private static int Days => GameClock.DaysPerMonth;
 
     public void TickDay(GameState gs)
     {

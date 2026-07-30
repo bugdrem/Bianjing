@@ -14,21 +14,14 @@ namespace Bianjing;
 /// </summary>
 public class LifecycleSystem
 {
-    /// <summary>每日迁入概率（有空房才成行）：夫妻户 / 单身流民。</summary>
-    private const float CoupleChancePerDay = 0.1f;
-    private const float SingleChancePerDay = 0.05f;
-
-    /// <summary>每日概率：单身男婚配 / 成年人结交新友；生育概率另由算法推算（见 BirthProbability）。</summary>
-    private const float MarriageChancePerDay = 0.01f;
-    private const float BirthChancePerDay = 0.003f;
-    private const float FriendChancePerDay = 0.01f;
-
-    private const int EmigrateAfterHomelessMonths = 6;
-
-    /// <summary>富裕度对第五胎后生育的抑制尺度（家庭人均资产越高越不易再生，达此值降至下限）。</summary>
-    private const double WealthEase = 400;
-    /// <summary>满员住户每月触发拥挤事件（成年未婚男搬出 / 升级扩建）的概率。</summary>
-    private const float CrowdEventChance = 0.15f;
+    // 高频引用的短名转发（调参集中在 configs/PopulationConfig）
+    private static float CoupleChancePerDay => PopulationConfig.CoupleChancePerDay;
+    private static float SingleChancePerDay => PopulationConfig.SingleChancePerDay;
+    private static float MarriageChancePerDay => PopulationConfig.MarriageChancePerDay;
+    private static float BirthChancePerDay => PopulationConfig.BirthChancePerDay;
+    private static float FriendChancePerDay => PopulationConfig.FriendChancePerDay;
+    private static int EmigrateAfterHomelessMonths => PopulationConfig.EmigrateAfterHomelessMonths;
+    private static float CrowdEventChance => PopulationConfig.CrowdEventChance;
 
     private readonly Random _rng = new();
 
@@ -76,31 +69,20 @@ public class LifecycleSystem
         }
     }
 
-    /// <summary>月死亡概率：任何年龄都有基础底噪，死亡率随年龄按 Gompertz 曲线上升
-    /// （约 55-65 为主要死亡区间），达最大寿数必亡；饥荒额外加压；预留健康值放大接口。</summary>
+    /// <summary>月死亡概率：公式与曲线参数均在 LifeConfig（Gompertz 随龄上升，约 55-65 为主要死亡区间），
+    /// 达最大寿数必亡；健康值放大死亡率（当前恒满为中性）；饥荒额外加压。</summary>
     private static float MonthlyDeathChance(Citizen c, bool famine)
     {
         int age = c.AgeYears;
-        if (age >= GameBalance.Life.MaxAgeYears)
+        if (age >= LifeConfig.MaxAgeYears)
             return 1f; // 寿数已尽，必亡
 
-        // 年死亡率 = 基础底噪 + 随龄上升项（陡增起点处为 A，每 55 岁后按尺度指数增长）
-        double annual = GameBalance.Life.BaseAnnualMortality
-            + GameBalance.Life.MortalityAtRamp
-              * Math.Exp((age - GameBalance.Life.MortalityRampAgeYears) / (double)GameBalance.Life.MortalityScaleYears);
-        annual *= HealthMortalityFactor(c); // 预埋：健康值放大死亡率（满健康时为 1）
-        annual = Math.Clamp(annual, 0.0, 1.0);
-
-        double monthly = 1.0 - Math.Pow(1.0 - annual, 1.0 / 12.0); // 年率转月率
+        double annual = LifeConfig.AnnualMortalityAt(age) * LifeConfig.HealthMortalityFactor(c.Health);
+        double monthly = LifeConfig.MonthlyFromAnnual(annual);
         if (famine)
-            monthly += 0.03;
+            monthly += LifeConfig.FamineMonthlyDeathBonus;
         return (float)monthly;
     }
-
-    /// <summary>预埋接口：健康值对死亡率的放大系数（满值 100 时为 1.0，越低越易亡，封顶 4 倍）。
-    /// 当前无系统削减健康值，故恒为中性；后续健康系统接入后自动生效。</summary>
-    private static double HealthMortalityFactor(Citizen c)
-        => Math.Clamp(1.0 + (100.0 - c.Health) / 100.0, 1.0, 4.0);
 
     /// <summary>住所被拆或从未有住所：按家庭分组整家迁入同一空宅（一宅一家，不再逐人塞进别家空床），
     /// 找不到累计计时，过久则迁出。</summary>
@@ -165,7 +147,7 @@ public class LifecycleSystem
         if (_rng.NextDouble() < SingleChancePerDay)
         {
             double assets = RandomImmigrantAssets();
-            if (assets >= GameBalance.Immigration.SelfBuildAssets
+            if (assets >= ImmigrationConfig.SelfBuildAssets
                 && ZoneGrowthSystem.TryBuildHouse(gs, assets, out var house, out double cost))
             {
                 SpawnSingle(gs, house, occupancy, assets - cost, false);
@@ -182,8 +164,8 @@ public class LifecycleSystem
 
     /// <summary>迁入者随机自带资产（家庭公产初值）。</summary>
     private double RandomImmigrantAssets()
-        => GameBalance.Immigration.AssetsMin
-           + _rng.NextDouble() * (GameBalance.Immigration.AssetsMax - GameBalance.Immigration.AssetsMin);
+        => ImmigrationConfig.AssetsMin
+           + _rng.NextDouble() * (ImmigrationConfig.AssetsMax - ImmigrationConfig.AssetsMin);
 
     /// <summary>找可寄居的工坊/商铺（居住格未满，BuildingOccupancy &lt; 容量）；无则 null。</summary>
     private static BuildingInstance FindLodging(GameState gs)
@@ -220,7 +202,7 @@ public class LifecycleSystem
 
     private void SpawnSingle(GameState gs, BuildingInstance house, Dictionary<int, int> occupancy, double assets, bool lodger)
     {
-        var single = NewAdult(gs, _rng.NextDouble() < 0.6 ? Gender.Male : Gender.Female);
+        var single = NewAdult(gs, _rng.NextDouble() < PopulationConfig.SingleMaleChance ? Gender.Male : Gender.Female);
         var family = gs.AddFamily(new Family { HomeId = house.Id, SharedAssets = Math.Max(0, assets) });
         single.FamilyId = family.Id;
         family.MemberIds.Add(single.Id);
@@ -247,8 +229,9 @@ public class LifecycleSystem
             Surname = surname,
             Name = fullName,
             Gender = gender,
-            AgeMonths = (18 + _rng.Next(18)) * 12 + _rng.Next(12),
-            Money = 10 + _rng.Next(20),
+            // 迁入成人的年龄与随身私产：区间取自 ImmigrationConfig（钱为整数贯，同旧版分布）
+            AgeMonths = (ImmigrationConfig.ArriveAgeMin + _rng.Next(ImmigrationConfig.ArriveAgeSpan)) * 12 + _rng.Next(12),
+            Money = ImmigrationConfig.ArriveMoneyMin + _rng.Next((int)ImmigrationConfig.ArriveMoneySpan),
         });
     }
 
@@ -256,9 +239,9 @@ public class LifecycleSystem
     private void Marriages(GameState gs)
     {
         var singleMen = gs.Citizens.Values
-            .Where(c => c.Gender == Gender.Male && !c.IsMarried && c.AgeYears >= GameBalance.Life.AdultAgeYears && c.AgeYears < GameBalance.Life.MarriageMaxAgeYears).ToList();
+            .Where(c => c.Gender == Gender.Male && !c.IsMarried && c.AgeYears >= LifeConfig.AdultAgeYears && c.AgeYears < LifeConfig.MarriageMaxAgeYears).ToList();
         var singleWomen = gs.Citizens.Values
-            .Where(c => c.Gender == Gender.Female && !c.IsMarried && c.AgeYears >= GameBalance.Life.AdultAgeYears && c.AgeYears < GameBalance.Life.MarriageMaxAgeYears).ToList();
+            .Where(c => c.Gender == Gender.Female && !c.IsMarried && c.AgeYears >= LifeConfig.AdultAgeYears && c.AgeYears < LifeConfig.MarriageMaxAgeYears).ToList();
 
         var occupancy = gs.BuildHomeOccupancy();
 
@@ -269,9 +252,9 @@ public class LifecycleSystem
             if (_rng.NextDouble() >= MarriageChancePerDay)
                 continue;
 
-            // 排除近亲：同家庭、直系、同胞均不得婚配（最多试八人，无合适对象则本日作罢）
+            // 排除近亲：同家庭、直系、同胞均不得婚配（抽满候选数无合适对象则本日作罢）
             Citizen woman = null;
-            for (int attempt = 0; attempt < 8 && singleWomen.Count > 0; attempt++)
+            for (int attempt = 0; attempt < PopulationConfig.MarriageTryCandidates && singleWomen.Count > 0; attempt++)
             {
                 var candidate = singleWomen[_rng.Next(singleWomen.Count)];
                 if (CloseKin(man, candidate))
@@ -437,16 +420,16 @@ public class LifecycleSystem
     {
         var occupancy = gs.BuildHomeOccupancy();
         var mothers = gs.Citizens.Values
-            .Where(c => c.Gender == Gender.Female && c.IsMarried && c.AgeYears >= GameBalance.Life.FertileMinAgeYears && c.AgeYears <= GameBalance.Life.FertileMaxAgeYears && c.HomeId >= 0)
+            .Where(c => c.Gender == Gender.Female && c.IsMarried && c.AgeYears >= LifeConfig.FertileMinAgeYears && c.AgeYears <= LifeConfig.FertileMaxAgeYears && c.HomeId >= 0)
             .ToList();
 
         foreach (var mother in mothers)
         {
             if (_rng.NextDouble() >= BirthProbability(gs, mother))
                 continue;
-            // 生育以自有住宅（house）为前置（寄居店坊/无家不生）；容量 1.5 倍封顶略超，超员由拥挤事件扩建/分家疏解
+            // 生育以自有住宅（house）为前置（寄居店坊/无家不生）；容量封顶倍率内略超，超员由拥挤事件扩建/分家疏解
             if (!gs.Buildings.TryGetValue(mother.HomeId, out var house) || house.Def.Id != "house"
-                || occupancy.GetValueOrDefault(house.Id) >= (int)Math.Ceiling(house.HousingCapacity * 1.5))
+                || occupancy.GetValueOrDefault(house.Id) >= (int)Math.Ceiling(house.HousingCapacity * PopulationConfig.BirthOverCapFactor))
                 continue;
             if (!gs.Citizens.TryGetValue(mother.SpouseId, out var father))
                 continue;
@@ -478,24 +461,15 @@ public class LifecycleSystem
     }
 
     /// <summary>生育日概率：1~3 胎最大，之后随子女数递减；第五胎后再结合母亲年龄与家庭富裕程度进一步抑制，
-    /// 但始终 &gt;0（仍有几率突破五个）。</summary>
+    /// 但始终 &gt;0（仍有几率突破五个）；各胎次/年龄/富裕系数均取自 PopulationConfig。</summary>
     private static double BirthProbability(GameState gs, Citizen mother)
     {
         int kids = mother.ChildrenIds.Count;
-        double countFactor = kids <= 2 ? 1.0
-            : kids == 3 ? 0.6
-            : kids == 4 ? 0.3
-            : 0.12 * Math.Pow(0.5, kids - 5); // 第六胎起指数衰减，永不归零
         double modifier = 1.0;
         if (kids >= 4) // 第五胎（及以后）才结合年龄与富裕程度
-        {
-            int age = mother.AgeYears;
-            double ageFactor = age <= 30 ? 1.0 : Math.Max(0.2, 1.0 - (age - 30) * 0.05);
-            double perCapita = FamilyPerCapitaAssets(gs, mother);
-            double wealthFactor = Math.Clamp(1.0 - perCapita / WealthEase, 0.3, 1.0); // 越富越不易再生
-            modifier = ageFactor * wealthFactor;
-        }
-        return BirthChancePerDay * countFactor * modifier;
+            modifier = PopulationConfig.BirthAgeFactor(mother.AgeYears)
+                * PopulationConfig.BirthWealthFactor(FamilyPerCapitaAssets(gs, mother));
+        return BirthChancePerDay * PopulationConfig.BirthCountFactor(kids) * modifier;
     }
 
     /// <summary>家庭人均资产（公产+成员私产 / 人数），用于生育富裕度修正。</summary>
@@ -509,7 +483,7 @@ public class LifecycleSystem
     /// <summary>简版社交：成年人小概率结识新朋友（为后续人物交互留接口）。</summary>
     private void MakeFriends(GameState gs)
     {
-        var adults = gs.Citizens.Values.Where(c => !c.IsChild && c.FriendIds.Count < 5).ToList();
+        var adults = gs.Citizens.Values.Where(c => !c.IsChild && c.FriendIds.Count < PopulationConfig.MaxFriends).ToList();
         if (adults.Count < 2)
             return;
 
@@ -596,7 +570,7 @@ public class LifecycleSystem
             if (c.FamilyId >= 0 && !seen.Add(c.FamilyId))
                 continue; // 同家庭只处理一次
             double budget = FamilyPerCapitaAssets(gs, c);
-            if (budget < GameBalance.Immigration.SelfBuildAssets)
+            if (budget < ImmigrationConfig.SelfBuildAssets)
                 continue;
             if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var house, out double cost))
                 MoveFamilyToNewHouse(gs, c, house, occupancy, cost);
@@ -670,7 +644,7 @@ public class LifecycleSystem
             occupancy[c.HomeId]--;
 
         c.Money = Math.Max(0, c.Money - cost); // 房款从个人私产支付
-        var fam = gs.AddFamily(new Family { HomeId = newHome.Id, SharedAssets = 15 });
+        var fam = gs.AddFamily(new Family { HomeId = newHome.Id, SharedAssets = PopulationConfig.SplitFamilyAssets });
         c.FamilyId = fam.Id;
         fam.MemberIds.Add(c.Id);
         newHome.Abandoned = false;

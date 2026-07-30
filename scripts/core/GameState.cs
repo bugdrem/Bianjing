@@ -9,10 +9,11 @@ public class GameState
 {
     public static GameState I { get; set; }
 
-    public const int BridgeCost = 30;
+    /// <summary>桥梁每延米造价（调参见 configs/WorldConfig）。</summary>
+    public const int BridgeCost = WorldConfig.BridgeCost;
 
-    /// <summary>两种道路造价（每延米，不计宽度）：辅路 10 / 主路 18。</summary>
-    public static int RoadCostOf(RoadKind kind) => kind == RoadKind.Main ? 18 : 10;
+    /// <summary>两种道路造价（每延米，不计宽度，调参见 configs/WorldConfig）。</summary>
+    public static int RoadCostOf(RoadKind kind) => kind == RoadKind.Main ? WorldConfig.MainRoadCost : WorldConfig.SideRoadCost;
 
     /// <summary>道路占地宽度（米/格）：主路 4，辅路 2。</summary>
     public static int RoadWidthOf(RoadKind kind) => kind == RoadKind.Main ? 4 : 2;
@@ -39,8 +40,8 @@ public class GameState
     /// <summary>地面物资堆，以格索引（y*Size+x）为键（一格至多一堆，拾空即消）。</summary>
     public Dictionary<int, ItemPileObj> Piles { get; } = new();
 
-    public double Money = 5000;
-    public double Food = 500;
+    public double Money = WorldConfig.StartMoney;
+    public double Food = WorldConfig.StartFood;
 
     /// <summary>官库收支账本（本月/上月分类流水，随存档保存）。</summary>
     public Ledger Ledger = new();
@@ -268,7 +269,7 @@ public class GameState
     /// 已有任意路（主/辅/桥/小路）保留不动（不重铺也不降级）。</summary>
     private void LayLaneRing(Vector2I origin, int sx, int sy)
     {
-        int w = GameBalance.Growth.LaneRing;
+        int w = GrowthConfig.LaneRing;
         for (int x = origin.X - w; x < origin.X + sx + w; x++)
         {
             for (int y = origin.Y - w; y < origin.Y + sy + w; y++)
@@ -390,7 +391,7 @@ public class GameState
         Buildings.Remove(b.Id);
     
         // footprint 已清空，此时判断小路格是否仍贴着「其它」建筑
-        int w = GameBalance.Growth.LaneRing;
+        int w = GrowthConfig.LaneRing;
         for (int x = origin.X - w; x < origin.X + fx + w; x++)
         {
             for (int y = origin.Y - w; y < origin.Y + fy + w; y++)
@@ -558,8 +559,8 @@ public class GameState
         };
 
         // 后门数随占地面积增长；仅大门边临路时 slot 全取不出，自然无后门
-        int backDoors = System.Math.Max(1, fx * fy / GameBalance.Growth.CellsPerBackDoor);
-        int gap = GameBalance.Growth.MinDoorGap;
+        int backDoors = System.Math.Max(1, fx * fy / GrowthConfig.CellsPerBackDoor);
+        int gap = GrowthConfig.MinDoorGap;
         while (doors.Count < 1 + backDoors && gap >= 0)
         {
             int before = doors.Count;
@@ -906,11 +907,11 @@ public class GameState
         return c;
     }
 
-    /// <summary>记一笔年龄履历（重大事件）：按当前游戏年月追加；上限 40 条，超出移除最旧，防长寿居民档案膨胀。</summary>
+    /// <summary>记一笔年龄履历（重大事件）：按当前游戏年月追加；超出上限移除最旧，防长寿居民档案膨胀。</summary>
     public void LogLifeEvent(Citizen c, string text)
     {
         c.LifeEvents.Add(new LifeEvent { Year = CurYear, Month = CurMonth, Text = text });
-        if (c.LifeEvents.Count > 40)
+        if (c.LifeEvents.Count > WorldConfig.LifeEventCap)
             c.LifeEvents.RemoveAt(0);
     }
 
@@ -919,7 +920,7 @@ public class GameState
     public void PostNews(string kind, string text)
     {
         News.Insert(0, new NewsItem { Year = CurYear, Month = CurMonth, Kind = kind, Text = text });
-        if (News.Count > 200)
+        if (News.Count > WorldConfig.NewsCap)
             News.RemoveAt(News.Count - 1); // 满则淘汰最旧一条
         EventBus.RaiseNewsPosted();
     }

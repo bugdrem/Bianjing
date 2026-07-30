@@ -21,8 +21,8 @@ public static class Goods
     public const string Ironware = "ironware"; // 铁器←矿石
     public const string Cured = "cured";       // 腌货←野味+盐
 
-    /// <summary>一担 = 5 份（居民单次搬运量）。</summary>
-    public const double LoadUnits = 5;
+    /// <summary>一担几份（居民单次搬运量）：转发自 EconomyConfig。</summary>
+    public static double LoadUnits => EconomyConfig.LoadUnits;
 
     /// <summary>食物类货品（家庭口粮储备按此合计；消耗优先级：粮→果→野味）。</summary>
     public static readonly string[] FoodKinds = { Grain, Fruit, Game };
@@ -52,7 +52,7 @@ public static class Goods
     /// <summary>成品所需原料（非成品返回空数组）。</summary>
     public static string[] InputsOf(string id) => Recipes.GetValueOrDefault(id, System.Array.Empty<string>());
 
-    /// <summary>每份基价（居民卖出价；买入价为基价 × 1.5）。</summary>
+    /// <summary>每份基价（居民卖出价；买入价为基价 × BuyMarkup）。</summary>
     public static readonly Dictionary<string, double> BasePrice = new()
     {
         [Grain] = 0.2,
@@ -67,8 +67,8 @@ public static class Goods
         [Cured] = 1.0,
     };
 
-    /// <summary>买入价倍率（去商铺购买比自产贵）。</summary>
-    public const double BuyMarkup = 1.5;
+    /// <summary>买入价倍率（去商铺购买比自产贵）：转发自 EconomyConfig。</summary>
+    public static double BuyMarkup => EconomyConfig.BuyMarkup;
 
     public static readonly Dictionary<string, string> DisplayName = new()
     {
@@ -87,5 +87,5 @@ public static class Goods
 
     public static string NameOf(string id) => DisplayName.GetValueOrDefault(id, id);
 
-    public static double PriceOf(string id) => BasePrice.GetValueOrDefault(id, 0.2);
+    public static double PriceOf(string id) => BasePrice.GetValueOrDefault(id, EconomyConfig.DefaultPrice);
 }

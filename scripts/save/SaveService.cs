@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v14：房体=占地且默认尺寸 4×4→2×2（坐标体系与旧档不兼）；早期开发版本不符拒读。</summary>
-    public const int FormatVersion = 14;
+    /// <summary>v15：新增地形高度（整数台地）+山体生成，地图高度层与旧档不兼；早期开发版本不符拒读。</summary>
+    public const int FormatVersion = 15;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -179,6 +179,11 @@ public static class SaveService
                     map.WaterCells.Add(index);
                 if (cell.HasBridge)
                     map.BridgeCells.Add(index);
+                if (cell.Height != 0)
+                {
+                    map.HeightCells.Add(index);
+                    map.HeightLayers.Add(cell.Height); // 非零高度稀疏存
+                }
             }
         }
 
@@ -325,6 +330,11 @@ public static class SaveService
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasWater = true;
         foreach (int index in map.BridgeCells ?? new List<int>())
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasBridge = true; // HasRoad 已由 RoadCells 恢复
+
+        // v15：非零地形高度恢复（与 HeightLayers 一一对应）
+        var hCells = map.HeightCells ?? new List<int>();
+        for (int i = 0; i < hCells.Count; i++)
+            gs.Map.CellAt(hCells[i] % MapGrid.Size, hCells[i] / MapGrid.Size).Height = map.HeightLayers[i];
 
         foreach (var p in plants ?? new List<PlantObj>())
         {

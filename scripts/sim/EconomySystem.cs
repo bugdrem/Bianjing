@@ -6,7 +6,8 @@ namespace Bianjing;
 /// 粮田产粮、人口耗粮。税收由 TaxSystem 按政策结算。</summary>
 public class EconomySystem
 {
-    private const double FoodPerCapita = 0.2;
+    /// <summary>人均日耗官粮：转发自 EconomyConfig。</summary>
+    private static double FoodPerCapita => EconomyConfig.OfficialFoodPerCapita;
 
     public void TickDay(GameState gs)
     {

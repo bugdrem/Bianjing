@@ -12,16 +12,13 @@ namespace Bianjing;
 /// </summary>
 public class WildlifeSystem
 {
-    /// <summary>每多少格树林支撑一只动物（总数与林地成正比）。</summary>
-    private const int TreesPerAnimal = 15;
-    /// <summary>种群硬上限（防极端密林爆量；世界面积扩大四倍后同比上调）。</summary>
-    private const int HardCap = 240;
-    /// <summary>每月补充新个体的触发比例（“一定比例的树林会刷新”）。</summary>
-    private const float SpawnChancePerMonth = 0.5f;
-    /// <summary>刷新点该半径（米）内无动物才算“此处动物少于一”。</summary>
-    private const int LonelyRadius = 24;
-    private const float BreedChance = 0.12f;
-    private const float NaturalDeathChance = 0.01f;
+    // 调参集中在 configs/WildlifeConfig，此处只留短名转发便于阅读
+    private const int TreesPerAnimal = WildlifeConfig.TreesPerAnimal;
+    private const int HardCap = WildlifeConfig.HardCap;
+    private const float SpawnChancePerMonth = WildlifeConfig.SpawnChancePerMonth;
+    private const int LonelyRadius = WildlifeConfig.LonelyRadius;
+    private const float BreedChance = WildlifeConfig.BreedChance;
+    private const float NaturalDeathChance = WildlifeConfig.NaturalDeathChance;
 
     private readonly Random _rng = new();
 
@@ -49,7 +46,7 @@ public class WildlifeSystem
         foreach (var a in gs.Animals.Values)
         {
             var cur = new Vector2I(a.X, a.Y);
-            var next = BestNearbyCell(gs, cur, 4, occupied);
+            var next = BestNearbyCell(gs, cur, WildlifeConfig.WanderRadius, occupied);
             if (next == null || next.Value == cur)
                 continue;
             occupied.Remove(cur);

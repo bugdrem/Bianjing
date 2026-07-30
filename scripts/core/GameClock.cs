@@ -3,16 +3,17 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏时钟：暂停/1x/2x/4x。日历与流速取自 GameBalance.Time（每月 12 天、每天 24 时=12 时辰、每年 12 月）；
+/// <summary>游戏时钟：暂停/1x/2x/4x。日历与流速取自 TimeConfig（每月 12 天、每天 24 时=12 时辰、每年 12 月）；
 /// 日常事务按「日」结算，人口老化等大事按「月」结算；金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
 public partial class GameClock : Node
 {
-    public const int HoursPerDay = GameBalance.Time.HoursPerDay;
-    public const int DaysPerMonth = GameBalance.Time.DaysPerMonth;
-    public const int MonthsPerYear = GameBalance.Time.MonthsPerYear;
+    /// <summary>日历常量转发自 TimeConfig（调参集中在 configs 目录）。</summary>
+    public static int HoursPerDay => TimeConfig.HoursPerDay;
+    public static int DaysPerMonth => TimeConfig.DaysPerMonth;
+    public static int MonthsPerYear => TimeConfig.MonthsPerYear;
 
-    /// <summary>1x 速度下一个游戏小时对应的真实秒数（取自 GameBalance.Time）。</summary>
-    public const float SecondsPerHour = GameBalance.Time.SecondsPerGameHour;
+    /// <summary>1x 速度下一个游戏小时对应的真实秒数（取自 TimeConfig）。</summary>
+    public static float SecondsPerHour => TimeConfig.SecondsPerGameHour;
 
     /// <summary>0=暂停，1/2/4=倍速。</summary>
     public int Speed { get; set; } = 1;
@@ -102,10 +103,15 @@ public partial class GameClock : Node
         }
     }
 
-    public override void _UnhandledKeyInput(InputEvent e)
+    /// <summary>用 _Input（优先于 UI）而非 _UnhandledKeyInput：否则点过任意按钮后焦点留在按钮上，
+    /// 空格会被当成 ui_accept 触发那个按钮并吞掉事件，表现为“暂停失灵/松手即恢复”；
+    /// 正在文本框打字时放行（城市名/存档名输入）。</summary>
+    public override void _Input(InputEvent e)
     {
         if (e is not InputEventKey key || !key.Pressed || key.Echo)
             return;
+        if (GetViewport().GuiGetFocusOwner() is LineEdit or TextEdit)
+            return; // 打字中：空格/数字键归输入框
 
         switch (key.Keycode)
         {
@@ -113,6 +119,8 @@ public partial class GameClock : Node
             case Key.Key1: Speed = 1; break;
             case Key.Key2: Speed = 2; break;
             case Key.Key3: Speed = 4; break;
+            default: return; // 非时钟按键不拦截
         }
+        GetViewport().SetInputAsHandled(); // 已处理：不再传给焦点按钮防误触
     }
 }

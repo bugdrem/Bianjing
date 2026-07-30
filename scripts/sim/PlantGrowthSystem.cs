@@ -7,17 +7,13 @@ namespace Bianjing;
 /// <summary>植物生长系统：月结——树木固定生长、成熟大树散播幼体；日结——成树逐日挂果，挂满过熟概率落果成地面果堆。</summary>
 public class PlantGrowthSystem
 {
-    /// <summary>全图植物上限（世界面积扩大四倍后同比上调），防止树林无限蔓延吞噬地图。</summary>
-    private const int MaxPlants = 8800;
-    private const float SeedChance = 0.03f;
-
-    /// <summary>成树每日挂果增量（份）与挂满后每日落果概率。</summary>
-    private const double FruitPerDay = 0.1;
-    private const double DropChance = 0.1;
-
-    /// <summary>砍伐伤恢复：连续无人砍伐达到延迟天数后，每日回血至满。</summary>
-    private const int RegenDelayDays = 3;
-    private const float RegenPerDay = 2f;
+    // 调参集中在 configs/PlantConfig，此处只留短名转发便于阅读
+    private const int MaxPlants = PlantConfig.MaxPlants;
+    private const float SeedChance = PlantConfig.SeedChance;
+    private const double FruitPerDay = PlantConfig.FruitPerDay;
+    private const double DropChance = PlantConfig.DropChance;
+    private const int RegenDelayDays = PlantConfig.RegenDelayDays;
+    private const float RegenPerDay = PlantConfig.RegenPerDay;
 
     private readonly Random _rng = new();
 
@@ -60,8 +56,10 @@ public class PlantGrowthSystem
 
             if (p.Mature && gs.Plants.Count + seeds.Count < MaxPlants && _rng.NextDouble() < SeedChance)
             {
-                // 成熟大树在 ±4 米内的空格散播一株幼体（与旧版 ±1 格同距；不侵入坊区规划地）
-                var c = new Vector2I(p.X + _rng.Next(-4, 5), p.Y + _rng.Next(-4, 5));
+                // 成熟大树在 ±SeedRange 米内的空格散播一株幼体（不侵入坊区规划地）
+                var c = new Vector2I(
+                    p.X + _rng.Next(-PlantConfig.SeedRange, PlantConfig.SeedRange + 1),
+                    p.Y + _rng.Next(-PlantConfig.SeedRange, PlantConfig.SeedRange + 1));
                 if (!MapGrid.InBounds(c))
                     continue;
                 ref var cell = ref gs.Map.CellAt(c);

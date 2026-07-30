@@ -36,18 +36,22 @@ public class DesirabilitySystem
         }
 
         // 道路也带来临街吸引力：主路/辅路小量叠加，桥面（RoadKind.None）不加成；
-        // 半径 12 米与旧版 3 格（4m 格）等距，每格幅度除 16 归一
-        // （1m 格密度是旧版 16 倍，不除会把吸引力场吹胀十几倍）；
+        // 幅度/归一系数/泼溅半径均见 configs/DesirabilityConfig；
         // 只遍历增量维护的道路格列表，大地图下不再全图扫描
         foreach (var rc in gs.RoadCells)
         {
             var cell = gs.Map.CellAt(rc);
             if (!cell.HasRoad)
                 continue;
-            float bonus = cell.RoadKind switch { RoadKind.Main => 1.0f / 16f, RoadKind.Side => 0.4f / 16f, _ => 0f };
+            float bonus = cell.RoadKind switch
+            {
+                RoadKind.Main => DesirabilityConfig.MainRoadBonus / DesirabilityConfig.RoadBonusScale,
+                RoadKind.Side => DesirabilityConfig.SideRoadBonus / DesirabilityConfig.RoadBonusScale,
+                _ => 0f,
+            };
             if (bonus <= 0f)
                 continue;
-            SplatCell(gs, rc.X, rc.Y, bonus, 12f);
+            SplatCell(gs, rc.X, rc.Y, bonus, DesirabilityConfig.RoadRadius);
         }
     }
 

@@ -14,24 +14,23 @@ namespace Bianjing;
 /// </summary>
 public partial class CitizenAgent : Node3D
 {
-    private const float BaseSpeed = GameBalance.Movement.BaseSpeed;
-    private const float OffRoadFactor = GameBalance.Movement.OffRoadFactor; // 脱离道路的减速惩罚
-    private const float TiredThreshold = 80f;
-    private const float BoredThreshold = 25f;
-    private const float StayUntilDone = 9999f; // 驻留到条件触发（如下班）而非计时
-    private const float LaneJitterRange = 0.45f; // 车道偏移幅度（路格宽 1m，偏移后不出本格太远，窄路也不至踩出路肩）
-    private const float ChopDamage = 25f; // 每斧砍伐伤害（幼树一斧倒，老树需多斧）
-    private const double WoodPerHp = Goods.LoadUnits / (double)ChopDamage; // 血量→柴薪折算：一斧 25 血恰好一担
+    // 调参均集中在 configs 目录（MovementConfig/AgentConfig），此处只留短名转发便于阅读
+    private const float BaseSpeed = MovementConfig.BaseSpeed;
+    private const float OffRoadFactor = MovementConfig.OffRoadFactor; // 脱离道路的减速惩罚
+    private const float TiredThreshold = AgentConfig.TiredThreshold;
+    private const float BoredThreshold = AgentConfig.BoredThreshold;
+    private const float StayUntilDone = 9999f; // 驻留到条件触发（如下班）而非计时（程序哨兵值非调参）
+    private const float LaneJitterRange = AgentConfig.LaneJitterRange; // 车道偏移幅度
+    private const float ChopDamage = AgentConfig.ChopDamage; // 每斧砍伐伤害
+    private const double WoodPerHp = AgentConfig.WoodPerHp; // 血量→柴薪折算：一斧恰好一担
 
-    // 家庭储备目标（份/人，约一月用量）：低于目标一半触发补货/打水，补到目标为止
-    private const double FoodPerResident = 3.0;
-    private const double WoodPerResident = 1.0;
-    private const double WaterPerResident = 3.0;
+    // 家庭储备目标（份/人）：低于目标一半触发补货/打水，补到目标为止
+    private const double FoodPerResident = AgentConfig.FoodPerResident;
+    private const double WoodPerResident = AgentConfig.WoodPerResident;
+    private const double WaterPerResident = AgentConfig.WaterPerResident;
 
-    /// <summary>就近采集半径（米）：伐木/采摘/拾堆/打猎只在此范围内找目标，
-    /// 附近没有就闲逛等林子长回来（树会散播/回血），不再为一棵树全图长途奔袭；
-    /// 打水不受此限（水是刚需且无替代来源）。</summary>
-    private const int ForageRadius = 64;
+    /// <summary>就近采集半径（米，见 AgentConfig）：打水不受此限。</summary>
+    private const int ForageRadius = AgentConfig.ForageRadius;
 
     public Citizen C { get; }
 
@@ -43,10 +42,10 @@ public partial class CitizenAgent : Node3D
     private readonly AgentManager _manager;
     private readonly Random _rng = new();
 
-    private MeshInstance3D _lower, _upper, _head, _hat;
-    private StandardMaterial3D _lowerMat, _upperMat, _headMat, _hatMat;
+    private MeshInstance3D _lower, _upper, _belt, _sleeveL, _sleeveR, _head, _hair, _hat;
+    private StandardMaterial3D _lowerMat, _upperMat, _beltMat, _headMat, _hatMat;
 
-    // 宋人占位模型：头/上身/下身 + 冠发，共享网格资源省内存，材质各自持有
+    // 宋人占位模型：头/发盖/上身/袍摆 + 腰带 + 双垂袖 + 冠发，共享网格资源省内存，材质各自持有（袖同上衣、发盖同冠发共用）
     private static readonly BoxMesh SharedBox = new() { Size = Vector3.One };
     private static readonly SphereMesh SharedSphere = new() { Radius = 0.5f, Height = 1f };
 
@@ -88,8 +87,12 @@ public partial class CitizenAgent : Node3D
         AddChild(_body);
         _lower = AddPart(SharedBox, _lowerMat = new StandardMaterial3D());
         _upper = AddPart(SharedBox, _upperMat = new StandardMaterial3D());
+        _sleeveL = AddPart(SharedBox, _upperMat); // 垂袖与上衣同料同色，共用材质
+        _sleeveR = AddPart(SharedBox, _upperMat);
+        _belt = AddPart(SharedBox, _beltMat = new StandardMaterial3D());
         _head = AddPart(SharedSphere, _headMat = new StandardMaterial3D());
-        _hat = AddPart(SharedBox, _hatMat = new StandardMaterial3D());
+        _hair = AddPart(SharedSphere, _hatMat = new StandardMaterial3D()); // 发盖与冠发同色，共用材质
+        _hat = AddPart(SharedBox, _hatMat);
         ApplyLook();
 
         _laneJitter = new Vector3(
@@ -155,6 +158,11 @@ public partial class CitizenAgent : Node3D
         var push = _manager.SeparationPush(this);
         if (push != Vector3.Zero)
             Position += push * Mathf.Min(dt, 0.1f);
+
+        // 站面贴合：脚下是桥板时抬到桥面顶，下桥回落地面基准（平滑过渡免上下瞬跳）
+        float surfaceY = SurfaceYAt(Position);
+        if (Mathf.Abs(Position.Y - surfaceY) > 0.001f)
+            Position = Position with { Y = Mathf.MoveToward(Position.Y, surfaceY, 1.5f * dt) };
 
         // 位置回写数据层，随存档保存
         C.PosX = Position.X;
@@ -382,7 +390,7 @@ public partial class CitizenAgent : Node3D
         }
 
         if (C.Gender == Gender.Female && C.IsMarried && C.Activity != ActivityType.Shopping
-            && _rng.NextDouble() < 0.6)
+            && _rng.NextDouble() < AgentConfig.HousewifeShopChance)
         {
             // 主妇：外出采购，回程自然衔接下次决策
             StartActivity(ActivityType.Shopping, ShoppingAnchor(gs), 2.5f);
@@ -391,7 +399,7 @@ public partial class CitizenAgent : Node3D
 
         if (C.IsElder)
         {
-            if (_rng.NextDouble() < 0.5)
+            if (_rng.NextDouble() < AgentConfig.ElderStrollChance)
                 StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
             else
                 StartRestHome(gs, 4f);
@@ -481,11 +489,11 @@ public partial class CitizenAgent : Node3D
 
     /// <summary>今日是否为本人的休息日：按绝对天数每 RestCycleDays 天休一天，叠加个体 Id 错峰（不全城同日停工）。</summary>
     private bool IsRestDayToday()
-        => (_clock.AbsoluteDay + C.Id) % GameBalance.Schedule.RestCycleDays == 0;
+        => (_clock.AbsoluteDay + C.Id) % ScheduleConfig.RestCycleDays == 0;
 
     /// <summary>当前是否处于上班时段（早晨上工、下午收工，不含收工时）。</summary>
     private bool IsWorkHourNow()
-        => _clock.Hour >= GameBalance.Schedule.WorkStartHour && _clock.Hour < GameBalance.Schedule.WorkEndHour;
+        => _clock.Hour >= ScheduleConfig.WorkStartHour && _clock.Hour < ScheduleConfig.WorkEndHour;
 
     /// <summary>当前是否该上工（非休息日且处于上班时段）：驻工下班判定用。</summary>
     private bool IsWorkTimeNow() => !IsRestDayToday() && IsWorkHourNow();
@@ -524,7 +532,7 @@ public partial class CitizenAgent : Node3D
 
     /// <summary>是否已退休：过退休年龄且已离岗（无业）的成年人（致仕判定在数据层 JobSystem）。</summary>
     private bool IsRetiredNow()
-        => C.JobKind == JobKind.None && !C.IsChild && C.AgeYears >= GameBalance.Retire.Age;
+        => C.JobKind == JobKind.None && !C.IsChild && C.AgeYears >= RetireConfig.Age;
 
     /// <summary>退休生活安排：家中告急仍去补（打水/采购/自采，属“采集等”范畴）；
     /// 否则：富裕家庭闲逛消遣，寒门则上山采薪采果补贴家用。</summary>
@@ -558,7 +566,7 @@ public partial class CitizenAgent : Node3D
             perCapita = fam.TotalAssets(gs) / fam.MemberIds.Count;
         else
             perCapita = C.Money;
-        return perCapita >= GameBalance.Retire.WealthyPerCapitaAssets;
+        return perCapita >= RetireConfig.WealthyPerCapitaAssets;
     }
 
     /// <summary>闲逛消遣（退休富户/闲人）：当前仅四处闲逛。
@@ -1317,6 +1325,15 @@ public partial class CitizenAgent : Node3D
         return !cell.HasWater || cell.HasBridge || cell.HasRoad;
     }
 
+    /// <summary>相邻两格能否步行相通：既是旱路，且层差在可翻越范围内（降壁/降坡不可跨）。
+    /// 山体生成已削平陡壁（全图坡度≤上限），此守卫主要为后续玩家塑形（b 方案）预留。</summary>
+    private static bool StepTraversable(Vector2I from, Vector2I to)
+    {
+        if (!IsDryCell(to))
+            return false;
+        return TerrainConfig.Traversable(GameState.I.Map.CellAt(from).Height, GameState.I.Map.CellAt(to).Height);
+    }
+
     /// <summary>四向 BFS 找旱路（含起终格）；搜索量封顶防卡帧，找不到返回 null。
     /// 1m 格下上限需足够大：旧值 2000 格只覆盖二十米见方，绕到几十米外的桥就搜不到——
     /// 导致有桥也直接蹚水过河；现封顶 24000 格（约 150m 见方），仅直线穿水时才触发。</summary>
@@ -1348,7 +1365,7 @@ public partial class CitizenAgent : Node3D
             foreach (var d in dirs)
             {
                 var n = cur + d;
-                if (!prev.ContainsKey(n) && MapGrid.InBounds(n) && IsDryCell(n))
+                if (!prev.ContainsKey(n) && MapGrid.InBounds(n) && StepTraversable(cur, n))
                 {
                     prev[n] = cur;
                     queue.Enqueue(n);
@@ -1356,6 +1373,19 @@ public partial class CitizenAgent : Node3D
             }
         }
         return null;
+    }
+
+    /// <summary>脚下站面高度：地形海拔叠加地面厚度——桥格站桥板顶（桥跨水在 0 基准，顶 0.43），
+    /// 其余格为本格地面海拔 +0.2（路面顶约 0.24 与基准差无感，不单独处理）。</summary>
+    private static float SurfaceYAt(Vector3 pos)
+    {
+        var c = MapGrid.WorldToCell(pos);
+        if (!MapGrid.InBounds(c))
+            return 0.2f;
+        ref var cell = ref GameState.I.Map.CellAt(c);
+        if (cell.HasBridge)
+            return 0.43f;
+        return TerrainConfig.LayerToWorldY(cell.Height) + 0.2f;
     }
 
     private void MoveAlongPath(float dt)
@@ -1366,8 +1396,8 @@ public partial class CitizenAgent : Node3D
         float speedFactor;
         if (inBounds && GameState.I.Map.CellAt(cell).HasRoad)
         {
-            // 路面按种类快慢（主路快/辅路常速/小路慢/桥面常速），取自 GameBalance.Movement
-            speedFactor = GameBalance.Movement.RoadSpeedFactor(GameState.I.Map.CellAt(cell).RoadKind);
+            // 路面按种类快慢（主路快/辅路常速/小路慢/桥面常速），取自 MovementConfig
+            speedFactor = MovementConfig.RoadSpeedFactor(GameState.I.Map.CellAt(cell).RoadKind);
         }
         else
         {
@@ -1378,6 +1408,7 @@ public partial class CitizenAgent : Node3D
         while (step > 0f && _path != null)
         {
             var target = _path[_pathIndex];
+            target.Y = Position.Y; // 水平面内移动；垂直贴面（桥面/地面）由 _Process 统一校正
             float dist = Position.DistanceTo(target);
             if (dist > step)
             {
@@ -1536,38 +1567,66 @@ public partial class CitizenAgent : Node3D
         return target != null ? BuildingAnchor(target) : _manager.RandomRoadCell(_rng);
     }
 
-    /// <summary>外观：宋人三段式（头/上身/下身）+ 冠发。体型随年龄，配色分男女，老人白发。</summary>
+    /// <summary>外观：宋人市井装束（参考宋画风人物）——男女皆着及踝长袍（A 字下摆），
+    /// 束深色腰带配宽垂袖；男戴幞头、女盘圆发髻；体型随年龄，配色按人稳定取自色板，老人白发灰袍。</summary>
     private void ApplyLook()
     {
         _lookAgeYears = C.AgeYears;
         // 体型随年龄线性生长：新生儿 ChildMinScale → 成年门槛达满值 1.0，再乘全局村民模型缩放
-        float grow = Mathf.Min(1f, C.AgeMonths / (GameBalance.Life.AdultAgeYears * 12f));
-        float bodyScale = (GameBalance.Villager.ChildMinScale + (1f - GameBalance.Villager.ChildMinScale) * grow)
-            * GameBalance.Villager.ModelScale;
+        float grow = Mathf.Min(1f, C.AgeMonths / (LifeConfig.AdultAgeYears * 12f));
+        float bodyScale = (VillagerConfig.ChildMinScale + (1f - VillagerConfig.ChildMinScale) * grow)
+            * VillagerConfig.ModelScale;
         _body.Scale = Vector3.One * bodyScale;
 
         bool female = C.Gender == Gender.Female;
 
-        // 下身：男着裤褌收窄，女着长裙放宽
-        _lower.Scale = female ? new Vector3(0.6f, 0.8f, 0.42f) : new Vector3(0.48f, 0.75f, 0.32f);
+        // 袍摆：及踝长袍下半，比上身宽出一圈成 A 字轮廓（女裙袍更宽）；
+        // 含袖总宽控在旧版体量内（≤约 0.56），不放大人物
+        _lower.Scale = female ? new Vector3(0.54f, 0.85f, 0.4f) : new Vector3(0.5f, 0.82f, 0.36f);
         _lower.Position = Vector3.Up * (_lower.Scale.Y / 2f);
         float waist = _lower.Scale.Y;
-
-        // 上身：男肩宽、女肩窄
-        _upper.Scale = new Vector3(female ? 0.5f : 0.56f, 0.55f, 0.34f);
-        _upper.Position = Vector3.Up * (waist + 0.275f);
-        float neck = waist + 0.55f;
-
-        // 头 + 冠发（男戴幞头、女绾发髻，老人白发）
+        
+        // 袍身上段：收窄于袍摆，男肩略宽（两侧留出垂袖位）
+        _upper.Scale = new Vector3(female ? 0.34f : 0.36f, 0.5f, female ? 0.26f : 0.28f);
+        _upper.Position = Vector3.Up * (waist + 0.25f);
+        float neck = waist + 0.5f;
+        
+        // 双垂袖：自肩部垂至腰际，前后宽于臂形成宽袖剪影
+        var sleeve = new Vector3(0.1f, 0.38f, 0.2f);
+        _sleeveL.Scale = sleeve;
+        _sleeveR.Scale = sleeve;
+        float armX = _upper.Scale.X / 2f + sleeve.X / 2f;
+        float armY = neck - sleeve.Y / 2f;
+        _sleeveL.Position = new Vector3(-armX, armY, 0f);
+        _sleeveR.Position = new Vector3(armX, armY, 0f);
+        
+        // 腰带：深色细带束在袍身交界处上沿，贴上身凸出可见（位置略高于袍摆顶免被盖住）
+        _belt.Scale = new Vector3(_upper.Scale.X + 0.06f, 0.08f, _upper.Scale.Z + 0.06f);
+        _belt.Position = Vector3.Up * (waist + 0.05f);
+        
+        // 头 + 发：发盖是套在头顶上半的扁球（贴头皮包住头颅，不再是悬浮黑团），
+        // 其上再戴冠发：男幞头（扁盒）、女与孩童小圆髻（小球），老人白发
         _head.Scale = Vector3.One * 0.34f;
         _head.Position = Vector3.Up * (neck + 0.19f);
-        _hat.Scale = female ? new Vector3(0.18f, 0.14f, 0.18f) : new Vector3(0.3f, 0.1f, 0.3f);
-        _hat.Position = Vector3.Up * (neck + 0.38f);
+        _hair.Scale = new Vector3(0.365f, 0.2f, 0.365f); // 略宽于头、压扁，只罩头顶半球
+        _hair.Position = Vector3.Up * (neck + 0.27f);
+        if (female || C.IsChild)
+        {
+            _hat.Mesh = SharedSphere;
+            _hat.Scale = Vector3.One * (female ? 0.13f : 0.1f);
+            _hat.Position = Vector3.Up * (neck + 0.41f);
+        }
+        else
+        {
+            _hat.Mesh = SharedBox;
+            _hat.Scale = new Vector3(0.2f, 0.09f, 0.2f);
+            _hat.Position = Vector3.Up * (neck + 0.4f);
+        }
 
         _headMat.AlbedoColor = new Color(0.91f, 0.76f, 0.62f); // 肤色
         _hatMat.AlbedoColor = C.IsElder ? new Color(0.92f, 0.92f, 0.9f) : new Color(0.09f, 0.08f, 0.08f);
 
-        Color upperCol, lowerCol;
+        Color upperCol, lowerCol, beltCol = new(0.24f, 0.19f, 0.14f); // 默认深褐腰带
         if (C.IsChild)
         {
             upperCol = new Color(0.95f, 0.85f, 0.45f);
@@ -1575,20 +1634,42 @@ public partial class CitizenAgent : Node3D
         }
         else if (C.IsElder)
         {
-            upperCol = new Color(0.62f, 0.62f, 0.58f);
-            lowerCol = new Color(0.46f, 0.46f, 0.43f);
+            upperCol = new Color(0.64f, 0.63f, 0.58f);
+            lowerCol = new Color(0.48f, 0.47f, 0.43f);
+            beltCol = new Color(0.3f, 0.28f, 0.25f);
         }
         else if (female)
         {
-            upperCol = new Color(0.76f, 0.42f, 0.47f); // 粉色襦衫
-            lowerCol = new Color(0.5f, 0.62f, 0.5f);   // 青绿罗裙
+            // 按人稳定取色（Id 取模，重看不变色）：襦衫 + 罗裙两色一组
+            var (u, l) = FemaleRobes[C.Id % FemaleRobes.Length];
+            upperCol = u; lowerCol = l;
+            beltCol = new Color(0.45f, 0.26f, 0.22f); // 女束红褐带
         }
         else
         {
-            upperCol = new Color(0.34f, 0.4f, 0.5f);   // 青灰襕衫
-            lowerCol = new Color(0.26f, 0.3f, 0.36f);
+            var (u, l) = MaleRobes[C.Id % MaleRobes.Length];
+            upperCol = u; lowerCol = l;
         }
         _upperMat.AlbedoColor = upperCol;
         _lowerMat.AlbedoColor = lowerCol;
+        _beltMat.AlbedoColor = beltCol;
     }
+
+    // 成年袍服色板（上衣/下摆）：取自宋画市井色调——男灰蓝/青绿/米褐/藏青/茶棕，
+    // 女米白襦朱红裙/青襦米裙/藕荷襦灰蓝裙；下摆略深于上衣显层次
+    private static readonly (Color Upper, Color Lower)[] MaleRobes =
+    {
+        (new Color(0.42f, 0.50f, 0.58f), new Color(0.36f, 0.43f, 0.50f)), // 灰蓝
+        (new Color(0.45f, 0.55f, 0.47f), new Color(0.38f, 0.47f, 0.40f)), // 青绿
+        (new Color(0.72f, 0.63f, 0.50f), new Color(0.62f, 0.54f, 0.42f)), // 米褐
+        (new Color(0.30f, 0.36f, 0.46f), new Color(0.25f, 0.30f, 0.39f)), // 藏青
+        (new Color(0.55f, 0.44f, 0.34f), new Color(0.47f, 0.37f, 0.28f)), // 茶棕
+    };
+
+    private static readonly (Color Upper, Color Lower)[] FemaleRobes =
+    {
+        (new Color(0.88f, 0.84f, 0.76f), new Color(0.70f, 0.30f, 0.30f)), // 米白襦 + 朱红裙
+        (new Color(0.55f, 0.65f, 0.60f), new Color(0.80f, 0.74f, 0.62f)), // 青襦 + 米裙
+        (new Color(0.76f, 0.55f, 0.55f), new Color(0.45f, 0.52f, 0.60f)), // 藕荷襦 + 灰蓝裙
+    };
 }

@@ -11,12 +11,12 @@ namespace Bianjing;
 /// </summary>
 public partial class AgentManager : Node
 {
-    /// <summary>表现层代理上限（超出的居民只参与数据模拟，不上屏）。</summary>
-    private const int MaxAgents = 300;
+    /// <summary>表现层代理上限（超出的居民只参与数据模拟，不上屏；调参见 configs/AgentConfig）。</summary>
+    private const int MaxAgents = AgentConfig.MaxAgents;
 
     /// <summary>分离半径/强度：小于邻桶覆盖距离（1m 格桶，查 3×3 邻桶保证覆盖 1m 内邻居）。</summary>
-    private const float SeparationRadius = 0.9f;
-    private const float SeparationStrength = 3f;
+    private const float SeparationRadius = AgentConfig.SeparationRadius;
+    private const float SeparationStrength = AgentConfig.SeparationStrength;
 
     private readonly GameClock _clock;
     private readonly Dictionary<int, CitizenAgent> _agents = new();

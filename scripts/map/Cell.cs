@@ -9,7 +9,7 @@ public enum ZoneType
 }
 
 /// <summary>道路种类：无/小路/辅路/主路——小路为村民自建住宅四周自动生成（可通行、可作新房临路依据），
-/// 移速最慢且随房屋拆除；辅路/主路由玩家绘制。移速与寻路权重见 GameBalance.Movement。</summary>
+/// 移速最慢且随房屋拆除；辅路/主路由玩家绘制。移速与寻路权重见 MovementConfig。</summary>
 public enum RoadKind
 {
     None,
@@ -40,6 +40,10 @@ public struct Cell
     public int BuildingId;
 
     public ZoneType Zone;
+
+    /// <summary>地形高度层（整数台地，0=平地基准，越大越高）：世界海拔 = Height×TerrainConfig.LayerHeight。
+    /// 相邻格层差即台阶，通行/铺路是否可行见 TerrainConfig.Traversable。仅世界生成期由山体隆起赋值。</summary>
+    public int Height;
 
     /// <summary>吸引力缓存，由 DesirabilitySystem 重算。</summary>
     public float Desirability;

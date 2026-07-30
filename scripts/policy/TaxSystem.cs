@@ -8,8 +8,8 @@ namespace Bianjing;
 /// </summary>
 public class TaxSystem
 {
-    /// <summary>每项重税每月造成的民怨（成人兴趣值扣减）。</summary>
-    private const float HeavyTaxFunPenalty = 2f;
+    /// <summary>每项重税每月造成的民怨（成人兴趣值扣减）：转发自 TaxConfig。</summary>
+    private static float HeavyTaxFunPenalty => TaxConfig.HeavyTaxFunPenalty;
 
     /// <summary>每日征税：月基数 ÷ 30，逐税种记入账本；税所在岗吏员与钱法科技提供全局加成。</summary>
     public void TickDay(GameState gs)

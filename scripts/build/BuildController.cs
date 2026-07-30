@@ -399,7 +399,7 @@ public partial class BuildController : Node
         foreach (var agent in Agents.Agents)
         {
             // 瞄准缩放后的身躯中部（旧值 +1m 在小模型头顶老高处，投影偏离视觉位置致难点中）
-            var world = agent.Position + Vector3.Up * (GameBalance.Villager.ModelScale * 1.1f);
+            var world = agent.Position + Vector3.Up * (VillagerConfig.ModelScale * 1.1f);
             if (cam.IsPositionBehind(world))
                 continue;
             float d = cam.UnprojectPosition(world).DistanceTo(mouse);

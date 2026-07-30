@@ -131,11 +131,12 @@ public partial class Main : Node3D
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
 
-    /// <summary>新地图初始化：开凿河道、随机铺树、投放野物。</summary>
+    /// <summary>新地图初始化：开凿河道、隆起山体、随机铺树、投放野物。</summary>
     private static void SeedWorld()
     {
         var rng = new Random();
         RiverGenerator.Carve(GameState.I.Map, rng);
+        MountainGenerator.Raise(GameState.I.Map, rng); // 河后山前：山形定了再决定哪长树
         TreeGenerator.Scatter(GameState.I, rng);
         new WildlifeSystem().SeedInitial(GameState.I);
     }

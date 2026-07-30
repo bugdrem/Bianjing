@@ -67,6 +67,11 @@ public class MapSave
     public List<int> ZoneTypes = new();
     public List<int> WaterCells = new();
     public List<int> BridgeCells = new();
+
+    /// <summary>v15：非零地形高度格——HeightCells（一维索引）与 HeightLayers（对应层数）一一对应，
+    /// 平地（0 层）不存以保持稀疏。</summary>
+    public List<int> HeightCells = new();
+    public List<int> HeightLayers = new();
 }
 
 /// <summary>建筑实例 DTO（BuildingInstance 含 Godot 类型与 Def 引用，不直接序列化）。</summary>

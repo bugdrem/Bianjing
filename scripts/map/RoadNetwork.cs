@@ -4,7 +4,7 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>道路连通网络：基于 AStarGrid2D，只有道路格可通行；
-/// 寻路权重按道路种类区分（主路代价低、小路代价高），使居民在时间相近时偏好走快路。权重取自 GameBalance.Movement。</summary>
+/// 寻路权重按道路种类区分（主路代价低、小路代价高），使居民在时间相近时偏好走快路。权重取自 MovementConfig。</summary>
 public class RoadNetwork
 {
     private readonly AStarGrid2D _astar = new();
@@ -25,7 +25,7 @@ public class RoadNetwork
     {
         _astar.SetPointSolid(c, !isRoad);
         if (isRoad)
-            _astar.SetPointWeightScale(c, GameBalance.Movement.RoadWeight(kind));
+            _astar.SetPointWeightScale(c, MovementConfig.RoadWeight(kind));
     }
 
     /// <summary>沿道路寻路，返回格子序列；不可达时返回空列表。</summary>

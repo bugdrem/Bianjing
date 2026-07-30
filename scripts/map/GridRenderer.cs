@@ -19,6 +19,10 @@ public partial class GridRenderer : Node3D
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
     private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
 
+    // 地形土柱色：低处同草地基底色，高处渐变岩褐灰褐（随层数插值）
+    private static readonly Color TerrainLowColor = new(0.45f, 0.5f, 0.32f); // 同 Main 地面草绿
+    private static readonly Color TerrainHighColor = new(0.5f, 0.46f, 0.4f);  // 山顶岩褐
+
     /// <summary>门标记颜色：大门亮金（显眼），后门暗木色（低调）。</summary>
     private static readonly Color MainDoorColor = new(0.85f, 0.7f, 0.35f);
     private static readonly Color BackDoorColor = new(0.45f, 0.32f, 0.2f);
@@ -187,7 +191,14 @@ public partial class GridRenderer : Node3D
         }
     }
 
-    /// <summary>重建单个分块：块内地形方块（水/桥/路）与树木。</summary>
+    /// <summary>地形土柱色：层数越高越偏岩褐灰褐。</summary>
+    private static Color TerrainColor(int height)
+    {
+        float t = Mathf.Clamp(height / (float)TerrainConfig.MaxMountainLayer, 0f, 1f);
+        return TerrainLowColor.Lerp(TerrainHighColor, t);
+    }
+
+    /// <summary>重建单个分块：块内地形土柱 + 水/桥/路贴面 + 树木。</summary>
     private void RebuildChunk(int index)
     {
         var gs = GameState.I;
@@ -208,9 +219,19 @@ public partial class GridRenderer : Node3D
             {
                 ref var cell = ref gs.Map.CellAt(x, y);
                 var world = MapGrid.CellToWorld(new Vector2I(x, y));
+                float groundY = TerrainConfig.LayerToWorldY(cell.Height); // 本格地面海拔
+
+                // 地形土柱：非水且高于基准的格填一根土柱，顶面到达 groundY（平地格靠整块底面兑底，不出实例）
+                if (!cell.HasWater && cell.Height > 0)
+                {
+                    float pillarH = groundY + 0.5f; // 多埋 0.5m 避免与基底平面露缝
+                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, pillarH, cs)), world + Vector3.Up * (groundY - pillarH / 2f)));
+                    boxColor.Add(TerrainColor(cell.Height));
+                }
+
                 if (cell.HasBridge)
                 {
-                    // 桥面：高出水面的木板
+                    // 桥面：高出水面的木板（桥跨水，水面一律在 0 基准）
                     boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, 0.35f, cs)), world + Vector3.Up * 0.25f));
                     boxColor.Add(BridgeColor);
                 }
@@ -221,7 +242,7 @@ public partial class GridRenderer : Node3D
                 }
                 else if (cell.HasRoad)
                 {
-                    // 三类道路按种类区分明度与厚度：主路最亮最厚，小路最暗最薄
+                    // 三类道路按种类区分明度与厚度：主路最亮最厚，小路最暗最薄（贴在本格地面上）
                     float h;
                     Color rc;
                     switch (cell.RoadKind)
@@ -233,18 +254,18 @@ public partial class GridRenderer : Node3D
                         default: // Side / 桥面(None)
                             h = 0.2f; rc = RoadColor; break;
                     }
-                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, h, cs)), world + Vector3.Up * (h / 2f)));
+                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, h, cs)), world + Vector3.Up * (groundY + h / 2f)));
                     boxColor.Add(rc);
                 }
 
                 // 树木：植物实体驱动，尺寸随生长进度放大（块内格→实体查询，重建量与块大小成正比）
                 if (cell.HasTree && gs.Plants.TryGetValue(GameState.CellIndex(new Vector2I(x, y)), out var p))
                 {
-                    // 位置/大小用格坐标伪随机扰动，避免排队感
+                    // 位置/大小用格坐标伪随机扰动，避免排队感；站在本格地面上
                     float jx = ((x * 73 + y * 31) % 7 - 3) * 0.15f;
                     float jz = ((x * 41 + y * 57) % 7 - 3) * 0.15f;
                     float s = (0.8f + ((x * 13 + y * 17) % 5) * 0.1f) * (0.35f + 0.65f * p.GrowthRatio);
-                    treeXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, s, s)), world + new Vector3(jx, 1.5f * s, jz)));
+                    treeXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, s, s)), world + new Vector3(jx, groundY + 1.5f * s, jz)));
                     treeColor.Add(p.IsFruitTree ? FruitTreeColor : TreeColor);
                 }
             }
@@ -275,7 +296,8 @@ public partial class GridRenderer : Node3D
             if (cell.BuildingId >= 0)
                 continue; // 已被建筑占用的坊区格不画色块
             var world = MapGrid.CellToWorld(c);
-            zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * 0.05f));
+            float gy = TerrainConfig.LayerToWorldY(cell.Height); // 贴本格地面
+            zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * (gy + 0.05f)));
             zoneColor.Add(BuildableZoneColor);
         }
         FillMultiMesh(_zones.Multimesh, zoneXf, zoneColor);
@@ -298,12 +320,13 @@ public partial class GridRenderer : Node3D
             // 等级越高楼越高；年久失修则发暗
             float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
 
-            // 房体范围：grown 与官营统一按占地 ~0.9 缩放整块绘制（房体=占地，不再留院子/不对称檐隙）
+            // 房体范围：grown 与官营统一按占地 ~0.9 缩放整块绘制（房体=占地）；立在原点格地面上
             float w, d;
             var center = MapGrid.CellToWorld(b.Origin);
+            float groundY = gs.Map.GroundY(b.Origin); // 地形高度基准（建筑要求平地，整块同高）
             w = b.FootX * cs * 0.9f;
             d = b.FootY * cs * 0.9f;
-            center += new Vector3((b.FootX - 1) * cs / 2f, height / 2f, (b.FootY - 1) * cs / 2f);
+            center += new Vector3((b.FootX - 1) * cs / 2f, groundY + height / 2f, (b.FootY - 1) * cs / 2f);
 
             var color = b.Def.GodotColor;
             if (b.Condition < 50f)
@@ -321,7 +344,7 @@ public partial class GridRenderer : Node3D
             var roofBasis = w >= d
                 ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * 1.06f, roofH, w * 1.06f))
                 : Basis.FromScale(new Vector3(w * 1.06f, roofH, d * 1.06f));
-            var roofCenter = new Vector3(center.X, height + roofH / 2f, center.Z);
+            var roofCenter = new Vector3(center.X, groundY + height + roofH / 2f, center.Z);
             roofXf.Add(new Transform3D(roofBasis, roofCenter));
             roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
 
@@ -338,7 +361,7 @@ public partial class GridRenderer : Node3D
                     const float thick = 0.18f;
                     // 门面宽度沿墙面（垂直于 dir），厚度沿 dir
                     var scale = dir.X != 0 ? new Vector3(thick, doorH, wide) : new Vector3(wide, doorH, thick);
-                    var pos = MapGrid.CellToWorld(door.Inside) + dirW * (cs * 0.5f) + Vector3.Up * (doorH / 2f);
+                    var pos = MapGrid.CellToWorld(door.Inside) + dirW * (cs * 0.5f) + Vector3.Up * (gs.Map.GroundY(door.Inside) + doorH / 2f);
                     doorXf.Add(new Transform3D(Basis.FromScale(scale), pos));
                     doorColor.Add(door.IsMain ? MainDoorColor : BackDoorColor);
                 }

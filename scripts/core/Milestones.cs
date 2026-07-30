@@ -41,6 +41,7 @@ public class MilestoneDef
 /// <summary>里程碑注册表：村落→集镇→县城→州城→京城（宋代聚落层级）。</summary>
 public static class Milestones
 {
+    /// <summary>里程碑表（数据驱动：后续增改档位直接改表）。</summary>
     public static readonly MilestoneDef[] Levels =
     {
         new() { Level = 0, Name = "村落", PopulationRequired = 0,   Reward = 0,    MaxHouseLevel = 1, FunBonus = 0f },
@@ -77,6 +78,7 @@ public static class Milestones
         public float FunPenalty;
     }
 
+    /// <summary>分级需求表（数据驱动：后续增改分级直接改表）。</summary>
     public static readonly TierNeed[] TierNeeds =
     {
         new() { MilestoneRequired = 2, Label = "副食", GoodsIds = new[] { Goods.Fruit },

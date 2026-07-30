@@ -12,10 +12,10 @@ namespace Bianjing;
 /// </summary>
 public class GoodsSystem
 {
-    /// <summary>每人每日口粮 / 柴薪 / 饮水消耗（份）。</summary>
-    private const double FoodPerDay = 0.1;
-    private const double FuelPerDay = 0.03;
-    private const double WaterPerDay = 0.1;
+    /// <summary>每人每日口粮 / 柴薪 / 饮水消耗（份）：转发自 EconomyConfig。</summary>
+    private static double FoodPerDay => EconomyConfig.FoodPerDay;
+    private static double FuelPerDay => EconomyConfig.FuelPerDay;
+    private static double WaterPerDay => EconomyConfig.WaterPerDay;
 
     /// <summary>口粮扣减优先级：先吃主粮，再果品，最后野味。</summary>
     private static readonly string[] FoodOrder = { Goods.Grain, Goods.Fruit, Goods.Game };
@@ -36,7 +36,7 @@ public class GoodsSystem
             else
             {
                 c.FoodShortDays++;
-                c.Fun = Math.Max(0, c.Fun - 1f); // 断炊：一天比一天丧气
+                c.Fun = Math.Max(0, c.Fun - EconomyConfig.HungerFunPenalty); // 断炊：一天比一天丧气
             }
 
             if (ConsumeFuel(gs, c, home, workersOf))
@@ -44,7 +44,7 @@ public class GoodsSystem
             else
             {
                 c.FuelShortDays++;
-                c.Fun = Math.Max(0, c.Fun - 0.5f); // 缺柴：冷灶伤神
+                c.Fun = Math.Max(0, c.Fun - EconomyConfig.ColdFunPenalty); // 缺柴：冷灶伤神
             }
 
             // 饮水：只扣家中存水（水不上市无处可买）；缺水暂不设惩罚，由储备阈值驱动居民去井/河边打水
@@ -103,9 +103,9 @@ public class GoodsSystem
             string goodsId = string.IsNullOrEmpty(b.Def.ProduceGoods) ? Goods.Grain : b.Def.ProduceGoods;
 
             // 收成散落在占地格上（典型案例三：散落地图的物资）；
-            // 1m 格下逐格散会生成上百小堆（拾运与渲染都遭殃），改为集中成至多 8 堆随机散在田面
+            // 1m 格下逐格散会生成上百小堆（拾运与渲染都遭殃），改为集中成限堆随机散在田面
             int cellCount = b.FootX * b.FootY;
-            int dropSpots = Math.Min(8, cellCount);
+            int dropSpots = Math.Min(EconomyConfig.HarvestMaxPiles, cellCount);
             double per = yield / dropSpots;
             for (int i = 0; i < dropSpots; i++)
             {

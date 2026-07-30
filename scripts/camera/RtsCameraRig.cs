@@ -5,7 +5,7 @@ namespace Bianjing;
 /// <summary>RTS 相机：WASD/屏幕边缘平移、滚轮缩放、Q/E 或中键拖动旋转，带俯仰与范围限制。</summary>
 public partial class RtsCameraRig : Node3D
 {
-    private const float MinDist = 6f;
+    private const float MinDist = 2.5f; // 拉近下限：可凑到街头看清单个行人
     private const float MaxDist = 700f; // 世界边长 1024m，拉远能看全大半张地图
     private const float MinPitch = -1.45f;
     private const float MaxPitch = -0.35f;
