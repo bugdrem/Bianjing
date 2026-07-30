@@ -46,21 +46,8 @@
       "DocumentGroups": [
         {
           "DockedWidth": 200,
-          "SelectedChildIndex": 0,
+          "SelectedChildIndex": 22,
           "Children": [
-            {
-              "$type": "Document",
-              "DocumentIndex": 0,
-              "Title": "TaxPolicy.cs",
-              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\policy\\TaxPolicy.cs",
-              "RelativeDocumentMoniker": "scripts\\policy\\TaxPolicy.cs",
-              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\policy\\TaxPolicy.cs",
-              "RelativeToolTip": "scripts\\policy\\TaxPolicy.cs",
-              "ViewState": "AgIAAAsAAAAAAAAAAAAAwB4AAABCAAAAAAAAAA==",
-              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-30T07:59:15.308Z",
-              "EditorCaption": ""
-            },
             {
               "$type": "Bookmark",
               "Name": "ST:137:0:{1fc202d4-d401-403c-9834-5b218574bb67}"
@@ -151,6 +138,19 @@
             },
             {
               "$type": "Document",
+              "DocumentIndex": 0,
+              "Title": "TaxPolicy.cs",
+              "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\policy\\TaxPolicy.cs",
+              "RelativeDocumentMoniker": "scripts\\policy\\TaxPolicy.cs",
+              "ToolTip": "D:\\Godot\\Bianjing\\scripts\\policy\\TaxPolicy.cs",
+              "RelativeToolTip": "scripts\\policy\\TaxPolicy.cs",
+              "ViewState": "AgIAAAsAAAAAAAAAAAAAwB4AAABCAAAAAAAAAA==",
+              "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
+              "WhenOpened": "2026-07-30T07:59:15.308Z",
+              "EditorCaption": ""
+            },
+            {
+              "$type": "Document",
               "DocumentIndex": 1,
               "Title": "Obj.cs",
               "DocumentMoniker": "D:\\Godot\\Bianjing\\scripts\\objects\\Obj.cs",
@@ -159,8 +159,7 @@
               "RelativeToolTip": "scripts\\objects\\Obj.cs",
               "ViewState": "AgIAADMAAAAAAAAAAAA1wAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-30T07:59:01.193Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-30T07:59:01.193Z"
             },
             {
               "$type": "Document",
@@ -172,8 +171,7 @@
               "RelativeToolTip": "scripts\\agents\\CitizenAgent.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAYAAAANAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-30T07:55:24.032Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-30T07:55:24.032Z"
             },
             {
               "$type": "Document",
@@ -185,8 +183,7 @@
               "RelativeToolTip": "scripts\\agents\\AgentManager.cs",
               "ViewState": "AgIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-30T07:55:19.823Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-30T07:55:19.823Z"
             },
             {
               "$type": "Document",
@@ -198,8 +195,7 @@
               "RelativeToolTip": "scripts\\zone\\ZoneGrowthSystem.cs",
               "ViewState": "AgIAADoBAAAAAAAAAAAwwEUBAABSAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-29T00:45:04.791Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-29T00:45:04.791Z"
             },
             {
               "$type": "Document",
@@ -234,8 +230,7 @@
               "RelativeToolTip": "scripts\\build\\BuildController.cs",
               "ViewState": "AgIAAOMAAAAAAAAAAAAgwOcAAAAJAAAAAAAAAA==",
               "Icon": "ae27a6b0-e345-4288-96df-5eaf394ee369.000738|",
-              "WhenOpened": "2026-07-27T09:23:31.417Z",
-              "EditorCaption": ""
+              "WhenOpened": "2026-07-27T09:23:31.417Z"
             },
             {
               "$type": "Document",
