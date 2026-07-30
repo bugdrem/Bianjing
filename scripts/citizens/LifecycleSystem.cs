@@ -119,9 +119,13 @@ public class LifecycleSystem
             }
         }
 
+        // 迁出公告按户去重：整户（夫妻/多名成年成员）同月迁出只报一条，免公告栏刷屏
+        var reported = new HashSet<int>();
         foreach (var c in homeless.Where(c => c.HomelessMonths > EmigrateAfterHomelessMonths).ToList())
         {
-            gs.PostNews("migrate-out", $"{c.Name}久觅居所不得，携家迁离汴京"); // 公告栏播报迁出
+            int famKey = c.FamilyId >= 0 ? c.FamilyId : -1000000 - c.Id;
+            if (reported.Add(famKey))
+                gs.PostNews("migrate-out", $"{c.Name}久觅居所不得，携家迁离汴京"); // 公告栏播报迁出
             // 带上未成年子女一同迁出，不留孤幼滞留城中
             foreach (var childId in c.ChildrenIds.ToList())
                 if (gs.Citizens.TryGetValue(childId, out var child) && child.IsChild)
@@ -198,6 +202,46 @@ public class LifecycleSystem
             gs.LogLifeEvent(c, "携眷迁入汴京，自建新宅");
         }
         gs.PostNews("migrate-in", $"{husband.Name}携眷迁入汴京，自建新宅安家"); // 公告栏播报迁入
+    }
+
+    /// <summary>王爷府建成时随迁安置：CoupleCount 对富裕年轻夫妻暂居府中（王爷府 capacity 提供居住位），
+    /// 各自成家、家庭公产丰厚；待玩家划好可建设坊区后，由 BuildUpFromLodging（寄居→攒够自建）自然迁出、
+    /// 在府邸周边自建新宅。由 Main 的 BuildingPlaced 钩子调用。</summary>
+    public void SettleNobleFamilies(GameState gs, BuildingInstance mansion)
+    {
+        var occupancy = gs.BuildHomeOccupancy();
+        for (int i = 0; i < PrinceMansionConfig.CoupleCount; i++)
+        {
+            if (gs.BuildingOccupancy(mansion) >= mansion.HousingCapacity)
+                break; // 居住位已满：兜底不再塞人
+            var family = gs.AddFamily(new Family { HomeId = mansion.Id, SharedAssets = PrinceMansionConfig.CoupleAssets });
+            var husband = NewNobleAdult(gs, Gender.Male);
+            var wife = NewNobleAdult(gs, Gender.Female);
+            husband.SpouseId = wife.Id;
+            wife.SpouseId = husband.Id;
+            foreach (var c in new[] { husband, wife })
+            {
+                c.FamilyId = family.Id;
+                family.MemberIds.Add(c.Id);
+                MoveIn(gs, c, mansion.Id, occupancy);
+                gs.LogLifeEvent(c, "随王爷入府，暂居府中");
+            }
+            gs.PostNews("migrate-in", $"{husband.Name}偕眷随王爷入府，暂居王爷府");
+        }
+    }
+
+    /// <summary>随迁的富裕年轻成人：年龄取自 PrinceMansionConfig（当婚育之年），随身私产丰厚。</summary>
+    private Citizen NewNobleAdult(GameState gs, Gender gender)
+    {
+        var (surname, fullName) = NameGenerator.NewName(gender);
+        return gs.AddCitizen(new Citizen
+        {
+            Surname = surname,
+            Name = fullName,
+            Gender = gender,
+            AgeMonths = (PrinceMansionConfig.AdultAgeMin + _rng.Next(PrinceMansionConfig.AdultAgeSpan)) * 12 + _rng.Next(12),
+            Money = PrinceMansionConfig.AdultMoney,
+        });
     }
 
     private void SpawnSingle(GameState gs, BuildingInstance house, Dictionary<int, int> occupancy, double assets, bool lodger)
@@ -565,8 +609,8 @@ public class LifecycleSystem
         {
             if (c.IsChild || c.HomeId < 0 || !gs.Buildings.TryGetValue(c.HomeId, out var home))
                 continue;
-            if (home.Def.Category != "grown" || home.Def.Id == "house")
-                continue; // 只处理寄居工坊/商铺者
+            if (home.Def.Id == "house" || home.HousingCapacity <= 0)
+                continue; // 只处理寄居于店坊/王爷府（非自宅、有居住位）者，攒够即自建迁出
             if (c.FamilyId >= 0 && !seen.Add(c.FamilyId))
                 continue; // 同家庭只处理一次
             double budget = FamilyPerCapitaAssets(gs, c);

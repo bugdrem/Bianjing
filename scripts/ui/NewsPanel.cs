@@ -3,8 +3,8 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>公告栏：右下角常驻「公告」按钮 + 可开合的滚动公告列表，
-/// 实时播报迁入迁出/出生离世等全城大事（数据源 GameState.News，可拓展新类别）。
+/// <summary>公告栏：底部操作栏最右侧的「公告」按钮（按钮实体由 BuildMenu 摆入操作栏）+ 可开合的滚动公告列表，
+/// 实时播报迁入迁出/出生离世等全城大事（数据源 GameState.News，随存档保存、读档续接）。
 /// 面板收合仅由按钮控制——点击游戏世界不收起（与政策/财政/科技面板不同，公告栏可常驻）；
 /// 收合期间新公告在按钮上累计未读数，展开即清零。</summary>
 public partial class NewsPanel : VBoxContainer
@@ -17,16 +17,26 @@ public partial class NewsPanel : VBoxContainer
 
     private PanelContainer _panel;
     private Label _body;
-    private Button _toggle;
+    private readonly Button _toggle;
     private int _unread;
+
+    /// <summary>「公告」开关按钮：未读数/开合逻辑仍由本面板自持，按钮本体交由 BuildMenu 摆进操作栏最右。</summary>
+    public Button ToggleButton => _toggle;
+
+    public NewsPanel()
+    {
+        // 按钮在构造期创建：BuildMenu._Ready 先于本面板 _Ready 运行，需提前拿到按钮实体挂入操作栏
+        _toggle = new Button { Text = "公告" };
+        _toggle.Pressed += Toggle;
+    }
 
     public override void _Ready()
     {
-        // 右下角竖排：公告列表在上、按钮在下，向左上生长（让开底部建造菜单与格子信息条）
+        // 右下角公告列表：向左上生长，让开底部操作栏（公告按钮已入栏，面板从栏上方展开）
         SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomRight);
         GrowHorizontal = Control.GrowDirection.Begin;
         GrowVertical = Control.GrowDirection.Begin;
-        Position -= new Vector2(12, 84);
+        Position -= new Vector2(12, 96);
         AddThemeConstantOverride("separation", 6);
 
         _panel = new PanelContainer { Visible = false };
@@ -61,10 +71,6 @@ public partial class NewsPanel : VBoxContainer
         _body.AddThemeFontSizeOverride("font_size", 13);
         scroll.AddChild(_body);
 
-        _toggle = new Button { Text = "公告", SizeFlagsHorizontal = SizeFlags.ShrinkEnd };
-        _toggle.Pressed += Toggle;
-        AddChild(_toggle);
-
         EventBus.NewsPosted += OnNewsPosted;
         EventBus.GameLoaded += OnGameLoaded;
     }
@@ -89,7 +95,7 @@ public partial class NewsPanel : VBoxContainer
         }
     }
 
-    /// <summary>读档/新开局：公告不入存档从头重记，清空未读并重刷。</summary>
+    /// <summary>读档/新开局：公告随存档恢复（见 SaveService），清空未读并重刷列表续接旧事。</summary>
     private void OnGameLoaded()
     {
         _unread = 0;

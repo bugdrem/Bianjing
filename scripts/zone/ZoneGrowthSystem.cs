@@ -7,7 +7,7 @@ namespace Bianjing;
 /// <summary>坊区生长系统（每日结算，日频概率——1x 下一游戏日 ≈ 20 现实秒、一游戏月 ≈ 10 现实分钟）：
 /// 住宅不再缺房自动生成（人口靠迁入 + 分家建房驱动，见 LifecycleSystem）；
 /// 住宅容量=占地格数，住满后由拥挤事件驱动扩地；升级只影响楼高观感，
-/// 升级时占地够大的住宅有概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
+/// 路边（主/辅路旁）够格占地的住宅按日概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
 public class ZoneGrowthSystem
 {
     /// <summary>建筑每日升级概率（调参见 configs/GrowthConfig）。</summary>
@@ -23,9 +23,28 @@ public class ZoneGrowthSystem
 
         // 住宅不再缺房自动生成：人口靠迁入 + 分家建房驱动（见 LifecycleSystem）；仅保留升级/转业
         LevelUps(gs);
+        Conversions(gs); // 路边住宅转商铺/工坊：独立于升级链（升级依赖吸引力，而村民多沿零吸引力小路建房）
     }
 
-    /// <summary>坊区建筑升级：吸引力越高级要求越高，年久失修的不升，里程碑限制最高等级；住宅升级后有概率转业。</summary>
+    /// <summary>路边转业（每日）：够格占地的路边民居按概率转商铺/工坊——独立于升级/吸引力，
+    /// 使沿主/辅路的住宅能如实长出工商户（吸引力驱动的升级另见 LevelUps）。</summary>
+    private void Conversions(GameState gs)
+    {
+        // 村落阶段不开店：集镇（里程碑 1）起才允许（与 TryConvertHouse 内闸门一致，此处先挡免无谓遍历）
+        if (gs.MilestoneLevel < 1)
+            return;
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Def.Id != "house" || b.Condition < GrowthConfig.LevelUpMinCondition)
+                continue; // 只转民居，失修的不转
+            if (b.FootX * b.FootY < GrowthConfig.ConvertMinArea)
+                continue; // 占地不够（须扩建过）
+            if (_rng.NextDouble() < GrowthConfig.ConvertChancePerDay)
+                TryConvertHouse(gs, b);
+        }
+    }
+
+    /// <summary>坊区建筑升级：吸引力越高级要求越高，年久失修的不升，里程碑限制最高等级（只影响楼高观感）。</summary>
     private void LevelUps(GameState gs)
     {
         int maxLevel = Milestones.MaxHouseLevel(gs); // 住宅限级随里程碑放开
@@ -42,9 +61,7 @@ public class ZoneGrowthSystem
                 b.Level++;
                 changed = true;
                 // 扩建不再随升级触发（改由住满拥挤事件驱动，见 LifecycleSystem.ResolveHousing）；
-                // 只有扩过地（占地 ≥ ConvertMinArea 平米，2×2 起步制下约扩建两次）的住宅升级时才有资格转为商铺/工坊
-                if (b.Def.Id == "house" && b.FootX * b.FootY >= GrowthConfig.ConvertMinArea)
-                    TryConvertHouse(gs, b);
+                // 转业已从升级链解耦（见 Conversions）：升级依赖吸引力，而村民多沿零吸引力小路建房，两者矛盾
             }
         }
         if (changed)
@@ -216,6 +233,9 @@ public class ZoneGrowthSystem
         built = null;
         cost = 0;
         var def = gs.Defs["house"];
+
+        // 近王爷府加成（用户需求：村民建房候选地叠加王爷府数值）：预取府邸中心，供逐候选格按距加分
+        Vector2I? mansion = PrinceMansionCenter(gs);
     
         // 可负担候选分两组：达标集（随机挑）与全集最高分（兜底）
         var qualified = new List<(Vector2I Cell, double Price)>();
@@ -228,7 +248,7 @@ public class ZoneGrowthSystem
             // 整块占地均为坊区内无树空地，且四周小路环可铺并接入既有路网（小路也算接入）
             if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY) || !RingLayable(gs, c, def.SizeX, def.SizeY))
                 continue;
-            double score = SiteScore(gs, c, def.SizeX, def.SizeY);
+            double score = SiteScore(gs, c, def.SizeX, def.SizeY) + PrinceMansionBonus(mansion, c, def.SizeX, def.SizeY);
             double price = GrowthConfig.LandPriceOf(score); // 地价公式见 GrowthConfig
             if (price > budget)
                 continue; // 该地段负担不起
@@ -266,6 +286,28 @@ public class ZoneGrowthSystem
 
     /// <summary>选址随机源（静态方法内使用，与实例 _rng 分开）。</summary>
     private static readonly Random _siteRng = new();
+
+    /// <summary>全局唯一王爷府的占地中心（无则 null）：供“近府邸”选址加成。</summary>
+    private static Vector2I? PrinceMansionCenter(GameState gs)
+    {
+        foreach (var b in gs.Buildings.Values)
+            if (b.Def.Id == PrinceMansionConfig.DefId)
+                return new Vector2I(b.Origin.X + b.FootX / 2, b.Origin.Y + b.FootY / 2);
+        return null;
+    }
+
+    /// <summary>近王爷府选址加成：占地中心到府邸中心切比雪夫距≤半径时按距线性衰减加分（距 0 满分），
+    /// 使村民建房优先聚于府邸周边（居选址首档）。</summary>
+    private static double PrinceMansionBonus(Vector2I? center, Vector2I origin, int sx, int sy)
+    {
+        if (!center.HasValue)
+            return 0;
+        int cx = origin.X + sx / 2, cy = origin.Y + sy / 2;
+        int d = Math.Max(Math.Abs(cx - center.Value.X), Math.Abs(cy - center.Value.Y));
+        if (d > PrinceMansionConfig.SiteRadius)
+            return 0;
+        return PrinceMansionConfig.SiteScore * (1.0 - (double)d / PrinceMansionConfig.SiteRadius);
+    }
 
     /// <summary>选址叠加打分：占地外扩 SiteScanDist 米内含主路/辅路/河道/已有建筑（含水井）各计一次分，
     /// 可叠加——河边十字路口（主+辅+河）分最高；自带小路不计分（到处都有，无区分度）。</summary>

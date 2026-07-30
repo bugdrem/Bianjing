@@ -12,6 +12,9 @@ public static class MovementConfig
     /// <summary>脱离道路的减速惩罚系数（越小惩罚越重）。</summary>
     public const float OffRoadFactor = 0.35f;
 
+    /// <summary>转身角速度（弧度/秒）：行进时模型正面平滑转向前方，掉头（180°）约 0.3 秒转完。</summary>
+    public const float TurnSpeedRadPerSec = 10f;
+
     /// <summary>各道路种类的移速系数：主路最快、小路最慢；桥面（RoadKind.None 但 HasRoad）同辅路。</summary>
     public const float SpeedMain = 1.2f;
     public const float SpeedSide = 1.0f;

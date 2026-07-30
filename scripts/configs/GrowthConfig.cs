@@ -52,9 +52,11 @@ public static class GrowthConfig
 
     // ---- 转业 ----
 
-    /// <summary>住宅转业（商铺/工坊）的最小占地（平米）：取起步 2×2 的两倍，
-    /// 即扩建过两次左右（如 2×4/3×3）的富足人家才有资格开店。</summary>
-    public const int ConvertMinArea = 8;
+    /// <summary>住宅转业（商铺/工坊）的最小占地（平米）：起步 2×2=4，扩建一次（2×3=6）即够格开店。</summary>
+    public const int ConvertMinArea = 6;
+
+    /// <summary>符合条件的路边住宅每日转业概率（独立于升级链；全城工商占比封顶在 TryConvertHouse 内约束）。</summary>
+    public const float ConvertChancePerDay = 0.03f;
 
     /// <summary>转业临路判定半径（米）：占地边缘到主/辅路在此距内才算“贴近”该级道路。</summary>
     public const int ConvertRoadDist = 6;

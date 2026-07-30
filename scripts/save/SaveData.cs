@@ -53,6 +53,10 @@ public class WorldSave
     public List<string> Techs = new();
     public string ResearchTechId = "";
     public double ResearchDays;
+
+    /// <summary>v16 追加：公告栏历史（最新在前，数据层封顶 NewsCap 条）——可选字段，
+    /// 旧档缺失时读出空表，不破坏格式兼容。</summary>
+    public List<NewsItem> News = new();
 }
 
 /// <summary>地图数据：各类地表格用一维索引（y*Size+x）紧凑存储。</summary>
@@ -68,8 +72,8 @@ public class MapSave
     public List<int> WaterCells = new();
     public List<int> BridgeCells = new();
 
-    /// <summary>v15：非零地形高度格——HeightCells（一维索引）与 HeightLayers（对应层数）一一对应，
-    /// 平地（0 层）不存以保持稀疏。</summary>
+    /// <summary>v16：地形高度稀疏表——只存“偏离默认值（水面 0 / 陆地基准层）”的格：
+    /// HeightCells（一维索引）与 HeightLayers（对应绝对层数）一一对应，基准平地不入表保持稀疏。</summary>
     public List<int> HeightCells = new();
     public List<int> HeightLayers = new();
 }

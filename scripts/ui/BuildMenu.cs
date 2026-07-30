@@ -22,12 +22,15 @@ public partial class BuildMenu : PanelContainer
     private const string DefaultGroup = "official";
 
     private readonly BuildController _build;
+    private readonly Button _newsToggle;
     private HBoxContainer _itemRow;
     private string _currentGroup = ""; // 当前展开的分组（里程碑晋级时刷新解锁态）
 
-    public BuildMenu(BuildController build)
+    /// <summary>newsToggle：公告栏开关按钮（由 NewsPanel 自持逻辑），摆在操作栏最右侧。</summary>
+    public BuildMenu(BuildController build, Button newsToggle = null)
     {
         _build = build;
+        _newsToggle = newsToggle;
     }
 
     public override void _Ready()
@@ -59,14 +62,39 @@ public partial class BuildMenu : PanelContainer
         AddButton(catRow, "可建造区", () => { _build.SetZoneMode(ZoneType.Buildable); ClearItems(); });
         AddButton(catRow, "拆除", () => { _build.SetDemolishMode(); ClearItems(); });
 
-        // 默认展开首个分类，避免上排空白
-        ShowGroup(BaseGroups[0].Key);
+        // 默认展开首个分类；开局未建王爷府时改展官府设施页，让王爷府一眼可见
+        ShowGroup(GameState.I.PrinceMansionBuilt ? BaseGroups[0].Key : "official");
+
+        // 公告按钮：叠一层右下收缩容器压在操作栏最右（PanelContainer 子节点同占整栏矩形，
+        // 按钮两向 ShrinkEnd 即落在下排分类行的右端）；容器自身 Ignore 鼠标，免遮下层居中的分类按钮
+        if (_newsToggle != null)
+        {
+            var corner = new MarginContainer { MouseFilter = MouseFilterEnum.Ignore };
+            corner.AddThemeConstantOverride("margin_right", 10);
+            corner.AddThemeConstantOverride("margin_bottom", 4);
+            _newsToggle.SizeFlagsHorizontal = SizeFlags.ShrinkEnd;
+            _newsToggle.SizeFlagsVertical = SizeFlags.ShrinkEnd;
+            corner.AddChild(_newsToggle);
+            AddChild(corner);
+        }
 
         // 里程碑晋级：刷新当前分组，新解锁的建筑按钮即时点亮
         EventBus.MilestoneReached += OnMilestone;
+        // 王爷府建成（BuildingPlaced）：首建门槛解锁，刷新当前分组重新点亮道路/其它官营建筑
+        EventBus.BuildingPlaced += OnBuildingPlaced;
     }
 
-    public override void _ExitTree() => EventBus.MilestoneReached -= OnMilestone;
+    public override void _ExitTree()
+    {
+        EventBus.MilestoneReached -= OnMilestone;
+        EventBus.BuildingPlaced -= OnBuildingPlaced;
+    }
+
+    private void OnBuildingPlaced(BuildingInstance _)
+    {
+        if (_currentGroup != "")
+            ShowGroup(_currentGroup); // 建成/拆除后刷新锁态（王爷府首建、唯一置灰）
+    }
 
     private void OnMilestone(int _)
     {
@@ -96,13 +124,25 @@ public partial class BuildMenu : PanelContainer
         _currentGroup = key;
         ClearItems();
 
+        bool mansionBuilt = GameState.I.PrinceMansionBuilt;
         if (key == "infrastructure")
         {
-            // 道路/桥按长度计价（每延米，不计宽度），标价带单位一目了然
-            AddButton(_itemRow, $"主路 {GameState.RoadCostOf(RoadKind.Main)}/米", () => _build.SetRoadMode(RoadKind.Main));
-            AddButton(_itemRow, $"辅路 {GameState.RoadCostOf(RoadKind.Side)}/米", () => _build.SetRoadMode(RoadKind.Side));
-            AddButton(_itemRow, $"桥梁 {GameState.BridgeCost}/米", () => _build.SetBridgeMode());
-            AddButton(_itemRow, "树木", () => _build.SetTreeMode());
+            if (!mansionBuilt)
+            {
+                // 开局首建王爷府前，道路/桥梁/树木置灰
+                AddLockedButton(_itemRow, "主路", "需先建造王爷府");
+                AddLockedButton(_itemRow, "辅路", "需先建造王爷府");
+                AddLockedButton(_itemRow, "桥梁", "需先建造王爷府");
+                AddLockedButton(_itemRow, "树木", "需先建造王爷府");
+            }
+            else
+            {
+                // 道路/桥按长度计价（每延米，不计宽度），标价带单位一目了然
+                AddButton(_itemRow, $"主路 {GameState.RoadCostOf(RoadKind.Main)}/米", () => _build.SetRoadMode(RoadKind.Main));
+                AddButton(_itemRow, $"辅路 {GameState.RoadCostOf(RoadKind.Side)}/米", () => _build.SetRoadMode(RoadKind.Side));
+                AddButton(_itemRow, $"桥梁 {GameState.BridgeCost}/米", () => _build.SetBridgeMode());
+                AddButton(_itemRow, "树木", () => _build.SetTreeMode());
+            }
         }
 
         int milestone = GameState.I.MilestoneLevel;
@@ -111,16 +151,24 @@ public partial class BuildMenu : PanelContainer
             .OrderBy(d => d.MenuOrder))
         {
             var captured = def; // 闭包捕获当前定义
+
+            // 全局唯一且已建成（如王爷府）：置灰标“已建”
+            if (captured.Unique && GameState.I.CountByDef(captured.Id) > 0)
+            {
+                AddLockedButton(_itemRow, $"{captured.Name}（已建）", "全城唯一，不可再建");
+                continue;
+            }
+            // 开局首建门槛：未建王爷府前，除王爷府外一律置灰
+            if (!mansionBuilt && captured.Id != PrinceMansionConfig.DefId)
+            {
+                AddLockedButton(_itemRow, captured.Name, "需先建造王爷府");
+                continue;
+            }
             if (captured.MilestoneRequired > milestone)
             {
                 // 未解锁：置灰展示所需里程碑，玩家一眼知道升到什么城市才能建
-                var btn = new Button
-                {
-                    Text = $"{captured.Name}（需{Milestones.NameOf(captured.MilestoneRequired)}）",
-                    Disabled = true,
-                    TooltipText = $"人口达 {Milestones.Of(captured.MilestoneRequired).PopulationRequired} 晋级后解锁",
-                };
-                _itemRow.AddChild(btn);
+                AddLockedButton(_itemRow, $"{captured.Name}（需{Milestones.NameOf(captured.MilestoneRequired)}）",
+                    $"人口达 {Milestones.Of(captured.MilestoneRequired).PopulationRequired} 晋级后解锁");
                 continue;
             }
             AddButton(_itemRow, $"{captured.Name} {captured.Cost}", () => _build.SetBuildingMode(captured));
@@ -146,5 +194,11 @@ public partial class BuildMenu : PanelContainer
         var btn = new Button { Text = text };
         btn.Pressed += () => onPressed();
         box.AddChild(btn);
+    }
+
+    /// <summary>置灰（不可点）按钮：用于未解锁/需前置条件的建造项，鼠标悬停标提示原因。</summary>
+    private static void AddLockedButton(HBoxContainer box, string text, string tooltip)
+    {
+        box.AddChild(new Button { Text = text, Disabled = true, TooltipText = tooltip });
     }
 }

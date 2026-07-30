@@ -1326,12 +1326,17 @@ public partial class CitizenAgent : Node3D
     }
 
     /// <summary>相邻两格能否步行相通：既是旱路，且层差在可翻越范围内（降壁/降坡不可跨）。
+    /// 涉水豁免：基准抬升后岸陆比水面/桥面高 1 米，上下桥属水陆分界而非陡壁，不受坡度限制。
     /// 山体生成已削平陡壁（全图坡度≤上限），此守卫主要为后续玩家塑形（b 方案）预留。</summary>
     private static bool StepTraversable(Vector2I from, Vector2I to)
     {
         if (!IsDryCell(to))
             return false;
-        return TerrainConfig.Traversable(GameState.I.Map.CellAt(from).Height, GameState.I.Map.CellAt(to).Height);
+        ref var cf = ref GameState.I.Map.CellAt(from);
+        ref var ct = ref GameState.I.Map.CellAt(to);
+        if (cf.HasWater || ct.HasWater)
+            return true; // 上下桥/岸沿落差不作陡壁论
+        return TerrainConfig.Traversable(cf.Height, ct.Height);
     }
 
     /// <summary>四向 BFS 找旱路（含起终格）；搜索量封顶防卡帧，找不到返回 null。
@@ -1375,7 +1380,7 @@ public partial class CitizenAgent : Node3D
         return null;
     }
 
-    /// <summary>脚下站面高度：地形海拔叠加地面厚度——桥格站桥板顶（桥跨水在 0 基准，顶 0.43），
+    /// <summary>脚下站面高度：地形海拔叠加地面厚度——桥格站桥板顶（桥悬浮在水面 -0.5 之上，顶 0.34），
     /// 其余格为本格地面海拔 +0.2（路面顶约 0.24 与基准差无感，不单独处理）。</summary>
     private static float SurfaceYAt(Vector3 pos)
     {
@@ -1384,7 +1389,7 @@ public partial class CitizenAgent : Node3D
             return 0.2f;
         ref var cell = ref GameState.I.Map.CellAt(c);
         if (cell.HasBridge)
-            return 0.43f;
+            return 0.34f;
         return TerrainConfig.LayerToWorldY(cell.Height) + 0.2f;
     }
 
@@ -1404,6 +1409,7 @@ public partial class CitizenAgent : Node3D
             speedFactor = OffRoadFactor;
         }
         float step = BaseSpeed * speedFactor * dt;
+        var before = Position; // 记录本帧起点，移完按净位移转身（跨路点时取合方向，免拐角瞬间甩头）
 
         while (step > 0f && _path != null)
         {
@@ -1413,7 +1419,7 @@ public partial class CitizenAgent : Node3D
             if (dist > step)
             {
                 Position += (target - Position).Normalized() * step;
-                return;
+                break;
             }
             Position = target;
             step -= dist;
@@ -1421,6 +1427,23 @@ public partial class CitizenAgent : Node3D
             if (_pathIndex >= _path.Count)
                 _path = null; // 到达，进入活动驻留
         }
+
+        // 正面朝前：按本帧路径净位移平滑转身（分离推力不计入，免被挤得左右抖头）
+        FaceMoveDirection(Position - before, dt);
+    }
+
+    /// <summary>行进转身：模型正面（局部 +Z，胸前抱货挂点同向）按固定角速度转向水平位移方向；
+    /// 位移过小（贴点/驻留）保持原朝向不回正，驻留期自然停在最后的行进朝向。</summary>
+    private void FaceMoveDirection(Vector3 moved, float dt)
+    {
+        moved.Y = 0f;
+        if (moved.LengthSquared() < 1e-8f)
+            return;
+        float desired = Mathf.Atan2(moved.X, moved.Z); // +Z 为正面的偏航角
+        float yaw = _body.Rotation.Y;
+        float diff = Mathf.AngleDifference(yaw, desired);
+        float maxStep = MovementConfig.TurnSpeedRadPerSec * dt;
+        _body.Rotation = new Vector3(0f, yaw + Mathf.Clamp(diff, -maxStep, maxStep), 0f);
     }
 
     /// <summary>驻留期间按活动更新疲劳/兴趣；上班攒满疲劳即下班。</summary>

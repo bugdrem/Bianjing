@@ -70,9 +70,9 @@ public partial class BuildingStockRenderer : Node3D
                     b.Origin.Y + oy + slot / innerW % innerH);
                 slot++;
 
-                // 与地面掉落堆同规格：0.5m 见方小方块，高随份数（耗尽即消，不凭空常驻）
+                // 与地面掉落堆同规格：0.5m 见方小方块，高随份数（耗尽即消，不凭空常驻）；叠加地形海拔免埋进台地
                 float h = 0.15f + 0.35f * Mathf.Min(1f, (float)(s.Amount / ItemPileObj.PileCapacity));
-                var pos = MapGrid.CellToWorld(c) + Vector3.Up * (h / 2f);
+                var pos = MapGrid.CellToWorld(c) + Vector3.Up * (gs.Map.GroundY(c) + h / 2f);
                 xforms.Add(new Transform3D(Basis.Identity.Scaled(new Vector3(0.5f, h, 0.5f)), pos));
                 colors.Add(GoodsColors.ColorOf(s.GoodsId));
             }

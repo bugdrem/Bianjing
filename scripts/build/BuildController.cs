@@ -135,6 +135,15 @@ public partial class BuildController : Node
         // 点到游戏世界（非 UI，否则不会进 _UnhandledInput）：收起政策/财政/科技侧面板（公告栏常驻不收）
         Hud?.CloseSidePanels();
 
+        // 开局首建门槛：未建成王爷府前锁定一切营造（放置王爷府本体除外）；「选择/查看」不受限
+        var gsGate = GameState.I;
+        if (!gsGate.PrinceMansionBuilt && Mode != BuildMode.None
+            && !(Mode == BuildMode.Building && _def != null && _def.Id == PrinceMansionConfig.DefId))
+        {
+            Hud?.ShowCellInfo("请先建造王爷府");
+            return;
+        }
+
         switch (Mode)
         {
             case BuildMode.None:
@@ -289,6 +298,7 @@ public partial class BuildController : Node
 
         var gs = GameState.I;
         const float cs = MapGrid.CellSize;
+        float groundY = gs.Map.GroundY(_hover); // 预览框叠加悬停格地形海拔，免在台地上半埋
         _preview.Visible = true;
 
         switch (Mode)
@@ -297,7 +307,7 @@ public partial class BuildController : Node
             {
                 // 方形画笔预览：w×w整块（宽 4 时偏移 -1..2，中心偏移半格）
                 int w = GameState.RoadWidthOf(_roadKind);
-                SetPreviewBox(StampCenter(w) + Vector3.Up * 0.15f, StampSize(w, 0.3f),
+                SetPreviewBox(StampCenter(w) + Vector3.Up * (groundY + 0.15f), StampSize(w, 0.3f),
                     PlacementValidator.CanPlaceRoad(gs, _hover, _roadKind) ? ValidColor : InvalidColor);
                 break;
             }
@@ -310,7 +320,7 @@ public partial class BuildController : Node
             case BuildMode.Building:
             {
                 var origin = MapGrid.CellToWorld(_hover);
-                var center = origin + new Vector3((_def.SizeX - 1) * cs / 2f, _def.Height / 2f, (_def.SizeY - 1) * cs / 2f);
+                var center = origin + new Vector3((_def.SizeX - 1) * cs / 2f, groundY + _def.Height / 2f, (_def.SizeY - 1) * cs / 2f);
                 SetPreviewBox(center, new Vector3(_def.SizeX * cs, _def.Height, _def.SizeY * cs),
                     PlacementValidator.CanPlaceBuilding(gs, _def, _hover) ? ValidColor : InvalidColor);
                 break;
@@ -321,7 +331,7 @@ public partial class BuildController : Node
                 var a = _dragging ? _dragStart : _hover;
                 var wa = MapGrid.CellToWorld(a);
                 var wb = MapGrid.CellToWorld(_hover);
-                var center = (wa + wb) / 2f + Vector3.Up * 0.1f;
+                var center = (wa + wb) / 2f + Vector3.Up * (groundY + 0.1f);
                 var size = new Vector3(Mathf.Abs(wa.X - wb.X) + cs, 0.2f, Mathf.Abs(wa.Z - wb.Z) + cs);
                 SetPreviewBox(center, size, ValidColor);
                 break;
@@ -330,13 +340,13 @@ public partial class BuildController : Node
             case BuildMode.Tree:
             {
                 ref var cell = ref gs.Map.CellAt(_hover);
-                SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * 1f, new Vector3(cs * 0.6f, 2f, cs * 0.6f),
+                SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * (groundY + 1f), new Vector3(cs * 0.6f, 2f, cs * 0.6f),
                     cell.IsEmpty && !cell.HasTree ? ValidColor : InvalidColor);
                 break;
             }
 
             case BuildMode.Demolish:
-                SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * 0.5f, new Vector3(cs, 1f, cs), DemolishColor);
+                SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * (groundY + 0.5f), new Vector3(cs, 1f, cs), DemolishColor);
                 break;
         }
     }
@@ -364,7 +374,7 @@ public partial class BuildController : Node
 
     // ---- 查看格子信息 ----
 
-    /// <summary>无模式左键点选：优先拾取居民 → 建筑详情 → 退化为格子信息。</summary>
+    /// <summary>无模式左键点选：优先拾取居民 → 野物 → 沿视线拾取建筑/树木/地面堆 → 退化为格子信息。</summary>
     private void InspectAt(Vector2I c)
     {
         var citizen = PickCitizen();
@@ -374,19 +384,88 @@ public partial class BuildController : Node
             return;
         }
 
-        var gs = GameState.I;
-        int bid = gs.Map.CellAt(c).BuildingId;
-        if (bid >= 0 && gs.Buildings.TryGetValue(bid, out var b))
+        var animal = PickAnimal();
+        if (animal != null)
         {
-            Hud?.ShowBuilding(b);
+            Hud?.ShowAnimal(animal);
             return;
         }
 
+        // 沿视线深度拾取：点中高大物件的「身体」也能选中（而非打到其身后地面）
+        switch (PickWorldObject(out var groundCell))
+        {
+            case BuildingInstance b:
+                Hud?.ShowBuilding(b);
+                return;
+            case PlantObj plant:
+                Hud?.ShowTree(plant);
+                return;
+            case ItemPileObj pile:
+                Hud?.ShowPile(pile);
+                return;
+        }
+
         Hud?.CloseInspect();
-        ShowCellInfo(c);
+        ShowCellInfo(groundCell ?? c);
     }
 
-    /// <summary>把在场代理投影到屏幕，取鼠标 32px 内最近的一位（模型缩小后放宽命中圈）。</summary>
+    /// <summary>沿鼠标视线半格步长推进，按深度返回首个命中的世界物件：
+    /// 建筑体（含屋顶余量）→ 树木（冠高内）→ 落地处的物资堆；无命中时 groundCell 为视线落地格
+    /// （比 Y=0 平面求交更准，台地/缓丘上点选不再偏到身后格）。</summary>
+    private object PickWorldObject(out Vector2I? groundCell)
+    {
+        groundCell = null;
+        var cam = _rig.Cam;
+        var mouse = GetViewport().GetMousePosition();
+        var from = cam.ProjectRayOrigin(mouse);
+        var dir = cam.ProjectRayNormal(mouse);
+        if (dir.Y >= -0.0001f)
+            return null; // 视线不朝下（贴地平视）：不做世界拾取
+
+        var gs = GameState.I;
+        const float step = MapGrid.CellSize / 2f; // 半格步长，不漏格不超距
+        const float maxObjTop = 22f; // 石峰 15m + 峰上树 + 余量：此高度以上无可拾物件，直接快进
+        float t = from.Y > maxObjTop ? (maxObjTop - from.Y) / dir.Y : 0f;
+
+        for (int i = 0; i < 4096; i++, t += step)
+        {
+            var p = from + dir * t;
+            if (p.Y < -1f)
+                break; // 已穿透水面基准以下，再无可拾
+            var c = MapGrid.WorldToCell(p);
+            if (!MapGrid.InBounds(c))
+                continue;
+            ref var cell = ref gs.Map.CellAt(c);
+            float groundY = gs.Map.GroundY(c);
+
+            // 建筑：视线点落在楼体+屋顶高度内即命中（点屋身/屋顶都算点中该栋）
+            if (cell.BuildingId >= 0 && gs.Buildings.TryGetValue(cell.BuildingId, out var b))
+            {
+                float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
+                float roof = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
+                if (p.Y <= groundY + height + roof)
+                    return b;
+            }
+
+            // 树木：视线点在树高范围内即命中（树冠顶约 3.5m，取 4m 余量）
+            if (cell.HasTree && p.Y <= groundY + 4f
+                && gs.Plants.TryGetValue(GameState.CellIndex(c), out var plant))
+                return plant;
+
+            // 落到地表附近：命中地面物资堆，否则就此结束（交由格子信息展示）
+            if (p.Y <= groundY + 0.9f)
+            {
+                groundCell = c;
+                if (gs.Piles.TryGetValue(GameState.CellIndex(c), out var pile))
+                    return pile;
+                return null;
+            }
+        }
+        return null;
+    }
+
+    /// <summary>把在场代理投影到屏幕，取鼠标 12px 内最近的一位（模型已缩小到 0.25，命中圈收紧：
+    /// 只有光标几乎压在小人上才选中，否则落空交给建筑视线拾取，免点房子时误选周围的人）。</summary>
     private Citizen PickCitizen()
     {
         if (Agents == null)
@@ -395,7 +474,7 @@ public partial class BuildController : Node
         var cam = _rig.Cam;
         var mouse = GetViewport().GetMousePosition();
         Citizen best = null;
-        float bestDist = 32f;
+        float bestDist = 12f;
         foreach (var agent in Agents.Agents)
         {
             // 瞄准缩放后的身躯中部（旧值 +1m 在小模型头顶老高处，投影偏离视觉位置致难点中）
@@ -407,6 +486,30 @@ public partial class BuildController : Node
             {
                 bestDist = d;
                 best = agent.C;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>野物拾取：同居民的屏幕投影就近法，命中圈 14px（野物体小且带位置扰动，圈略宽于体型但不遮建筑）。</summary>
+    private AnimalObj PickAnimal()
+    {
+        var gs = GameState.I;
+        var cam = _rig.Cam;
+        var mouse = GetViewport().GetMousePosition();
+        AnimalObj best = null;
+        float bestDist = 14f;
+        foreach (var a in gs.Animals.Values)
+        {
+            var c = new Vector2I(a.X, a.Y);
+            var world = MapGrid.CellToWorld(c) + Vector3.Up * (gs.Map.GroundY(c) + 0.35f);
+            if (cam.IsPositionBehind(world))
+                continue;
+            float d = cam.UnprojectPosition(world).DistanceTo(mouse);
+            if (d < bestDist)
+            {
+                bestDist = d;
+                best = a;
             }
         }
         return best;

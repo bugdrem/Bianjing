@@ -34,13 +34,14 @@ public partial class Hud : CanvasLayer
         _finance = new FinancePanel();
         _tech = new TechPanel();
         _inspect = new InspectPanel();
+        var news = new NewsPanel(); // 公告栏：列表右下角弹出，开关按钮交给底部操作栏摆在最右
         AddChild(new TopBar(_clock, _onSave, _onLoad, _policy.Toggle, _finance.Toggle, _tech.Toggle));
-        AddChild(new BuildMenu(_build));
+        AddChild(new BuildMenu(_build, news.ToggleButton));
         AddChild(_policy);
         AddChild(_finance);
         AddChild(_tech);
         AddChild(_inspect);
-        AddChild(new NewsPanel()); // 右下角常驻公告栏（迁入迁出/生死实时播报）
+        AddChild(news);
 
         // 里程碑晋级与科技研成：右下角弹报（复用格子信息条）
         EventBus.MilestoneReached += OnMilestone;
@@ -97,6 +98,12 @@ public partial class Hud : CanvasLayer
     public void ShowCitizen(Citizen c) => _inspect.ShowCitizen(c);
 
     public void ShowBuilding(BuildingInstance b) => _inspect.ShowBuilding(b);
+
+    public void ShowTree(PlantObj p) => _inspect.ShowTree(p);
+
+    public void ShowAnimal(AnimalObj a) => _inspect.ShowAnimal(a);
+
+    public void ShowPile(ItemPileObj p) => _inspect.ShowPile(p);
 
     public void CloseInspect() => _inspect.Close();
 

@@ -124,6 +124,8 @@ public class WildlifeSystem
             ref var cell = ref gs.Map.CellAt(c);
             if (!cell.IsEmpty || cell.HasTree)
                 continue;
+            if (cell.Height > TerrainConfig.ForageMaxLayer)
+                continue; // 峰顶景观林不作栖息地，免得野物刷在不可攀的石峰上
             // 栖息地约束：8 米内有树林、避开人口区，且此处附近暂无动物（动物数 <1）
             if (gs.Map.FindNearestTree(c, 8) == null || CrowdScore(gs, c, 16) > 0)
                 continue;
@@ -181,6 +183,8 @@ public class WildlifeSystem
             ref var cell = ref gs.Map.CellAt(c);
             if (!cell.IsEmpty || cell.HasTree)
                 continue;
+            if (cell.Height > TerrainConfig.ForageMaxLayer)
+                continue; // 石峰陡壁不可攀，野物不落峰顶
             var tree = gs.Map.FindNearestTree(c, 12);
             if (tree == null)
                 continue;

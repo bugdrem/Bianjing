@@ -31,6 +31,9 @@ public static class EventBus
     /// <summary>新公告入栏（迁入迁出/生死等全城大事，见 GameState.PostNews）：公告栏实时刷新。</summary>
     public static event Action NewsPosted;
 
+    /// <summary>玩家/村民新放置一座建筑（仅实时放置触发，读档重建不发）：供王爷府建成钩子、菜单刷新等响应。</summary>
+    public static event Action<BuildingInstance> BuildingPlaced;
+
     public static void RaiseMapChanged() => MapChanged?.Invoke();
     public static void RaiseZonesChanged() => ZonesChanged?.Invoke();
     public static void RaiseStatsChanged() => StatsChanged?.Invoke();
@@ -43,6 +46,7 @@ public static class EventBus
     public static void RaiseMilestoneReached(int level) => MilestoneReached?.Invoke(level);
     public static void RaiseTechUnlocked(string techId) => TechUnlocked?.Invoke(techId);
     public static void RaiseNewsPosted() => NewsPosted?.Invoke();
+    public static void RaiseBuildingPlaced(BuildingInstance b) => BuildingPlaced?.Invoke(b);
 
     /// <summary>重开一局时清空所有订阅，避免编辑器内重启后重复订阅。</summary>
     public static void Reset()
@@ -59,5 +63,6 @@ public static class EventBus
         MilestoneReached = null;
         TechUnlocked = null;
         NewsPosted = null;
+        BuildingPlaced = null;
     }
 }

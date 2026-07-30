@@ -49,7 +49,6 @@ public partial class Main : Node3D
         AddChild(_clock);
         _clock.DayPassed += OnDayPassed;
         _clock.MonthPassed += OnMonthPassed;
-
         _desirability = new DesirabilitySystem();
         _growth = new ZoneGrowthSystem();
         _lifecycle = new LifecycleSystem();
@@ -78,6 +77,31 @@ public partial class Main : Node3D
         // 游戏菜单最后加入：_Ready 时暂停全树展示主菜单，ESC 呼出暂停菜单
         _menu = new GameMenu(NewGame, SaveNamed, LoadSlot, ReturnToTitle);
         AddChild(_menu);
+
+        // 王爷府建成钩子：实时放置才触发（读档重建不经 PlaceBuilding，不会重复拨款/重生夫妻）
+        EventBus.BuildingPlaced += OnBuildingPlaced;
+    }
+
+    /// <summary>建筑建成钩子：王爷府落成时一次性拨给开基资源（官库钱/粮 + 府库货品），
+    /// 并携三对富裕年轻夫妻暂居府中（待玩家划区后自建新宅迁出）。</summary>
+    private void OnBuildingPlaced(BuildingInstance b)
+    {
+        if (b.Def.Id != PrinceMansionConfig.DefId)
+            return;
+        var gs = GameState.I;
+
+        // 一次性开基资源：钱/粮入官库，各类货品入王爷府库存
+        gs.Money += PrinceMansionConfig.GrantMoney;
+        gs.Ledger.Add("王爷府开基", PrinceMansionConfig.GrantMoney);
+        gs.Food += PrinceMansionConfig.GrantFood;
+        foreach (var (goodsId, amount) in PrinceMansionConfig.GrantGoods)
+            b.StoreGoodsForce(goodsId, amount);
+
+        // 随迁三对富裕年轻夫妻暂居府中
+        _lifecycle.SettleNobleFamilies(gs, b);
+
+        gs.PostNews("milestone", "王爷府落成，王爷携眷开府建衙，开基家底入库");
+        EventBus.RaiseStatsChanged();
     }
 
     /// <summary>每日结算：日常事务（生长/民生/财政/物产/动物游走）。</summary>
@@ -123,10 +147,9 @@ public partial class Main : Node3D
         if (_autoSaveTimer < GameSettings.AutoSaveMinutes * 60f)
             return;
         _autoSaveTimer = 0f;
-        if (SaveService.Save(_clock, SaveService.AutoSlot, "自动保存"))
-            _hud.ShowCellInfo("已自动保存");
-        else
-            _hud.ShowCellInfo("自动保存失败（详见日志）");
+        // 异步原子保存：主线程快照+序列化，后台线程写盘免卡帧；完成回调在后台线程，用 CallDeferred marshal 回主线程再碰 HUD
+        SaveService.SaveAsync(_clock, SaveService.AutoSlot, "自动保存", ok =>
+            Callable.From(() => _hud.ShowCellInfo(ok ? "已自动保存" : "自动保存失败（详见日志）")).CallDeferred());
     }
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
@@ -160,10 +183,8 @@ public partial class Main : Node3D
 
     private void SaveNamed(string saveName)
     {
-        if (SaveService.Save(_clock, SaveService.SlotFor(saveName), saveName))
-            _hud.ShowCellInfo($"已保存：{saveName}");
-        else
-            _hud.ShowCellInfo($"保存失败：{saveName}（详见日志）");
+        SaveService.SaveAsync(_clock, SaveService.SlotFor(saveName), saveName, ok =>
+            Callable.From(() => _hud.ShowCellInfo(ok ? $"已保存：{saveName}" : $"保存失败：{saveName}（详见日志）")).CallDeferred());
     }
 
     private bool LoadSlot(string slot) => SaveService.Load(_clock, slot);
@@ -178,10 +199,8 @@ public partial class Main : Node3D
 
     private void SaveGame()
     {
-        if (SaveService.Save(_clock, SaveService.QuickSlot, "快速存档"))
-            _hud.ShowCellInfo("已快速保存 (F5)");
-        else
-            _hud.ShowCellInfo("快速保存失败（详见日志）");
+        SaveService.SaveAsync(_clock, SaveService.QuickSlot, "快速存档", ok =>
+            Callable.From(() => _hud.ShowCellInfo(ok ? "已快速保存 (F5)" : "快速保存失败（详见日志）")).CallDeferred());
     }
 
     private void LoadGame()
@@ -227,11 +246,12 @@ public partial class Main : Node3D
         };
         AddChild(new WorldEnvironment { Environment = env });
 
-        // 地面
+        // 地面背景平面：落在水面（y=-0.5）之下作河床/图外背景；陆地靠逐格土柱立于其上（顶 0），故河道自然下凹
         float extent = MapGrid.Size * MapGrid.CellSize + 80f;
         var ground = new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(extent, extent) },
+            Position = new Vector3(0f, -0.6f, 0f),
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.45f, 0.5f, 0.32f),

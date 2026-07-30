@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v15：新增地形高度（整数台地）+山体生成，地图高度层与旧档不兼；早期开发版本不符拒读。</summary>
-    public const int FormatVersion = 15;
+    /// <summary>v18：新增王爷府（开局首建、全局唯一）与首建门槛；旧城无府会被锁死营造，故拒读旧档。</summary>
+    public const int FormatVersion = 18;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -103,12 +103,18 @@ public static class SaveService
 
     // ---- 保存 ----
 
-    /// <summary>保存到指定槽；磁盘/序列化异常不崩游戏，返回是否成功。</summary>
+    /// <summary>上一次异步保存是否仍在写盘（后台任务未完）：避免并发写同一库与重复快照开销。</summary>
+    private static volatile bool _asyncSaving;
+
+    /// <summary>是否有异步保存正在进行（HUD 可据此提示“保存中”）。</summary>
+    public static bool IsSaving => _asyncSaving;
+
+    /// <summary>同步保存到指定槽（主线程序列化 + 当场写盘）；磁盘/序列化异常不崩游戏，返回是否成功。</summary>
     public static bool Save(GameClock clock, string slot, string saveName)
     {
         try
         {
-            SaveCore(clock, slot, saveName);
+            WriteRecords(SlotDir(slot), BuildRecords(clock, saveName));
             return true;
         }
         catch (Exception e)
@@ -118,12 +124,58 @@ public static class SaveService
         }
     }
 
-    private static void SaveCore(GameClock clock, string slot, string saveName)
+    /// <summary>
+    /// 异步原子保存：先在主线程将全部存档段序列化为不可变字节（读游戏状态必须在主线程，
+    /// 免与模拟线程竞争），再把阻塞的 LMDB 写盘+提交（磁盘 I/O）丢后台线程（免卡帧）；
+    /// 单事务提交保留原子性。完成回调 <paramref name="onDone"/> 在后台线程投递，调用方需自行 marshal 回主线程再碰节点。
+    /// </summary>
+    public static void SaveAsync(GameClock clock, string slot, string saveName, Action<bool> onDone = null)
+    {
+        if (_asyncSaving)
+        {
+            onDone?.Invoke(false); // 上一次还没写完：本次跳过
+            return;
+        }
+
+        Dictionary<string, byte[]> records;
+        try
+        {
+            records = BuildRecords(clock, saveName); // 主线程快照+序列化（字节一旦生成即不变）
+        }
+        catch (Exception e)
+        {
+            GD.PushWarning($"保存快照 {slot} 失败：{e.Message}");
+            onDone?.Invoke(false);
+            return;
+        }
+
+        _asyncSaving = true;
+        string dir = SlotDir(slot);
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            bool ok = false;
+            try
+            {
+                WriteRecords(dir, records);
+                ok = true;
+            }
+            catch (Exception e)
+            {
+                GD.PushWarning($"写入存档 {slot} 失败：{e.Message}");
+            }
+            finally
+            {
+                _asyncSaving = false;
+                onDone?.Invoke(ok);
+            }
+        });
+    }
+
+    /// <summary>在主线程构建并序列化全部存档段为字节：读游戏状态必须在主线程（与模拟同线程免竞争），
+    /// 序列化产出的字节即快照，交给后台线程写盘不再触碰可变对象。</summary>
+    private static Dictionary<string, byte[]> BuildRecords(GameClock clock, string saveName)
     {
         var gs = GameState.I;
-        string dir = SlotDir(slot);
-        Directory.CreateDirectory(dir);
-
         var meta = new SaveMeta
         {
             Version = FormatVersion,
@@ -153,6 +205,7 @@ public static class SaveService
             Techs = new List<string>(gs.TechsUnlocked),
             ResearchTechId = gs.ResearchTechId,
             ResearchDays = gs.ResearchDays,
+            News = new List<NewsItem>(gs.News), // 公告随档保存（浅拷即可，NewsItem 写入后不变）
         };
 
         var map = new MapSave();
@@ -179,10 +232,13 @@ public static class SaveService
                     map.WaterCells.Add(index);
                 if (cell.HasBridge)
                     map.BridgeCells.Add(index);
-                if (cell.Height != 0)
+                // 高度稀疏存“偏离默认值”的格（水面默认 0 / 陆地默认基准层）：
+                // 基准抬升后全图陆地皆为基准层，若仍按“非零”存会退化成百万条全量表
+                int defaultH = cell.HasWater ? 0 : TerrainConfig.BaseLayers;
+                if (cell.Height != defaultH)
                 {
                     map.HeightCells.Add(index);
-                    map.HeightLayers.Add(cell.Height); // 非零高度稀疏存
+                    map.HeightLayers.Add(cell.Height); // 存绝对层数
                 }
             }
         }
@@ -205,19 +261,32 @@ public static class SaveService
         var animals = new List<AnimalObj>(gs.Animals.Values);
         var piles = new List<ItemPileObj>(gs.Piles.Values);
 
+        // 当场序列化为字节（仍在主线程）：字节即不可变快照，后续写盘可安全交后台
+        return new Dictionary<string, byte[]>
+        {
+            ["meta"] = Serialize(meta),
+            ["world"] = Serialize(world),
+            ["map"] = Serialize(map),
+            ["buildings"] = Serialize(buildings),
+            ["citizens"] = Serialize(citizens),
+            ["families"] = Serialize(families),
+            ["plants"] = Serialize(plants),
+            ["animals"] = Serialize(animals),
+            ["piles"] = Serialize(piles),
+        };
+    }
+
+    /// <summary>把已序列化的字节在单个写事务内全部落盘并提交（原子：要么全落要么回滚）；
+    /// 只碰不可变字节与磁盘，可在后台线程执行。</summary>
+    private static void WriteRecords(string dir, Dictionary<string, byte[]> records)
+    {
+        Directory.CreateDirectory(dir);
         using var env = OpenEnv(dir);
         using var tx = env.BeginTransaction();
         using var db = tx.OpenDatabase(configuration: new DatabaseConfiguration { Flags = DatabaseOpenFlags.Create });
 
-        Put(tx, db, "meta", meta);
-        Put(tx, db, "world", world);
-        Put(tx, db, "map", map);
-        Put(tx, db, "buildings", buildings);
-        Put(tx, db, "citizens", citizens);
-        Put(tx, db, "families", families);
-        Put(tx, db, "plants", plants);
-        Put(tx, db, "animals", animals);
-        Put(tx, db, "piles", piles);
+        foreach (var kv in records)
+            tx.Put(db, Encoding.UTF8.GetBytes(kv.Key), kv.Value);
 
         tx.Commit(); // 单事务提交：原子落盘
     }
@@ -308,6 +377,7 @@ public static class SaveService
         };
         foreach (var id in world.Techs ?? new List<string>())
             gs.TechsUnlocked.Add(id);
+        gs.News.AddRange(world.News ?? new List<NewsItem>()); // 公告随档恢复，公告栏读档后续接旧事
 
         for (int i = 0; i < map.RoadCells.Count; i++)
         {
@@ -331,7 +401,12 @@ public static class SaveService
         foreach (int index in map.BridgeCells ?? new List<int>())
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasBridge = true; // HasRoad 已由 RoadCells 恢复
 
-        // v15：非零地形高度恢复（与 HeightLayers 一一对应）
+        // v16：先铺默认高度（水面 0 / 陆地基准层，须在水体恢复之后），再覆盖稀疏异常格（缓丘/石峰）
+        for (int i = 0; i < MapGrid.Size * MapGrid.Size; i++)
+        {
+            ref var cell = ref gs.Map.CellAt(i % MapGrid.Size, i / MapGrid.Size);
+            cell.Height = cell.HasWater ? 0 : TerrainConfig.BaseLayers;
+        }
         var hCells = map.HeightCells ?? new List<int>();
         for (int i = 0; i < hCells.Count; i++)
             gs.Map.CellAt(hCells[i] % MapGrid.Size, hCells[i] / MapGrid.Size).Height = map.HeightLayers[i];
@@ -411,11 +486,7 @@ public static class SaveService
         return env;
     }
 
-    private static void Put<T>(LightningTransaction tx, LightningDatabase db, string key, T value)
-    {
-        byte[] bytes = JsonSerializer.SerializeToUtf8Bytes(value, JsonOpts);
-        tx.Put(db, Encoding.UTF8.GetBytes(key), bytes);
-    }
+    private static byte[] Serialize<T>(T value) => JsonSerializer.SerializeToUtf8Bytes(value, JsonOpts);
 
     private static T Get<T>(LightningTransaction tx, LightningDatabase db, string key) where T : class
     {

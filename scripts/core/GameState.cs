@@ -46,7 +46,7 @@ public class GameState
     /// <summary>官库收支账本（本月/上月分类流水，随存档保存）。</summary>
     public Ledger Ledger = new();
 
-    /// <summary>全城公告（新在前，上限 200 条；不入存档，读档/新开局从头重记）。</summary>
+    /// <summary>全城公告（新在前，上限 200 条；随存档保存，读档续接旧事）。</summary>
     public readonly List<NewsItem> News = new();
 
     /// <summary>当前游戏日期（由 Main 随时钟同步，供建造盖戳等数据层使用）。</summary>
@@ -262,6 +262,7 @@ public class GameState
 
         EventBus.RaiseMapChanged();
         EventBus.RaiseStatsChanged();
+        EventBus.RaiseBuildingPlaced(b); // 实时放置钩子（如王爷府建成：拨款+安置夫妻）；读档重建不经此方法故不误触
         return b;
     }
 
@@ -751,13 +752,16 @@ public class GameState
         return best;
     }
 
-    /// <summary>找最近的树木格（线性扫描植物实体，免大半径环扫全图；伐木选目标用）。</summary>
+    /// <summary>找最近的树木格（线性扫描植物实体，免大半径环扫全图；伐木选目标用）；
+    /// 石峰上的景观树不入选（人不可攀，高于 ForageMaxLayer 即跳过）。</summary>
     public Vector2I? FindNearestTreeCell(Vector2I from, int maxRadius)
     {
         PlantObj best = null;
         int bestDist = maxRadius + 1;
         foreach (var p in Plants.Values)
         {
+            if (Map.CellAt(p.X, p.Y).Height > TerrainConfig.ForageMaxLayer)
+                continue; // 峰上景观树不可及
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)
             {
@@ -768,7 +772,7 @@ public class GameState
         return best != null ? new Vector2I(best.X, best.Y) : null;
     }
 
-    /// <summary>找最近的挂果果树（至少一份可摘；普通树不挂果，字段双重过滤防误摘）。</summary>
+    /// <summary>找最近的挂果果树（至少一份可摘；普通树不挂果，字段双重过滤防误摘）；峰上树同样豁免。</summary>
     public PlantObj FindNearestFruitTree(Vector2I from, int maxRadius)
     {
         PlantObj best = null;
@@ -777,6 +781,8 @@ public class GameState
         {
             if (!p.IsFruitTree || !p.Mature || p.FruitStock < 1)
                 continue;
+            if (Map.CellAt(p.X, p.Y).Height > TerrainConfig.ForageMaxLayer)
+                continue; // 峰上景观树不可及
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)
             {
@@ -896,6 +902,9 @@ public class GameState
                 n++;
         return n;
     }
+
+    /// <summary>是否已建成王爷府（开局首建门槛：未建成前锁定其它一切营造）。</summary>
+    public bool PrinceMansionBuilt => CountByDef(PrinceMansionConfig.DefId) > 0;
 
     // ---- 居民 / 家庭 ----
 

@@ -16,6 +16,7 @@ public partial class GridRenderer : Node3D
     private static readonly Color BridgeColor = new(0.55f, 0.42f, 0.26f);
     private static readonly Color TreeColor = new(0.2f, 0.45f, 0.2f);
     private static readonly Color FruitTreeColor = new(0.5f, 0.52f, 0.16f); // 果树：暖黄绿树冠，一眼可辨
+    private static readonly Color TrunkColor = new(0.42f, 0.3f, 0.2f); // 树干木褐
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
     private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
 
@@ -33,11 +34,17 @@ public partial class GridRenderer : Node3D
     /// <summary>分块边长（格）：128 图 2×2 块，1024 图 16×16 块，单块重建量恒定。</summary>
     private const int ChunkCells = 64;
 
-    /// <summary>单个地表分块：地形方块 + 树木两套 MultiMesh。</summary>
+    /// <summary>每帧最多重建的分块数：限制全图标脏时的单帧重建量，把尖峰摊到多帧防卡顿
+    /// （12 块/帧 → 1024 图 256 块约 22 帧（~0.35s@60fps）铺完，无可见顿挠）。</summary>
+    private const int MaxChunkRebuildsPerFrame = 12;
+
+    /// <summary>单个地表分块：地形方块 + 树木（树干/两种树冠）四套 MultiMesh。</summary>
     private class Chunk
     {
         public MultiMeshInstance3D Boxes;
-        public MultiMeshInstance3D Trees;
+        public MultiMeshInstance3D Trunks;     // 树干：圆柱
+        public MultiMeshInstance3D ConeCrowns; // 圆锥树冠（针叶状）
+        public MultiMeshInstance3D BallCrowns; // 椭球树冠（阔叶状，果树固定用此）
         public bool Dirty = true;
     }
 
@@ -56,15 +63,23 @@ public partial class GridRenderer : Node3D
 
     // 共享网格资源：所有分块复用同一份 Mesh，只是各自实例化
     private BoxMesh _boxMesh;
-    private CylinderMesh _treeMesh;
+    private CylinderMesh _trunkMesh;
+    private CylinderMesh _coneCrownMesh;
+    private SphereMesh _ballCrownMesh;
 
     public override void _Ready()
     {
         _boxMesh = new BoxMesh { Size = Vector3.One };
         _boxMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
 
-        _treeMesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 1.1f, Height = 3f };
-        _treeMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+        // 树木三件套：单位尺寸网格，实例变换里再按株缩放——
+        // 树干圆柱（上细下粗）；树冠分圆锥（针叶）与椭球（阔叶）两形，逐株伪随机选型
+        _trunkMesh = new CylinderMesh { TopRadius = 0.12f, BottomRadius = 0.16f, Height = 1f };
+        _trunkMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+        _coneCrownMesh = new CylinderMesh { TopRadius = 0f, BottomRadius = 1.1f, Height = 3f };
+        _coneCrownMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+        _ballCrownMesh = new SphereMesh { Radius = 0.5f, Height = 1f };
+        _ballCrownMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
 
         // 地表/树木分块阵列
         _chunksPerSide = (MapGrid.Size + ChunkCells - 1) / ChunkCells;
@@ -74,10 +89,14 @@ public partial class GridRenderer : Node3D
             var chunk = new Chunk
             {
                 Boxes = MakeMulti(_boxMesh, useColors: true),
-                Trees = MakeMulti(_treeMesh, useColors: true),
+                Trunks = MakeMulti(_trunkMesh, useColors: true),
+                ConeCrowns = MakeMulti(_coneCrownMesh, useColors: true),
+                BallCrowns = MakeMulti(_ballCrownMesh, useColors: true),
             };
             AddChild(chunk.Boxes);
-            AddChild(chunk.Trees);
+            AddChild(chunk.Trunks);
+            AddChild(chunk.ConeCrowns);
+            AddChild(chunk.BallCrowns);
             _chunks[i] = chunk;
         }
 
@@ -172,12 +191,17 @@ public partial class GridRenderer : Node3D
 
     public override void _Process(double delta)
     {
-        for (int i = 0; i < _chunks.Length; i++)
+        // 分块重建限额：全图变更（读档/月度生长/建筑升级转业）会把全部分块标脏，
+        // 若同帧重建全部（1024 图 256 块×每块 4096 格≈百万格）会造成尖峰卡顿（尤其 4x 下建筑频变）；
+        // 限每帧最多重建 MaxChunkRebuildsPerFrame 块，将尖峰摊到多帧（余脏块下帧续建）。
+        int budget = MaxChunkRebuildsPerFrame;
+        for (int i = 0; i < _chunks.Length && budget > 0; i++)
         {
             if (!_chunks[i].Dirty)
                 continue;
             _chunks[i].Dirty = false;
             RebuildChunk(i);
+            budget--;
         }
         if (_zonesDirty)
         {
@@ -209,8 +233,12 @@ public partial class GridRenderer : Node3D
 
         var boxXf = new List<Transform3D>();
         var boxColor = new List<Color>();
-        var treeXf = new List<Transform3D>();
-        var treeColor = new List<Color>();
+        var trunkXf = new List<Transform3D>();
+        var trunkColor = new List<Color>();
+        var coneXf = new List<Transform3D>();
+        var coneColor = new List<Color>();
+        var ballXf = new List<Transform3D>();
+        var ballColor = new List<Color>();
 
         const float cs = MapGrid.CellSize;
         for (int x = x0; x < x1; x++)
@@ -221,23 +249,25 @@ public partial class GridRenderer : Node3D
                 var world = MapGrid.CellToWorld(new Vector2I(x, y));
                 float groundY = TerrainConfig.LayerToWorldY(cell.Height); // 本格地面海拔
 
-                // 地形土柱：非水且高于基准的格填一根土柱，顶面到达 groundY（平地格靠整块底面兑底，不出实例）
+                // 地形土柱：非水陆地格各填一根土柱，顶面到达 groundY，底面埋到地面背景平面（y≈-0.6）之下免露缝；
+                // 平原 groundY=0、水面 y=-0.5，故陆地土柱顶高出水面半米，自然形成河道下凹观感
                 if (!cell.HasWater && cell.Height > 0)
                 {
-                    float pillarH = groundY + 0.5f; // 多埋 0.5m 避免与基底平面露缝
+                    float pillarH = groundY + 0.7f; // 底面埋到 -0.7（低于地面背景平面 -0.6）避免图缘露缝
                     boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, pillarH, cs)), world + Vector3.Up * (groundY - pillarH / 2f)));
                     boxColor.Add(TerrainColor(cell.Height));
                 }
 
                 if (cell.HasBridge)
                 {
-                    // 桥面：高出水面的木板（桥跨水，水面一律在 0 基准）
-                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, 0.35f, cs)), world + Vector3.Up * 0.25f));
+                    // 桥面：悬浮在河面（y=-0.5）之上的木板，底 0.18、顶 0.34（略高于道路面顶≈最高 0.24），与水面留明显空隙
+                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, 0.16f, cs)), world + Vector3.Up * 0.26f));
                     boxColor.Add(BridgeColor);
                 }
                 else if (cell.HasWater)
                 {
-                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, 0.1f, cs)), world + Vector3.Up * 0.03f));
+                    // 水面：下凹到 y=-0.5（顶），低于岸陆半米；薄板向下延伸到背景平面下
+                    boxXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs, 0.12f, cs)), world + Vector3.Up * (-0.56f)));
                     boxColor.Add(WaterColor);
                 }
                 else if (cell.HasRoad)
@@ -258,28 +288,47 @@ public partial class GridRenderer : Node3D
                     boxColor.Add(rc);
                 }
 
-                // 树木：植物实体驱动，尺寸随生长进度放大（块内格→实体查询，重建量与块大小成正比）
+                // 树木：植物实体驱动，尺寸随生长进度放大（块内格→实体查询，重建量与块大小成正比）。
+                // 造型：圆柱树干 + 树冠（逐株伪随机选圆锥/椭球；果树固定椭球阔叶状），位置/大小带扰动避免排队感
                 if (cell.HasTree && gs.Plants.TryGetValue(GameState.CellIndex(new Vector2I(x, y)), out var p))
                 {
-                    // 位置/大小用格坐标伪随机扰动，避免排队感；站在本格地面上
                     float jx = ((x * 73 + y * 31) % 7 - 3) * 0.15f;
                     float jz = ((x * 41 + y * 57) % 7 - 3) * 0.15f;
                     float s = (0.8f + ((x * 13 + y * 17) % 5) * 0.1f) * (0.35f + 0.65f * p.GrowthRatio);
-                    treeXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, s, s)), world + new Vector3(jx, groundY + 1.5f * s, jz)));
-                    treeColor.Add(p.IsFruitTree ? FruitTreeColor : TreeColor);
+                    var root = world + new Vector3(jx, groundY, jz); // 树根落在本格地面
+
+                    // 树干：高随株大小，颜色带微扰动（免成片同色塑料感）
+                    float trunkH = 1.1f * s;
+                    trunkXf.Add(new Transform3D(Basis.FromScale(new Vector3(s, trunkH, s)), root + Vector3.Up * (trunkH / 2f)));
+                    trunkColor.Add(TrunkColor.Lightened(((x * 7 + y * 13) % 5) * 0.03f));
+
+                    var crownCol = (p.IsFruitTree ? FruitTreeColor : TreeColor).Lightened(((x * 11 + y * 5) % 5) * 0.025f);
+                    bool cone = !p.IsFruitTree && (x * 29 + y * 61) % 5 < 2; // 约两成针叶圆锥，果树恒为阔叶椭球
+                    if (cone)
+                    {
+                        // 圆锥冠：坐在树干顶略下压（遮住接缝）
+                        float crownH = 2.6f * s;
+                        coneXf.Add(new Transform3D(Basis.FromScale(new Vector3(s * 0.9f, crownH / 3f, s * 0.9f)),
+                            root + Vector3.Up * (trunkH - 0.25f * s + crownH / 2f)));
+                        coneColor.Add(crownCol);
+                    }
+                    else
+                    {
+                        // 椭球冠：竖向略拉长，中心架在树干顶上方
+                        var crownScale = new Vector3(1.8f * s, 2.3f * s, 1.8f * s);
+                        ballXf.Add(new Transform3D(Basis.FromScale(crownScale),
+                            root + Vector3.Up * (trunkH + crownScale.Y * 0.5f - 0.35f * s)));
+                        ballColor.Add(crownCol);
+                    }
                 }
             }
         }
 
         var chunk = _chunks[index];
         FillMultiMesh(chunk.Boxes.Multimesh, boxXf, boxColor);
-
-        chunk.Trees.Multimesh.InstanceCount = treeXf.Count;
-        for (int i = 0; i < treeXf.Count; i++)
-        {
-            chunk.Trees.Multimesh.SetInstanceTransform(i, treeXf[i]);
-            chunk.Trees.Multimesh.SetInstanceColor(i, treeColor[i]);
-        }
+        FillMultiMesh(chunk.Trunks.Multimesh, trunkXf, trunkColor);
+        FillMultiMesh(chunk.ConeCrowns.Multimesh, coneXf, coneColor);
+        FillMultiMesh(chunk.BallCrowns.Multimesh, ballXf, ballColor);
     }
 
     /// <summary>重建坊区色块层：只遍历坊区候选集（增量索引），非全图扫描。</summary>
@@ -339,14 +388,17 @@ public partial class GridRenderer : Node3D
             bodyXf.Add(bodyTransform);
             bodyColor.Add(bodyCol);
 
-            // 斜屋顶：脊线沿长边，稍出檐（跟随房体尺寸与中心）
-            float roofH = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
-            var roofBasis = w >= d
-                ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * 1.06f, roofH, w * 1.06f))
-                : Basis.FromScale(new Vector3(w * 1.06f, roofH, d * 1.06f));
-            var roofCenter = new Vector3(center.X, groundY + height + roofH / 2f, center.Z);
-            roofXf.Add(new Transform3D(roofBasis, roofCenter));
-            roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
+            // 斜屋顶：脊线沿长边，稍出檐（跟随房体尺寸与中心）；农田等 NoRoof 地块只有地面不盖顶
+            if (!b.Def.NoRoof)
+            {
+                float roofH = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
+                var roofBasis = w >= d
+                    ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * 1.06f, roofH, w * 1.06f))
+                    : Basis.FromScale(new Vector3(w * 1.06f, roofH, d * 1.06f));
+                var roofCenter = new Vector3(center.X, groundY + height + roofH / 2f, center.Z);
+                roofXf.Add(new Transform3D(roofBasis, roofCenter));
+                roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
+            }
 
             // 门标记：沿占地边界贴墙放置，朝向由门内→门外方向决定（大门大而亮，后门小而暗）
             gs.EnsureDoors(b);

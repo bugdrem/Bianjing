@@ -5,8 +5,9 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 点选详情面板（屏幕左侧）：点居民看个人履历与需求，点建筑看建造时间/等级/人员/储存。
-/// 面板常驻刷新（每 0.5s 重读数据层），目标消失（死亡/拆除）自动关闭。
+/// 点选详情面板（屏幕左侧）：点居民看个人履历与需求，点建筑看建造时间/等级/人员/储存，
+/// 另支持树木（树龄/长势/挂果）、野物（月龄）与地面物资堆（堆内明细）。
+/// 面板常驻刷新（每 0.5s 重读数据层），目标消失（死亡/拆除/砍倒/拾空）自动关闭。
 /// </summary>
 public partial class InspectPanel : PanelContainer
 {
@@ -21,6 +22,9 @@ public partial class InspectPanel : PanelContainer
 
     private int _citizenId = -1;
     private int _buildingId = -1;
+    private int _plantCell = -1; // 植物/地面堆均以格索引为键（见 GameState.Plants/Piles）
+    private int _pileCell = -1;
+    private int _animalId = -1;
 
     public override void _Ready()
     {
@@ -75,8 +79,8 @@ public partial class InspectPanel : PanelContainer
 
     public void ShowCitizen(Citizen c)
     {
+        ClearTargets();
         _citizenId = c.Id;
-        _buildingId = -1;
         _bioExpanded = false; // 换人重置为折叠
         Visible = true;
         EventBus.RaiseCitizenSelected(c.Id);
@@ -85,18 +89,54 @@ public partial class InspectPanel : PanelContainer
 
     public void ShowBuilding(BuildingInstance b)
     {
+        ClearTargets();
         _buildingId = b.Id;
-        _citizenId = -1;
         Visible = true;
         EventBus.RaiseCitizenSelected(-1);
         Refresh();
     }
 
+    public void ShowTree(PlantObj p)
+    {
+        ClearTargets();
+        _plantCell = GameState.CellIndex(new Vector2I(p.X, p.Y));
+        Visible = true;
+        EventBus.RaiseCitizenSelected(-1);
+        Refresh();
+    }
+
+    public void ShowAnimal(AnimalObj a)
+    {
+        ClearTargets();
+        _animalId = a.Id;
+        Visible = true;
+        EventBus.RaiseCitizenSelected(-1);
+        Refresh();
+    }
+
+    public void ShowPile(ItemPileObj pile)
+    {
+        ClearTargets();
+        _pileCell = GameState.CellIndex(new Vector2I(pile.X, pile.Y));
+        Visible = true;
+        EventBus.RaiseCitizenSelected(-1);
+        Refresh();
+    }
+
+    /// <summary>清空全部选中目标（切页前调用，保证同时只有一个目标生效）。</summary>
+    private void ClearTargets()
+    {
+        _citizenId = -1;
+        _buildingId = -1;
+        _plantCell = -1;
+        _pileCell = -1;
+        _animalId = -1;
+    }
+
     public void Close()
     {
         Visible = false;
-        _citizenId = -1;
-        _buildingId = -1;
+        ClearTargets();
         EventBus.RaiseCitizenSelected(-1);
     }
 
@@ -127,6 +167,27 @@ public partial class InspectPanel : PanelContainer
                 RenderBuilding(gs, b);
             else
                 Close(); // 已拆除/坍塌
+        }
+        else if (_plantCell >= 0)
+        {
+            if (gs.Plants.TryGetValue(_plantCell, out var p))
+                RenderTree(p);
+            else
+                Close(); // 已被砍倒
+        }
+        else if (_animalId >= 0)
+        {
+            if (gs.Animals.TryGetValue(_animalId, out var a))
+                RenderAnimal(a);
+            else
+                Close(); // 已被猎获/自然减员
+        }
+        else if (_pileCell >= 0)
+        {
+            if (gs.Piles.TryGetValue(_pileCell, out var pile))
+                RenderPile(pile);
+            else
+                Close(); // 已拾空
         }
     }
 
@@ -300,6 +361,65 @@ public partial class InspectPanel : PanelContainer
                     sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日）");
         }
 
+        _body.Text = sb.ToString().TrimEnd();
+    }
+
+    // ---- 树木/野物/地面堆页 ----
+
+    /// <summary>树木页：树龄/长势/木质血量，果树另列挂果存量。</summary>
+    private void RenderTree(PlantObj p)
+    {
+        _title.Text = p.IsFruitTree ? "果树" : "树木";
+        _bioToggle.Visible = false;
+        _bioBody.Visible = false;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"树龄：{p.GrowthMonths / 12} 年 {p.GrowthMonths % 12} 月");
+        sb.AppendLine(p.Mature ? "长势：已成树" : $"长势：幼树（{p.GrowthRatio * 100:F0}%）");
+        sb.AppendLine($"木质：{p.Hp:F0}/{p.MaxHp:F0}（砍伐扣减，久不被砍缓慢恢复）");
+        if (p.IsFruitTree)
+            sb.AppendLine(p.Mature
+                ? $"挂果：{p.FruitStock:F1}/{PlantObj.FruitCap:F0} 份（挂满过熟会落果）"
+                : "挂果：尚未到挂果树龄");
+        _body.Text = sb.ToString().TrimEnd();
+    }
+
+    /// <summary>野物页：月龄与习性。</summary>
+    private void RenderAnimal(AnimalObj a)
+    {
+        _title.Text = "野物";
+        _bioToggle.Visible = false;
+        _bioBody.Visible = false;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine(a.AgeMonths >= 12 ? $"月龄：{a.AgeMonths / 12} 岁零 {a.AgeMonths % 12} 月" : $"月龄：{a.AgeMonths} 个月");
+        sb.AppendLine("习性：倚林而栖，日间小范围游走觅食");
+        sb.AppendLine("可由猎户捕获，倒地化为野味供拾取");
+        _body.Text = sb.ToString().TrimEnd();
+    }
+
+    /// <summary>地面物资堆页：堆内逐货明细（标题随主要货品，果堆即显「果品堆」）。</summary>
+    private void RenderPile(ItemPileObj pile)
+    {
+        // 取份数最多的货品作标题（与地面堆渲染的主色逻辑同源）
+        string domId = "";
+        double domAmt = 0;
+        foreach (var s in pile.Inv.Stacks)
+        {
+            if (s.Amount > domAmt)
+            {
+                domAmt = s.Amount;
+                domId = s.GoodsId;
+            }
+        }
+        _title.Text = domId == "" ? "地面物资" : $"{Goods.NameOf(domId)}堆";
+        _bioToggle.Visible = false;
+        _bioBody.Visible = false;
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"堆存 {pile.Inv.Total:F1}/{ItemPileObj.PileCapacity:F0} 份（任何居民可拾取）");
+        foreach (var s in pile.Inv.Stacks)
+            sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日）");
         _body.Text = sb.ToString().TrimEnd();
     }
 

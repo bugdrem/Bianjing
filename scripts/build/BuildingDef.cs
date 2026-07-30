@@ -22,6 +22,12 @@ public class BuildingDef
     public string Color { get; set; } = "#ffffff";
     public float Height { get; set; } = 2f;
 
+    /// <summary>不绘制斜屋顶（如农田等开阔地块，只有地面无房顶）；默认 false 照常盖顶。</summary>
+    public bool NoRoof { get; set; }
+
+    /// <summary>全局唯一：全城至多存在一座（如王爷府）；已建成时放置校验/菜单据此拦截第二座。</summary>
+    public bool Unique { get; set; }
+
     /// <summary>正向吸引力（水井/衙门等）及作用半径（格）。</summary>
     public float DesirabilityBonus { get; set; }
     public float DesirabilityRadius { get; set; }
