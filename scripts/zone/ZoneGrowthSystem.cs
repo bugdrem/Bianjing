@@ -44,8 +44,8 @@ public class ZoneGrowthSystem
                 b.Level++;
                 changed = true;
                 // 扩建不再随升级触发（改由住满拥挤事件驱动，见 LifecycleSystem.ResolveHousing）；
-                // 只有占地扩过地（≥ 32 平米）的住宅升级时才有资格转为商铺/工坊
-                if (b.Def.Id == "house" && b.FootX * b.FootY >= 32)
+                // 只有扩过地（占地 ≥ ConvertMinArea 平米，2×2 起步制下约扩建两次）的住宅升级时才有资格转为商铺/工坊
+                if (b.Def.Id == "house" && b.FootX * b.FootY >= GameBalance.Growth.ConvertMinArea)
                     TryConvertHouse(gs, b);
             }
         }
@@ -53,14 +53,15 @@ public class ZoneGrowthSystem
             EventBus.RaiseMapChanged();
     }
 
-    /// <summary>住宅升级时掷是否转业：受全城工商占比封顶（约十间住宅出两三家），
-    /// 并按临街/环境吸引力加成：越旺的地段越容易开店。</summary>
+    /// <summary>住宅升级时掷是否转业：受全城工商占比封顶（约十间住宅出两三家）；
+    /// 商铺只在贴近主路（ConvertRoadDist 米内）时可转、越贴近越容易；
+    /// 工坊贴近主路或辅路即可转、同样越贴近越容易；两样都够不着则不转业。</summary>
     private void TryConvertHouse(GameState gs, BuildingInstance b)
     {
         // 村落阶段不开店：集镇（里程碑 1）起才允许住宅转工商
         if (gs.MilestoneLevel < 1)
             return;
-
+    
         // 全城工商户数封顶 30%：大致对应“10 间住宅中两三个升级成工坊或商铺”
         int grown = 0, biz = 0;
         foreach (var g in gs.Buildings.Values)
@@ -73,16 +74,65 @@ public class ZoneGrowthSystem
         }
         if (grown > 0 && biz >= grown * 0.3f)
             return;
-
-        // 临街与周边属性：吸引力（主路/衙署/水井加成，污染减分）越高越容易转业
-        float desir = gs.Map.CellAt(b.Origin).Desirability;
-        double scale = Math.Clamp(0.5 + desir * 0.25, 0.5, 1.5);
-
-        double r = _rng.NextDouble();
-        if (r < ShopConvertChance * scale)
+    
+        // 临路远近：占地边缘到最近主路/辅路的距离（米，范围内没有则 -1 无资格；小路/桥面不算）
+        var (dMain, dSide) = NearestRoadDistance(gs, b, GameBalance.Growth.ConvertRoadDist);
+    
+        // 商铺：门面要临主街——只认主路，越贴近越容易（贴边满额，判定边界处约打二折）
+        if (dMain > 0 && _rng.NextDouble() < ShopConvertChance * RoadProximity(dMain))
+        {
             gs.ConvertGrown(b, "shop");
-        else if (r < (ShopConvertChance + WorkshopConvertChance) * scale)
+            return;
+        }
+    
+        // 工坊：进出料方便即可——主路或辅路皆可，取两者中更近的距离，越贴近越容易
+        int dAny = dMain > 0 && (dSide < 0 || dMain < dSide) ? dMain : dSide;
+        if (dAny > 0 && _rng.NextDouble() < WorkshopConvertChance * RoadProximity(dAny))
             gs.ConvertGrown(b, "workshop");
+    }
+    
+    /// <summary>临路远近的概率倍率：贴边（d=1）为 1.0，随距离线性衰减到判定边界处的 1/ConvertRoadDist。</summary>
+    private static double RoadProximity(int d)
+        => (GameBalance.Growth.ConvertRoadDist + 1 - d) / (double)GameBalance.Growth.ConvertRoadDist;
+    
+    /// <summary>占地边缘到最近主路格与辅路格的切比雪夫距离（米）：范围内找不到返回 -1；
+    /// 小路与桥面不计（转业只认玩家画的主/辅路）。扫描面积 (占地+2r)² 量级，仅升级掷中时偶发调用。</summary>
+    private static (int Main, int Side) NearestRoadDistance(GameState gs, BuildingInstance b, int maxDist)
+    {
+        int dMain = -1, dSide = -1;
+        var o = b.Origin;
+        int fx = b.FootX, fy = b.FootY;
+        for (int x = o.X - maxDist; x < o.X + fx + maxDist; x++)
+        {
+            for (int y = o.Y - maxDist; y < o.Y + fy + maxDist; y++)
+            {
+                if (x >= o.X && x < o.X + fx && y >= o.Y && y < o.Y + fy)
+                    continue; // 占地内部不算
+                var c = new Vector2I(x, y);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                ref var cell = ref gs.Map.CellAt(c);
+                if (!cell.HasRoad)
+                    continue;
+                // 该格到占地边缘的切比雪夫距离（贴边为 1）
+                int dx = x < o.X ? o.X - x : x >= o.X + fx ? x - (o.X + fx - 1) : 0;
+                int dy = y < o.Y ? o.Y - y : y >= o.Y + fy ? y - (o.Y + fy - 1) : 0;
+                int d = Math.Max(dx, dy);
+                if (d > maxDist)
+                    continue; // 矩形四角可能超出判定半径
+                if (cell.RoadKind == RoadKind.Main)
+                {
+                    if (dMain < 0 || d < dMain)
+                        dMain = d;
+                }
+                else if (cell.RoadKind == RoadKind.Side)
+                {
+                    if (dSide < 0 || d < dSide)
+                        dSide = d;
+                }
+            }
+        }
+        return (dMain, dSide);
     }
 
     /// <summary>住宅向紧邻空地（或自家小路环格）扩大占地（最大 8×8 米）：依次试右列/左列/下行/上行，

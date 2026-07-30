@@ -45,6 +45,9 @@ public class GameState
     /// <summary>官库收支账本（本月/上月分类流水，随存档保存）。</summary>
     public Ledger Ledger = new();
 
+    /// <summary>全城公告（新在前，上限 200 条；不入存档，读档/新开局从头重记）。</summary>
+    public readonly List<NewsItem> News = new();
+
     /// <summary>当前游戏日期（由 Main 随时钟同步，供建造盖戳等数据层使用）。</summary>
     public int CurYear = 1;
     public int CurMonth = 1;
@@ -909,6 +912,16 @@ public class GameState
         c.LifeEvents.Add(new LifeEvent { Year = CurYear, Month = CurMonth, Text = text });
         if (c.LifeEvents.Count > 40)
             c.LifeEvents.RemoveAt(0);
+    }
+
+    /// <summary>发一条全城公告（迁入迁出/生死等大事，新在前）并广播公告栏刷新；
+    /// kind 为类别标签（见 NewsItem，后续新事件直接加标签即可拓展）。</summary>
+    public void PostNews(string kind, string text)
+    {
+        News.Insert(0, new NewsItem { Year = CurYear, Month = CurMonth, Kind = kind, Text = text });
+        if (News.Count > 200)
+            News.RemoveAt(News.Count - 1); // 满则淘汰最旧一条
+        EventBus.RaiseNewsPosted();
     }
 
     public Family AddFamily(Family f)

@@ -122,6 +122,14 @@ public static class GameBalance
         /// <summary>每点吸引力的地价系数：越靠主路/设施（吸引力越高）地价越贵。</summary>
         public const double LandPricePerDesir = 6;
 
+        /// <summary>住宅转业（商铺/工坊）的最小占地（平米）：取起步 2×2 的两倍，
+        /// 即扩建过两次左右（如 2×4/3×3）的富足人家才有资格开店。</summary>
+        public const int ConvertMinArea = 8;
+
+        /// <summary>转业临路判定半径（米）：占地边缘到主/辅路超出此距则无转业资格；
+        /// 距离越近转业概率越高（贴边满额，边界处约打二折）。商铺只认主路，工坊主/辅路皆可。</summary>
+        public const int ConvertRoadDist = 6;
+
         /// <summary>每多少格占地增设 1 个后门（大门恒 1 个，后门数 = max(1, 占地格数 / 本值)）。</summary>
         public const int CellsPerBackDoor = 64;
 

@@ -132,6 +132,9 @@ public partial class BuildController : Node
         if (!_hoverInMap)
             return;
 
+        // 点到游戏世界（非 UI，否则不会进 _UnhandledInput）：收起政策/财政/科技侧面板（公告栏常驻不收）
+        Hud?.CloseSidePanels();
+
         switch (Mode)
         {
             case BuildMode.None:

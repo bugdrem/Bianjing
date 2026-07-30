@@ -16,6 +16,7 @@ public partial class Hud : CanvasLayer
     private float _infoTimer;
 
     private InspectPanel _inspect;
+    private PolicyPanel _policy;
     private FinancePanel _finance;
     private TechPanel _tech;
 
@@ -29,16 +30,17 @@ public partial class Hud : CanvasLayer
 
     public override void _Ready()
     {
-        var policy = new PolicyPanel();
+        _policy = new PolicyPanel();
         _finance = new FinancePanel();
         _tech = new TechPanel();
         _inspect = new InspectPanel();
-        AddChild(new TopBar(_clock, _onSave, _onLoad, policy.Toggle, _finance.Toggle, _tech.Toggle));
+        AddChild(new TopBar(_clock, _onSave, _onLoad, _policy.Toggle, _finance.Toggle, _tech.Toggle));
         AddChild(new BuildMenu(_build));
-        AddChild(policy);
+        AddChild(_policy);
         AddChild(_finance);
         AddChild(_tech);
         AddChild(_inspect);
+        AddChild(new NewsPanel()); // 右下角常驻公告栏（迁入迁出/生死实时播报）
 
         // 里程碑晋级与科技研成：右下角弹报（复用格子信息条）
         EventBus.MilestoneReached += OnMilestone;
@@ -97,6 +99,15 @@ public partial class Hud : CanvasLayer
     public void ShowBuilding(BuildingInstance b) => _inspect.ShowBuilding(b);
 
     public void CloseInspect() => _inspect.Close();
+
+    /// <summary>收起政策/财政/科技侧面板（点击游戏世界时由 BuildController 调用）；
+    /// 公告栏常驻不收，ESC 菜单另有遮罩拦截仅手动返回。</summary>
+    public void CloseSidePanels()
+    {
+        _policy.Visible = false;
+        _finance.Visible = false;
+        _tech.Visible = false;
+    }
 
     public override void _Process(double delta)
     {

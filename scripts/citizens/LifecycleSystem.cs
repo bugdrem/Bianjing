@@ -66,7 +66,14 @@ public class LifecycleSystem
                 dead.Add(c.Id);
 
         foreach (var id in dead)
+        {
+            // 公告栏播报：先取名字年龄再移除（孩童报夭折，成年报享年）
+            if (gs.Citizens.TryGetValue(id, out var c))
+                gs.PostNews("death", c.IsChild
+                    ? $"{c.Name}不幸夭折，年仅 {c.AgeYears} 岁"
+                    : $"{c.Name}离世，享年 {c.AgeYears} 岁");
             gs.RemoveCitizen(id);
+        }
     }
 
     /// <summary>月死亡概率：任何年龄都有基础底噪，死亡率随年龄按 Gompertz 曲线上升
@@ -132,6 +139,7 @@ public class LifecycleSystem
 
         foreach (var c in homeless.Where(c => c.HomelessMonths > EmigrateAfterHomelessMonths).ToList())
         {
+            gs.PostNews("migrate-out", $"{c.Name}久觅居所不得，携家迁离汴京"); // 公告栏播报迁出
             // 带上未成年子女一同迁出，不留孤幼滞留城中
             foreach (var childId in c.ChildrenIds.ToList())
                 if (gs.Citizens.TryGetValue(childId, out var child) && child.IsChild)
@@ -207,6 +215,7 @@ public class LifecycleSystem
             MoveIn(gs, c, house.Id, occupancy);
             gs.LogLifeEvent(c, "携眷迁入汴京，自建新宅");
         }
+        gs.PostNews("migrate-in", $"{husband.Name}携眷迁入汴京，自建新宅安家"); // 公告栏播报迁入
     }
 
     private void SpawnSingle(GameState gs, BuildingInstance house, Dictionary<int, int> occupancy, double assets, bool lodger)
@@ -218,6 +227,9 @@ public class LifecycleSystem
         house.Abandoned = false;
         MoveIn(gs, single, house.Id, occupancy);
         gs.LogLifeEvent(single, lodger ? "寄居店坊，暂谋生计" : "只身迁入汴京，自建新宅");
+        gs.PostNews("migrate-in", lodger
+            ? $"{single.Name}迁入汴京，暂寄居{house.Def.Name}"
+            : $"{single.Name}只身迁入汴京，自建新宅"); // 公告栏播报迁入
 
         // 寄居者：若寄居的店坊有空岗位，顺带受雇（所占居住位与工作位为同一格）
         if (lodger && house.Def.JobSlots > 0 && gs.StaffOf(house).Count < house.Def.JobSlots)
@@ -456,11 +468,12 @@ public class LifecycleSystem
                 family.MemberIds.Add(child.Id);
             MoveIn(gs, child, mother.HomeId, occupancy);
 
-            // 孩子记出生，父母各记得子/得女
+            // 孩子记出生，父母各记得子/得女，公告栏同步播报
             gs.LogLifeEvent(child, $"生于{HomeName(gs, mother.HomeId)}");
             string kidWord = gender == Gender.Male ? "得子" : "得女";
             gs.LogLifeEvent(father, $"{kidWord} {child.Name}");
             gs.LogLifeEvent(mother, $"{kidWord} {child.Name}");
+            gs.PostNews("birth", $"{father.Name}家{kidWord}：{child.Name}");
         }
     }
 

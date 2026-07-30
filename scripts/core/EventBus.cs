@@ -28,6 +28,9 @@ public static class EventBus
     /// <summary>科技研成（参数为科技 id）：HUD 弹报。</summary>
     public static event Action<string> TechUnlocked;
 
+    /// <summary>新公告入栏（迁入迁出/生死等全城大事，见 GameState.PostNews）：公告栏实时刷新。</summary>
+    public static event Action NewsPosted;
+
     public static void RaiseMapChanged() => MapChanged?.Invoke();
     public static void RaiseZonesChanged() => ZonesChanged?.Invoke();
     public static void RaiseStatsChanged() => StatsChanged?.Invoke();
@@ -39,6 +42,7 @@ public static class EventBus
     public static void RaiseCellChanged(Vector2I c) => CellChanged?.Invoke(c);
     public static void RaiseMilestoneReached(int level) => MilestoneReached?.Invoke(level);
     public static void RaiseTechUnlocked(string techId) => TechUnlocked?.Invoke(techId);
+    public static void RaiseNewsPosted() => NewsPosted?.Invoke();
 
     /// <summary>重开一局时清空所有订阅，避免编辑器内重启后重复订阅。</summary>
     public static void Reset()
@@ -54,5 +58,6 @@ public static class EventBus
         CellChanged = null;
         MilestoneReached = null;
         TechUnlocked = null;
+        NewsPosted = null;
     }
 }
