@@ -116,10 +116,27 @@ public static class GameBalance
         /// <summary>住宅四周自动生成的小路环宽度（格）。</summary>
         public const int LaneRing = 1;
 
+        /// <summary>建房基价（地价下限，不论地段的营造成本）。</summary>
+        public const double HouseBaseCost = 20;
+
+        /// <summary>每点吸引力的地价系数：越靠主路/设施（吸引力越高）地价越贵。</summary>
+        public const double LandPricePerDesir = 6;
+
         /// <summary>每多少格占地增设 1 个后门（大门恒 1 个，后门数 = max(1, 占地格数 / 本值)）。</summary>
         public const int CellsPerBackDoor = 64;
 
         /// <summary>相邻门之间的最小间距（格，切比雪夫）：先按此间距分散布门，凑不足再放宽。</summary>
         public const int MinDoorGap = 2;
+    }
+
+    /// <summary>迁入流民自带资产与自建门槛：控制“靠迁入+分家建房”的人口增长节奏。</summary>
+    public static class Immigration
+    {
+        /// <summary>迁入者随机自带资产区间（家庭公产初值，扣除建房地价后余额入公产）。</summary>
+        public const double AssetsMin = 20;
+        public const double AssetsMax = 120;
+
+        /// <summary>单身自建住宅门槛：资产达此值且有合法落位才自建，否则寄居店坊当暂住雇工。</summary>
+        public const double SelfBuildAssets = 80;
     }
 }

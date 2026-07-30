@@ -27,7 +27,8 @@ public class JobSystem
         HouseholdSpending(gs);
     }
 
-    /// <summary>居住者承担自家产业：工坊/商铺（grown + 有岗位）的岗位优先由本楼居民填。
+    /// <summary>居住者优先承担自家产业：工坊/商铺（grown + 有岗位）的岗位先由本楼居民填，
+    /// 岗位被外来雇工占满时辞退外人给本楼人让位；余下空缺由 SeekJobs 对外招工。
     /// 本楼居民若在外就业则辞外职回自家上工；孩童不入职。</summary>
     private static void StaffHomeBusinesses(GameState gs)
     {
@@ -55,6 +56,24 @@ public class JobSystem
                 c.WorkplaceId = b.Id;
                 filled++;
             }
+
+            // 本楼人上工后岗位超员（外来雇工占着位）：辞退多余的外人，东家人优先
+            int total = 0;
+            foreach (var c in gs.Citizens.Values)
+                if (c.JobKind == JobKind.Employed && c.WorkplaceId == b.Id)
+                    total++;
+            if (total > b.Def.JobSlots)
+                foreach (var c in gs.Citizens.Values)
+                {
+                    if (total <= b.Def.JobSlots)
+                        break;
+                    if (c.JobKind != JobKind.Employed || c.WorkplaceId != b.Id || c.HomeId == b.Id)
+                        continue;
+                    c.JobKind = JobKind.None;
+                    c.WorkplaceId = -1;
+                    total--;
+                    gs.LogLifeEvent(c, $"东家自用家人，被{b.Def.Name}辞退");
+                }
         }
     }
 
@@ -143,15 +162,21 @@ public class JobSystem
         return workers;
     }
 
-    /// <summary>寻找空缺岗位：官营建筑面向全城招工；工坊/商铺等 grown 产业岗位专留给本楼居民（见 StaffHomeBusinesses），不对外招。</summary>
+    /// <summary>寻找空缺岗位：官营建筑面向全城招工（雇工从各自住处通勤，不占居住格）；
+    /// 工坊/商铺本楼居民优先（见 StaffHomeBusinesses），住户填不满的余缺对外招——
+    /// 外来打工者在工作地占一个居住格（居住与打工共用同一格池），满员（居民+雇工≥容量）则不再招。</summary>
     private static BuildingInstance FindVacancy(GameState gs, Dictionary<int, int> workers)
     {
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.JobSlots <= 0 || b.Def.Category == "grown")
+            if (b.Def.JobSlots <= 0)
                 continue;
-            if (workers.GetValueOrDefault(b.Id) < b.Def.JobSlots)
-                return b;
+            if (workers.GetValueOrDefault(b.Id) >= b.Def.JobSlots)
+                continue;
+            // grown 工坊/商铺：外来雇工占一个居住格，无空格（居民+雇工已满）则不对外招，直至扩建
+            if (b.Def.Category == "grown" && gs.BuildingOccupancy(b) >= b.HousingCapacity)
+                continue;
+            return b;
         }
         return null;
     }

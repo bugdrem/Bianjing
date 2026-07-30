@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v13：果树字段与水需求（旧档无果树全图断果）；早期开发版本不符拒读。</summary>
-    public const int FormatVersion = 13;
+    /// <summary>v14：房体=占地且默认尺寸 4×4→2×2（坐标体系与旧档不兼）；早期开发版本不符拒读。</summary>
+    public const int FormatVersion = 14;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>

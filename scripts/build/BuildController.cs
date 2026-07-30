@@ -383,7 +383,7 @@ public partial class BuildController : Node
         ShowCellInfo(c);
     }
 
-    /// <summary>把在场代理投影到屏幕，取鼠标 24px 内最近的一位。</summary>
+    /// <summary>把在场代理投影到屏幕，取鼠标 32px 内最近的一位（模型缩小后放宽命中圈）。</summary>
     private Citizen PickCitizen()
     {
         if (Agents == null)
@@ -392,10 +392,11 @@ public partial class BuildController : Node
         var cam = _rig.Cam;
         var mouse = GetViewport().GetMousePosition();
         Citizen best = null;
-        float bestDist = 24f;
+        float bestDist = 32f;
         foreach (var agent in Agents.Agents)
         {
-            var world = agent.Position + Vector3.Up * 1f; // 瞄准身躯而非脚底
+            // 瞄准缩放后的身躯中部（旧值 +1m 在小模型头顶老高处，投影偏离视觉位置致难点中）
+            var world = agent.Position + Vector3.Up * (GameBalance.Villager.ModelScale * 1.1f);
             if (cam.IsPositionBehind(world))
                 continue;
             float d = cam.UnprojectPosition(world).DistanceTo(mouse);

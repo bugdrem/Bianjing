@@ -4,14 +4,11 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>坊区生长系统（每日结算，日频概率——1x 下一游戏日 ≈ 20 现实秒、一游戏月 ≈ 10 现实分钟）：
-/// 居民在「可建设区」内临路+吸引力达标的空地上自动建房——初生均为住宅；
-/// 住宅容量=房体内部格数，住满后由拥挤事件驱动扩地（见 LifecycleSystem）；升级只影响楼高观感，
+/// 住宅不再缺房自动生成（人口靠迁入 + 分家建房驱动，见 LifecycleSystem）；
+/// 住宅容量=占地格数，住满后由拥挤事件驱动扩地；升级只影响楼高观感，
 /// 升级时占地够大的住宅有概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
 public class ZoneGrowthSystem
 {
-    /// <summary>缺房时每日建一座住宅的概率。</summary>
-    private const float HouseChancePerDay = 0.6f;
-
     /// <summary>建筑每日升级概率。</summary>
     private const float LevelUpChancePerDay = 0.02f;
 
@@ -27,13 +24,7 @@ public class ZoneGrowthSystem
         if (gs.Money <= 0 && !GameSettings.InfiniteMoney)
             return;
 
-        // 住房：全城总床位（含前店后宅）接近满员时继续吸引流民建房。商铺/工坊不再直接生成，而是由住宅升级转业而来。
-        int capacity = 0;
-        foreach (var b in gs.Buildings.Values)
-            capacity += b.HousingCapacity;
-        if (gs.Population >= capacity - 2 && _rng.NextDouble() < HouseChancePerDay)
-            TryGrow(gs, "house");
-
+        // 住宅不再缺房自动生成：人口靠迁入 + 分家建房驱动（见 LifecycleSystem）；仅保留升级/转业
         LevelUps(gs);
     }
 
@@ -94,58 +85,52 @@ public class ZoneGrowthSystem
             gs.ConvertGrown(b, "workshop");
     }
 
-    /// <summary>住宅向紧邻空地扩大占地（最大 8×8 米）：依次试右列/左列/下行/上行，
-    /// 整条带均为可建设区空地才并入；占领时顺带砍除树木。由住满拥挤事件调用（公开供 LifecycleSystem）；兼并邻居留 TODO。</summary>
+    /// <summary>住宅向紧邻空地（或自家小路环格）扩大占地（最大 8×8 米）：依次试右列/左列/下行/上行，
+    /// 整条带均为可建设区空地或本建筑小路环才并入；扩成后对新 footprint 重新环一圈小路。
+    /// 由住满拥挤事件调用（公开供 LifecycleSystem）；兼并邻居留 TODO。</summary>
     public static bool TryExpandHouse(GameState gs, BuildingInstance b)
     {
         const int MaxSide = 8; // 扩建边长上限（米）
         int fx = b.FootX, fy = b.FootY;
         if (fx * fy >= MaxSide * MaxSide)
             return false;
-
+    
+        bool expanded = false;
         if (fx < MaxSide)
         {
-            // 右侧加一列；不行则左侧加一列（原点左移）
             if (ClaimStrip(gs, b, new Vector2I(b.Origin.X + fx, b.Origin.Y), 0, 1, fy))
             {
-                b.SizeX = fx + 1;
-                b.SizeY = fy;
-                EventBus.RaiseMapChanged();
-                return true;
+                b.SizeX = fx + 1; b.SizeY = fy; expanded = true;
             }
-            if (ClaimStrip(gs, b, new Vector2I(b.Origin.X - 1, b.Origin.Y), 0, 1, fy))
+            else if (ClaimStrip(gs, b, new Vector2I(b.Origin.X - 1, b.Origin.Y), 0, 1, fy))
             {
                 b.Origin = new Vector2I(b.Origin.X - 1, b.Origin.Y);
-                b.SizeX = fx + 1;
-                b.SizeY = fy;
-                EventBus.RaiseMapChanged();
-                return true;
+                b.SizeX = fx + 1; b.SizeY = fy; expanded = true;
             }
         }
-        if (fy < MaxSide)
+        if (!expanded && fy < MaxSide)
         {
-            // 下侧加一行；不行则上侧加一行（原点上移）
             if (ClaimStrip(gs, b, new Vector2I(b.Origin.X, b.Origin.Y + fy), 1, 0, fx))
             {
-                b.SizeX = fx;
-                b.SizeY = fy + 1;
-                EventBus.RaiseMapChanged();
-                return true;
+                b.SizeX = fx; b.SizeY = fy + 1; expanded = true;
             }
-            if (ClaimStrip(gs, b, new Vector2I(b.Origin.X, b.Origin.Y - 1), 1, 0, fx))
+            else if (ClaimStrip(gs, b, new Vector2I(b.Origin.X, b.Origin.Y - 1), 1, 0, fx))
             {
                 b.Origin = new Vector2I(b.Origin.X, b.Origin.Y - 1);
-                b.SizeX = fx;
-                b.SizeY = fy + 1;
-                EventBus.RaiseMapChanged();
-                return true;
+                b.SizeX = fx; b.SizeY = fy + 1; expanded = true;
             }
         }
-        return false;
+        if (expanded)
+        {
+            gs.LayBuildingLaneRing(b); // 小路环随占地前移：在新边界外重新环一圈
+            EventBus.RaiseMapChanged();
+        }
+        return expanded;
     }
-
+    
     /// <summary>检查并占用一条带（起点 start，步进 (dx,dy)，共 count 格）：
-    /// 全部为可建设区内的空地才成立，成立即登记归属。</summary>
+    /// 每格须为「可建设区内空地」或「本建筑小路环格（HasRoad 且 RoadKind.Lane）」才成立，
+    /// 成立即登记归属（ClaimCellForBuilding 内部先清小路再并入）。</summary>
     private static bool ClaimStrip(GameState gs, BuildingInstance b, Vector2I start, int dx, int dy, int count)
     {
         for (int i = 0; i < count; i++)
@@ -153,51 +138,55 @@ public class ZoneGrowthSystem
             var c = new Vector2I(start.X + dx * i, start.Y + dy * i);
             if (!MapGrid.InBounds(c))
                 return false;
-            var cell = gs.Map.CellAt(c);
-            if (!cell.IsEmpty || cell.Zone != ZoneType.Buildable)
+            ref var cell = ref gs.Map.CellAt(c);
+            bool buildableEmpty = cell.IsEmpty && cell.Zone == ZoneType.Buildable;
+            bool ownLane = cell.HasRoad && cell.RoadKind == RoadKind.Lane && cell.BuildingId < 0;
+            if (!buildableEmpty && !ownLane)
                 return false;
         }
         for (int i = 0; i < count; i++)
             gs.ClaimCellForBuilding(new Vector2I(start.X + dx * i, start.Y + dy * i), b.Id);
         return true;
     }
-
-    /// <summary>在可建设区内挑吸引力最高的合法落位生成建筑（定义尺寸 4×4 米起）；无合法落位返回 false。
-    /// 只遍历 BuildableCells 增量索引作候选原点（坊区格数量级远小于全图），逐候选验整块占地。</summary>
-    private static bool TryGrow(GameState gs, string defId)
+    
+    /// <summary>在可建设区内挑一处可负担且吸引力最高的合法落位自建住宅（house）：
+    /// 地价 = HouseBaseCost + LandPricePerDesir×该格吸引力；budget 内选吸引力最高者（最靠主路/设施、最贵的可负担点），
+    /// 预算不足自然退而选便宜（低吸引力）的可负担处；全买不起或无合法落位返回 false，
+    /// 成功输出新建住宅与实际地价（由调用方从买房方资产中扣除）。只遍历 BuildableCells 增量索引作候选原点。</summary>
+    public static bool TryBuildHouse(GameState gs, double budget, out BuildingInstance built, out double cost)
     {
-        var def = gs.Defs[defId];
-        float bestScore = float.MinValue;
+        built = null;
+        cost = 0;
+        var def = gs.Defs["house"];
+    
         Vector2I best = default;
-        bool found = false;
-
+        float bestDesir = float.MinValue;
+        double bestCost = 0;
+        bool afford = false;
+    
         foreach (var c in gs.BuildableCells)
         {
-            // 整块占地均为坊区内的无树空地才能落位（以 c 为左上角原点）
-            if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY))
+            // 整块占地均为坊区内无树空地，且四周小路环可铺并接入既有路网（小路也算接入）
+            if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY) || !RingLayable(gs, c, def.SizeX, def.SizeY))
                 continue;
-
-            // 四周小路环整块须在可建设区内可铺，且至少一格已接入既有道路（临主/辅路或邻居小路，保证连通）
-            if (!RingLayable(gs, c, def.SizeX, def.SizeY))
-                continue;
-
-            // 临路本身 +1，加上环境吸引力；达标线为 >= 1（即临路即可起步，衙门/宫殿加速）
-            float score = gs.Map.CellAt(c).Desirability + 1f;
-            if (score < 1f)
-                continue;
-
-            if (score > bestScore)
+            float desir = gs.Map.CellAt(c).Desirability;
+            double price = GameBalance.Growth.HouseBaseCost + GameBalance.Growth.LandPricePerDesir * Math.Max(0f, desir);
+            if (price > budget)
+                continue; // 该地段负担不起
+            if (desir > bestDesir)
             {
-                bestScore = score;
+                bestDesir = desir;
                 best = c;
-                found = true;
+                bestCost = price;
+                afford = true;
             }
         }
-
-        if (!found)
-            return false;
-
-        gs.PlaceGrownWithLanes(def, best);
+    
+        if (!afford)
+            return false; // 全买不起 / 无合法落位
+    
+        cost = bestCost;
+        built = gs.PlaceBuilding(def, best);
         return true;
     }
 

@@ -13,7 +13,7 @@ public partial class InspectPanel : PanelContainer
     private const float RefreshInterval = 0.5f;
 
     private Label _title;
-    private Label _body;
+    private RichTextLabel _body; // 富文本：成员名按性别着色（BBCode），纯文本页同样兼容
     private Button _bioToggle;
     private Label _bioBody;
     private bool _bioExpanded; // 年龄履历默认折叠
@@ -48,8 +48,14 @@ public partial class InspectPanel : PanelContainer
         close.Pressed += Close;
         head.AddChild(close);
 
-        _body = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart };
-        _body.AddThemeFontSizeOverride("font_size", 13);
+        _body = new RichTextLabel
+        {
+            BbcodeEnabled = true,
+            FitContent = true, // 高度随内容适应（不出滚动条，行为同旧 Label）
+            ScrollActive = false,
+            AutowrapMode = TextServer.AutowrapMode.WordSmart,
+        };
+        _body.AddThemeFontSizeOverride("normal_font_size", 13);
         box.AddChild(_body);
 
         // 年龄履历折叠区（仅居民页可见，默认收起）
@@ -251,20 +257,31 @@ public partial class InspectPanel : PanelContainer
         if (b.Def.HarvestMonths > 0)
             sb.AppendLine($"农时：{b.Def.HarvestMonths - b.MonthsSinceHarvest} 月后收获");
 
-        // 人员
-        var residents = new List<string>();
+        // 人员：居民按户主/关系展示（名字按性别着色），雇工仍列名
+        var residents = new List<Citizen>();
         var workers = new List<string>();
         foreach (var c in gs.Citizens.Values)
         {
             if (c.HomeId == b.Id)
-                residents.Add(c.Name);
+                residents.Add(c);
             if (c.WorkplaceId == b.Id && c.JobKind == JobKind.Employed)
                 workers.Add(c.Name);
         }
         if (b.HousingCapacity > 0)
         {
             sb.AppendLine($"—— 居民 {residents.Count}/{b.HousingCapacity} ——");
-            sb.AppendLine(residents.Count > 0 ? string.Join("、", residents) : "（无人居住）");
+            var head = gs.HouseholdHead(b.Id);
+            if (head == null)
+            {
+                sb.AppendLine("（无人居住）");
+            }
+            else
+            {
+                sb.AppendLine($"屋主：{ColorName(head)}");
+                // 成员按年龄降序逐行：名（性别色）+ 年龄 + 与屋主关系
+                foreach (var c in residents.OrderByDescending(r => r.AgeMonths))
+                    sb.AppendLine($"{ColorName(c)}　{c.AgeYears}岁　{RelationTo(head, c)}");
+            }
         }
         if (b.Def.JobSlots > 0)
         {
@@ -284,5 +301,37 @@ public partial class InspectPanel : PanelContainer
         }
 
         _body.Text = sb.ToString().TrimEnd();
+    }
+
+    /// <summary>名字按性别着色（BBCode）：男青蓝、女红。</summary>
+    private static string ColorName(Citizen c)
+        => $"[color={(c.Gender == Gender.Male ? "#6fa8dc" : "#e0708a")}]{c.Name}[/color]";
+
+    /// <summary>与屋主的关系称谓（由配偶/父母/子女链推导）：本人/妻/夫/子/女/父/母/
+    /// 兄弟姐妹/孙辈/儿媳女婿，其余笼统称亲眷。</summary>
+    private static string RelationTo(Citizen head, Citizen c)
+    {
+        if (c.Id == head.Id)
+            return "本人";
+        if (c.Id == head.SpouseId)
+            return c.Gender == Gender.Female ? "妻" : "夫";
+        if (head.ChildrenIds.Contains(c.Id))
+            return c.Gender == Gender.Male ? "子" : "女";
+        if (c.ChildrenIds.Contains(head.Id))
+            return c.Gender == Gender.Male ? "父" : "母";
+        // 同胞：同父或同母，按年龄分长幼
+        bool sibling = (c.FatherId >= 0 && c.FatherId == head.FatherId)
+            || (c.MotherId >= 0 && c.MotherId == head.MotherId);
+        if (sibling)
+            return c.Gender == Gender.Male
+                ? (c.AgeMonths > head.AgeMonths ? "兄" : "弟")
+                : (c.AgeMonths > head.AgeMonths ? "姐" : "妹");
+        // 孙辈：父或母是屋主的子女
+        if (head.ChildrenIds.Contains(c.FatherId) || head.ChildrenIds.Contains(c.MotherId))
+            return c.Gender == Gender.Male ? "孙" : "孙女";
+        // 儿媳/女婿：配偶是屋主的子女
+        if (c.SpouseId >= 0 && head.ChildrenIds.Contains(c.SpouseId))
+            return c.Gender == Gender.Female ? "儿媳" : "女婿";
+        return "亲眷";
     }
 }

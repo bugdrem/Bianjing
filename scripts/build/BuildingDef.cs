@@ -228,22 +228,15 @@ public class BuildingInstance : Obj
         set { X = value.X; Y = value.Y; }
     }
 
-    /// <summary>可居住人数：grown 建筑（民居/前店后宅/工坊宿舍）= 房体内部格数——
-    /// 地块四周各留 1 米檐隙，紧贴道路的一侧贴边不留（与渲染房体同规则），
-    /// 住满后由拥挤事件驱动扩地增容或搬家；官营建筑沿用定义容量（通常为 0 不住人）。</summary>
+    /// <summary>可居住人数：grown 建筑 = 占地格数（房体=占地，居住与打工共用同一格池，不预留工位）；
+    /// 生育可略超，超员由拥挤事件扩建/分家疏解；官营建筑沿用定义容量（通常为 0 不住人）。</summary>
     public int HousingCapacity
     {
         get
         {
             if (Def.Category != "grown")
                 return Def.CapacityAt(Level);
-            var gs = GameState.I;
-            if (gs == null)
-                return Def.CapacityAt(Level); // 无世界上下文（极早期调用）退回定义值
-            var (l, r, t, b) = gs.RoadAdjacency(this);
-            int ix = System.Math.Max(1, FootX - (l ? 0 : 1) - (r ? 0 : 1));
-            int iy = System.Math.Max(1, FootY - (t ? 0 : 1) - (b ? 0 : 1));
-            return ix * iy;
+            return FootX * FootY; // 房体=占地：2×2 宅=4，2×3=6，3×3=9
         }
     }
 }

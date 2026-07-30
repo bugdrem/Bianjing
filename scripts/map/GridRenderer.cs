@@ -298,26 +298,12 @@ public partial class GridRenderer : Node3D
             // 等级越高楼越高；年久失修则发暗
             float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
 
-            // 房体范围：grown 建筑在地块中间建房——四周各留 1 米檐隙，紧贴道路的一侧贴边（前门临街）；
-            // 官营建筑仍按占地 0.92 缩放整块绘制
+            // 房体范围：grown 与官营统一按占地 ~0.9 缩放整块绘制（房体=占地，不再留院子/不对称檐隙）
             float w, d;
             var center = MapGrid.CellToWorld(b.Origin);
-            if (b.Def.Category == "grown")
-            {
-                var (roadL, roadR, roadT, roadB) = gs.RoadAdjacency(b);
-                float mL = roadL ? 0f : cs, mR = roadR ? 0f : cs;
-                float mT = roadT ? 0f : cs, mB = roadB ? 0f : cs;
-                w = Mathf.Max(cs, b.FootX * cs - mL - mR);
-                d = Mathf.Max(cs, b.FootY * cs - mT - mB);
-                // 地块世界中心 + 檐隙不对称产生的房体偏移（右檐大则房体左移）
-                center += new Vector3((b.FootX - 1) * cs / 2f + (mL - mR) / 2f, height / 2f, (b.FootY - 1) * cs / 2f + (mT - mB) / 2f);
-            }
-            else
-            {
-                w = b.FootX * cs * 0.92f;
-                d = b.FootY * cs * 0.92f;
-                center += new Vector3((b.FootX - 1) * cs / 2f, height / 2f, (b.FootY - 1) * cs / 2f);
-            }
+            w = b.FootX * cs * 0.9f;
+            d = b.FootY * cs * 0.9f;
+            center += new Vector3((b.FootX - 1) * cs / 2f, height / 2f, (b.FootY - 1) * cs / 2f);
 
             var color = b.Def.GodotColor;
             if (b.Condition < 50f)
