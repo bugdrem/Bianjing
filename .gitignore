@@ -20,3 +20,4 @@ obj/
 Thumbs.db
 .DS_Store
 saves
+.vs/
