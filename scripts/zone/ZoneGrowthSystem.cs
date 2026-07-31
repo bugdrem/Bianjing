@@ -65,7 +65,7 @@ public class ZoneGrowthSystem
             }
         }
         if (changed)
-            EventBus.RaiseMapChanged();
+            EventBus.RaiseBuildingsChanged(); // 升级只变楼高：仅重建建筑层，不重建地表分块
     }
 
     /// <summary>住宅升级时的去向掷签（按临路档位取分布，余量 = 维持住宅照常升级）：
@@ -201,7 +201,8 @@ public class ZoneGrowthSystem
             // 新占地整体重新整平到原台面高（含新并入条带），与 PlaceBuilding 垫基规则一致
             gs.Map.Height.FlattenRect(b.Origin, b.FootX, b.FootY, padH);
             gs.LayBuildingLaneRing(b); // 小路环随占地前移：在新边界外重新环一圈
-            EventBus.RaiseMapChanged();
+            // 局部重建：扩建只动新占地矩形顶点，标脏覆盖分块即可（小路环已逐格 CellChanged）
+            EventBus.RaiseRectChanged(b.Origin, new Vector2I(b.FootX, b.FootY));
         }
         return expanded;
     }

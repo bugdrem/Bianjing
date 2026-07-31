@@ -291,7 +291,9 @@ public class GameState
         // 所有建筑（含玩家放置的官营）建成后四周环一圈小路（附属小路）：该侧已临任意路则不重铺
         LayLaneRing(origin, def.SizeX, def.SizeY);
 
-        EventBus.RaiseMapChanged();
+        // 局部重建：垫基整平只动占地矩形内顶点，只标脏覆盖分块（小路环已逐格 CellChanged）；
+        // 旧版这里全图 MapChanged，村民 4x 下频繁建房时百万格重建是间歇卡顿主源
+        EventBus.RaiseRectChanged(origin, new Vector2I(def.SizeX, def.SizeY));
         EventBus.RaiseStatsChanged();
         EventBus.RaiseBuildingPlaced(b); // 实时放置钩子（如王爷府建成：拨款+安置夫妻）；读档重建不经此方法故不误触
         return b;
@@ -346,7 +348,7 @@ public class GameState
         b.Specialty = DefaultSpecialty(def);
         b.Abandoned = false;
         b.Doors = null; // 转业后临路/用途可变，门失效待重算
-        EventBus.RaiseMapChanged();
+        EventBus.RaiseBuildingsChanged(); // 只换定义/颜色不动地表：仅重建建筑层
     }
 
     /// <summary>拆除：桥梁 > 道路 > 建筑 > 坊区 > 树木，逐层清理；河水不可拆。</summary>
@@ -438,7 +440,8 @@ public class GameState
             }
         }
     
-        EventBus.RaiseMapChanged();
+        // 局部重建：占地矩形（含外圈小路已逐格 CellChanged）覆盖分块重建即可，免全图重建
+        EventBus.RaiseRectChanged(origin, new Vector2I(fx, fy));
     }
 
     /// <summary>某格的 8 邻域内是否存在建筑占地（判断小路是否仍被邻居依赖）。</summary>

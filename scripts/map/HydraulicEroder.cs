@@ -96,6 +96,36 @@ public static class HydraulicEroder
         }
     }
 
+    /// <summary>热侵蚀（塌方松弛）：相邻顶点高差超安息高差（ThermalTalusDh）时，
+    /// 把超出部分的一半×ThermalRate 搬向最低邻格——多轮后陡坡脚堆出平滑坡裙，
+    /// 专治水力侵蚀/高频细节在山脚留下的毛刺；缓地形不超安息角不动土，侵蚀冲沟纹理得以保留。</summary>
+    public static void ThermalRelax(float[] h, int size)
+    {
+        for (int it = 0; it < TerrainConfig.ThermalIterations; it++)
+        {
+            for (int y = 1; y < size - 1; y++)
+            {
+                for (int x = 1; x < size - 1; x++)
+                {
+                    int i = y * size + x;
+                    // 四邻中的最低者（Gauss-Seidel 就地更新，收敛更快；展开写免循环内 stackalloc）
+                    int lowest = i;
+                    float lowestH = h[i];
+                    if (h[i - 1] < lowestH) { lowestH = h[i - 1]; lowest = i - 1; }
+                    if (h[i + 1] < lowestH) { lowestH = h[i + 1]; lowest = i + 1; }
+                    if (h[i - size] < lowestH) { lowestH = h[i - size]; lowest = i - size; }
+                    if (h[i + size] < lowestH) { lowestH = h[i + size]; lowest = i + size; }
+                    float d = h[i] - lowestH;
+                    if (d <= TerrainConfig.ThermalTalusDh)
+                        continue; // 未超安息角不塌
+                    float move = (d - TerrainConfig.ThermalTalusDh) * 0.5f * TerrainConfig.ThermalRate;
+                    h[i] -= move;
+                    h[lowest] += move;
+                }
+            }
+        }
+    }
+
     /// <summary>双线性插值某浮点位置的高度与梯度（读 (ix,iy) 起四角）。</summary>
     private static (float h, float gx, float gy) SampleHeightGradient(float[] h, int size, int ix, int iy, float fx, float fy)
     {

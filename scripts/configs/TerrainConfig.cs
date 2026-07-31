@@ -27,6 +27,9 @@ public static class TerrainConfig
     /// <summary>世界最高海拔（米）：峰顶上限（映射/侵蚀后统一 clamp）。</summary>
     public const float MaxTerrainHeight = 64f;
 
+    /// <summary>世界最低海拔（米）：侵蚀/噪声下掘的统一下限；卷轴画布/图缘裙板垫在其下。</summary>
+    public const float MinTerrainHeight = -3f;
+
     // ---- 草图规划（SketchSize² 内存小图：先宏观后细节）----
 
     /// <summary>草图边长（格）：128 → 映射比 8（1024/128），一草图格 = 8 米。</summary>
@@ -45,8 +48,8 @@ public static class TerrainConfig
 
     // ---- 峰点（西北半包围结构）----
 
-    /// <summary>峰点数量范围（个）：撒在西北半包围带内，构成群山骨架。</summary>
-    public const int PeakCountMin = 8;
+    /// <summary>峰点数量范围（个）：撒在西北半包围带内，构成群山骨架（山地占比目标约两成半～四成）。</summary>
+    public const int PeakCountMin = 10;
     public const int PeakCountMax = 14;
 
     /// <summary>峰顶高度范围（米）：随机抽取（趋势与细节叠加后统一 clamp MaxTerrainHeight）。</summary>
@@ -55,13 +58,31 @@ public static class TerrainConfig
 
     /// <summary>单峰高斯锥半径范围（米）：越大山体越浑厚。</summary>
     public const float PeakRadiusMin = 60f;
-    public const float PeakRadiusMax = 140f;
+    public const float PeakRadiusMax = 120f;
 
     /// <summary>山区带深度（米）：顶点到西缘/北缘的较小距离小于此值即属半包围山区带。</summary>
-    public const float MountainBandDepth = 380f;
+    public const float MountainBandDepth = 440f;
 
-    /// <summary>地图中心避让半径（米）：峰点不落在中心圆内，给城建留开阔腹地。</summary>
+    /// <summary>山体离图缘的最小边距系数：峰心距任一图缘 ≥ 峰半径×此值（高斯尾到图缘已衰至 ~5%），
+    /// 落实「山体尽量不贴地图边缘」。</summary>
+    public const float PeakEdgeMarginFactor = 1.0f;
+
+    /// <summary>地图中心避让半径（米）：峰点/独立山不落在中心圆内，给城建留开阔腹地。</summary>
     public const float CenterExclusionRadius = 280f;
+
+    // ---- 低矮独立山（中部/东南平原上的零星山包，不连脊）----
+
+    /// <summary>独立山数量范围（座）：撒在山区带之外（中部/东南），避中心圆与图缘。</summary>
+    public const int LowHillCountMin = 3;
+    public const int LowHillCountMax = 6;
+
+    /// <summary>独立山高度范围（米）：低矮可见但不成屏障（高处仍可能超行走坡限成景观）。</summary>
+    public const float LowHillHeightMin = 3f;
+    public const float LowHillHeightMax = 7f;
+
+    /// <summary>独立山高斯锥半径范围（米）。</summary>
+    public const float LowHillRadiusMin = 30f;
+    public const float LowHillRadiusMax = 80f;
 
     // ---- 山脊连接（峰对之间未被河湖拦截才连）----
 
@@ -72,32 +93,24 @@ public static class TerrainConfig
     public const float RidgeSaddleFactor = 0.62f;
 
     /// <summary>山脊余弦横截面半宽（米）。</summary>
-    public const float RidgeHalfWidth = 56f;
+    public const float RidgeHalfWidth = 46f;
 
     /// <summary>沿脊高低起伏：幅度比例与波长（米），令山脊连绵起伏而非等高。</summary>
     public const float RidgeUndulateAmp = 0.18f;
     public const int RidgeUndulateWaveMeters = 180;
 
-    // ---- 谷线河流（草图上沿最陡下降走线，山脊之间的中心即河谷）----
-
-    /// <summary>河源数量范围（条）：源点取相邻峰对中点，先走干流后走支线（撞上即汇流）。</summary>
-    public const int RiverSourceMin = 3;
-    public const int RiverSourceMax = 5;
-
-    /// <summary>河谷 V 形压谷半宽（米）：沿程从源头到河口线性变宽（谷地随下游开阔）。</summary>
-    public const float ValleyHalfWidthSource = 24f;
-    public const float ValleyHalfWidthMouth = 90f;
-
-    /// <summary>谷底目标高（米）：沿程从源头到河口线性下降——保证河道不悬在山腰，
-    /// 山区段两侧仍高耸成峡谷，出山后与平原自然衔接。</summary>
-    public const float ValleyFloorSourceH = 1.2f;
-    public const float ValleyFloorMouthH = 0f;
+    // ---- 谷线河湖已删（批次五十）：水系改为在侵蚀完成的成品地形上循坡走线（参数见 WaterConfig），
+    // 草图不再压谷/压湖盆——地形生成保持纯粹，河湖只读地势不改地势（唯一例外：河床下压）----
 
     // ---- fBm 细节（映射后全图叠加，消上采样平滑感）----
 
     /// <summary>全图高频细节 fBm：幅度（米）与波长（米）。</summary>
     public const float DetailFbmAmp = 1.1f;
     public const int DetailFbmWaveMeters = 26;
+
+    /// <summary>细节噪声的坡度削减系数：幅度 ×= 1/(1+坡×此值)——陡坡（山腰/山脚）少叠噪声，
+    /// 专治山脚毛刺；平地细节不受影响。</summary>
+    public const float DetailSlopeDamp = 2f;
 
     // ---- 水力侵蚀（droplet 水滴模型，草图与全图两级复用）----
 
@@ -129,6 +142,16 @@ public static class TerrainConfig
 
     /// <summary>侵蚀笔刷半径（格）：挖沙/卸沙摊到邻域，防单点尖坑。全图级用此值，草图级用 1。</summary>
     public const int ErodeBrushRadius = 3;
+
+    // ---- 热侵蚀（塌方松弛，水力侵蚀后收尾）----
+
+    /// <summary>安息高差（米/邻格）：相邻顶点高差超此值才塌方（≈0.65 → 33°），
+    /// 缓地形不动土——只磨平山脚/山腰毛刺，保留侵蚀冲沟纹理。</summary>
+    public const float ThermalTalusDh = 0.65f;
+
+    /// <summary>塌方迭代轮数与每轮搬运比例（0-1）。</summary>
+    public const int ThermalIterations = 3;
+    public const float ThermalRate = 0.5f;
 
     // ---- 采集豁免 ----
 

@@ -34,6 +34,10 @@ public struct Cell
     /// 见 RiverGenerator.EncodeFlow。仅世界生成期赋值、随存档保存，供未来水流表现/生态取用。</summary>
     public byte FlowDir;
 
+    /// <summary>本格水面海拔（米，仅水格有意义）：沿程随地势逐级下降、下限 0（WaterConfig.MinWaterLevel），
+    /// 湖面同湖统一。渲染水面/桥面高度/河床下压均以此为准，随存档保存。</summary>
+    public float WaterH;
+
     /// <summary>是否有桥（架在水上，等效道路可通行）。</summary>
     public bool HasBridge;
 

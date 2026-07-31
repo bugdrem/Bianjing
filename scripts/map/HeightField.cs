@@ -61,9 +61,18 @@ public class HeightField
         Mathf.Max(Mathf.Max(VertexH(c.X, c.Y), VertexH(c.X + 1, c.Y)),
                   Mathf.Max(VertexH(c.X, c.Y + 1), VertexH(c.X + 1, c.Y + 1)));
 
-    /// <summary>格内坡角（度）：四角最大高差按 1m 格宽换算（铺路/通行的坡度判据）。</summary>
-    public float CellSlopeDeg(Vector2I c) =>
-        Mathf.RadToDeg(Mathf.Atan((CellMaxH(c) - CellMinH(c)) / MapGrid.CellSize));
+    /// <summary>格内坡角（度）：四角顶点间最陡一对的坡角（铺路/通行的坡度判据）——
+    /// 邻边对按格宽 1m、对角对按 √2m 换算（旧版对角高差也按 1m 算，坡角被高估）。</summary>
+    public float CellSlopeDeg(Vector2I c)
+    {
+        float h00 = VertexH(c.X, c.Y), h10 = VertexH(c.X + 1, c.Y);
+        float h01 = VertexH(c.X, c.Y + 1), h11 = VertexH(c.X + 1, c.Y + 1);
+        float maxEdge = Mathf.Max(
+            Mathf.Max(Mathf.Abs(h10 - h00), Mathf.Abs(h01 - h00)),
+            Mathf.Max(Mathf.Abs(h11 - h10), Mathf.Abs(h11 - h01)));
+        float maxDiag = Mathf.Max(Mathf.Abs(h11 - h00), Mathf.Abs(h10 - h01)) / 1.4142135f;
+        return Mathf.RadToDeg(Mathf.Atan(Mathf.Max(maxEdge, maxDiag) / MapGrid.CellSize));
+    }
 
     /// <summary>占地（origin 起 sx×sy 格）的四角顶点平均高：整平垫基的目标台面高。</summary>
     public float FootprintAvgH(Vector2I origin, int sx, int sy)

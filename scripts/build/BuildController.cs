@@ -160,7 +160,7 @@ public partial class BuildController : Node
                 DragRoadTo(_hover, isBridge: true);
                 break;
             case BuildMode.Building:
-                TryPlaceBuilding(_hover);
+                TryPlaceBuilding(BuildingOrigin());
                 break;
             case BuildMode.Zone:
                 _dragging = true;
@@ -203,6 +203,8 @@ public partial class BuildController : Node
         UpdatePreview();
     }
 
+    /// <summary>悬停格：鼠标视线与地形高度场的首个交点所在格——沿视线半格步长下探，
+    /// 比旧版 Y=0 平面求交准：高地/台地上预览框不再偏向远处（表现为方块挂在鼠标右上角）。</summary>
     private void UpdateHoverCell()
     {
         var vp = GetViewport();
@@ -212,18 +214,28 @@ public partial class BuildController : Node
         var dir = cam.ProjectRayNormal(mouse);
 
         _hoverInMap = false;
-        if (Mathf.Abs(dir.Y) < 0.0001f)
-            return;
-        float t = -from.Y / dir.Y;
-        if (t <= 0)
-            return;
+        if (dir.Y >= -0.0001f)
+            return; // 视线不朝下（贴地平视）：无落地点
 
-        var hit = from + dir * t;
-        var cell = MapGrid.WorldToCell(hit);
-        if (!MapGrid.InBounds(cell))
-            return;
-        _hover = cell;
-        _hoverInMap = true;
+        // 最高地形之上无可交，先快进到封顶面再逐步下探
+        const float step = MapGrid.CellSize / 2f;
+        var hf = GameState.I.Map.Height;
+        float t = from.Y > TerrainConfig.MaxTerrainHeight ? (TerrainConfig.MaxTerrainHeight - from.Y) / dir.Y : 0f;
+        for (int i = 0; i < 4096; i++, t += step)
+        {
+            var p = from + dir * t;
+            if (p.Y < TerrainConfig.MinTerrainHeight - 0.5f)
+                return; // 已穿透最深地形，视线落在图外
+            var cell = MapGrid.WorldToCell(p);
+            if (!MapGrid.InBounds(cell))
+                continue;
+            if (p.Y <= hf.SampleWorld(p.X, p.Z))
+            {
+                _hover = cell;
+                _hoverInMap = true;
+                return;
+            }
+        }
     }
 
     // ---- 放置操作 ----
@@ -319,10 +331,12 @@ public partial class BuildController : Node
 
             case BuildMode.Building:
             {
-                var origin = MapGrid.CellToWorld(_hover);
+                // 占地以鼠标为中心（而非鼠标在左上角格）：预览与实际放置用同一原点
+                var originCell = BuildingOrigin();
+                var origin = MapGrid.CellToWorld(originCell);
                 var center = origin + new Vector3((_def.SizeX - 1) * cs / 2f, groundY + _def.Height / 2f, (_def.SizeY - 1) * cs / 2f);
                 SetPreviewBox(center, new Vector3(_def.SizeX * cs, _def.Height, _def.SizeY * cs),
-                    PlacementValidator.CanPlaceBuilding(gs, _def, _hover) ? ValidColor : InvalidColor);
+                    PlacementValidator.CanPlaceBuilding(gs, _def, originCell) ? ValidColor : InvalidColor);
                 break;
             }
 
@@ -371,6 +385,11 @@ public partial class BuildController : Node
         const float cs = MapGrid.CellSize;
         return new Vector3(w * cs, h, w * cs);
     }
+
+    /// <summary>当前建筑的放置原点（左上角格）：以悬停格为占地中心反推——
+    /// 预览方块居中跟随鼠标（尤其 1×1 水井不再觉得偏），预览与落地同源不错位。</summary>
+    private Vector2I BuildingOrigin()
+        => _hover - new Vector2I((_def.SizeX - 1) / 2, (_def.SizeY - 1) / 2);
 
     // ---- 查看格子信息 ----
 

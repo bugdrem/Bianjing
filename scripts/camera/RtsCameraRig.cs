@@ -59,7 +59,7 @@ public partial class RtsCameraRig : Node3D
 
             float limit = MapGrid.Size * MapGrid.CellSize / 2f + 40f;
             Position = new Vector3(
-                Mathf.Clamp(Position.X, -limit, limit), 0f,
+                Mathf.Clamp(Position.X, -limit, limit), Position.Y,
                 Mathf.Clamp(Position.Z, -limit, limit));
         }
 
@@ -68,6 +68,23 @@ public partial class RtsCameraRig : Node3D
         if (Input.IsKeyPressed(Key.E)) _yaw -= 1.5f * dt;
 
         ApplyTransform();
+        ClampAboveTerrain();
+    }
+
+    /// <summary>镜头不入地：镜头低于脚下地形 + 最小净空时抬升整个云台（Position.Y），
+    /// 离开山体后平滑回落——防平移/低角度时镜头钻进山体透视。</summary>
+    private void ClampAboveTerrain()
+    {
+        var map = GameState.I?.Map;
+        if (map == null)
+            return;
+        var cam = Cam.GlobalPosition;
+        float baseCamY = cam.Y - Position.Y; // 云台不抬升时的镜头高度
+        float minCamY = map.Height.SampleWorld(cam.X, cam.Z) + CameraConfig.MinAboveTerrain;
+        float targetLift = Mathf.Max(0f, minCamY - baseCamY);
+        // 上抬立即到位（防穿山不能慢），回落渐进（免下山时镜头磕地感）
+        float y = targetLift > Position.Y ? targetLift : Mathf.Lerp(Position.Y, targetLift, 0.12f);
+        Position = new Vector3(Position.X, y, Position.Z);
     }
 
     public override void _UnhandledInput(InputEvent e)

@@ -74,6 +74,10 @@ public class MapSave
     /// <summary>v19：与 WaterCells 一一对应的水流方向（(byte)Cell.FlowDir，0=静水/湖）。</summary>
     public List<int> WaterFlow = new();
 
+    /// <summary>v21：与 WaterCells 一一对应的逐格水面海拔（Cell.WaterH，米）——
+    /// 水位沿程随地势变化（下限 0），不再是全图统一常量，须随档保存。</summary>
+    public List<float> WaterLevels = new();
+
     public List<int> BridgeCells = new();
 
     /// <summary>v20：顶点高度场灰度图——uint16 量化 blob（每顶点 2 字节小端，JSON 自动 base64），

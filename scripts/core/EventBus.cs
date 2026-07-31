@@ -22,6 +22,16 @@ public static class EventBus
     /// <summary>单格地表变化（铺路/砍树/拆除等局部变更）：渲染层只重建所在分块，免全图重建。</summary>
     public static event Action<Vector2I> CellChanged;
 
+    /// <summary>矩形区域地表变化（建筑落成/拆除/扩建的垫基整平）：渲染层只重建覆盖分块，
+    /// 取代旧版全图 MapChanged（村民 4x 下频繁建房时全图重建是间歇卡顿主源）。</summary>
+    public static event Action<Vector2I, Vector2I> RectChanged;
+
+    /// <summary>仅建筑外观变化（升级楼高/转业换色）：只重建建筑层，不碰地形/水面/树木分块。</summary>
+    public static event Action BuildingsChanged;
+
+    /// <summary>仅树木变化（月度生长/散播幼体）：只刷新各分块树木 MultiMesh，不重建地形网格。</summary>
+    public static event Action TreesChanged;
+
     /// <summary>城市晋级新里程碑（参数为新等级）：菜单刷新解锁项、HUD 弹报。</summary>
     public static event Action<int> MilestoneReached;
 
@@ -43,6 +53,9 @@ public static class EventBus
     public static void RaiseWildlifeChanged() => WildlifeChanged?.Invoke();
     public static void RaiseCitizenSelected(int id) => CitizenSelected?.Invoke(id);
     public static void RaiseCellChanged(Vector2I c) => CellChanged?.Invoke(c);
+    public static void RaiseRectChanged(Vector2I origin, Vector2I size) => RectChanged?.Invoke(origin, size);
+    public static void RaiseBuildingsChanged() => BuildingsChanged?.Invoke();
+    public static void RaiseTreesChanged() => TreesChanged?.Invoke();
     public static void RaiseMilestoneReached(int level) => MilestoneReached?.Invoke(level);
     public static void RaiseTechUnlocked(string techId) => TechUnlocked?.Invoke(techId);
     public static void RaiseNewsPosted() => NewsPosted?.Invoke();
@@ -60,6 +73,9 @@ public static class EventBus
         WildlifeChanged = null;
         CitizenSelected = null;
         CellChanged = null;
+        RectChanged = null;
+        BuildingsChanged = null;
+        TreesChanged = null;
         MilestoneReached = null;
         TechUnlocked = null;
         NewsPosted = null;

@@ -96,15 +96,18 @@ public partial class AgentManager : Node
             return;
         }
 
-        const float y = 0.5f; // 抬到路面（顶 0.2）与桥面（顶约 0.43）之上，否则沿路的线会被路面埋没
+        // 逐点贴地抬 0.5m（旧版固定 y=0.5 在山地上会埋入地下/飘离实际路径，表现为线与任务点偏移）：
+        // 每个顶点取该处地面高度场采样 + 定高，线贴着起伏地形走，与村民/目标同面
+        const float lift = 0.5f;
+        var hf = GameState.I.Map.Height;
         _pathMesh.ClearSurfaces();
         _pathMesh.SurfaceBegin(Mesh.PrimitiveType.LineStrip, _pathMat);
         var start = agent.Position;
-        _pathMesh.SurfaceAddVertex(new Vector3(start.X, y, start.Z));
+        _pathMesh.SurfaceAddVertex(new Vector3(start.X, start.Y + lift, start.Z));
         for (int i = agent.PathIndex; i < agent.PathPoints.Count; i++)
         {
             var p = agent.PathPoints[i];
-            _pathMesh.SurfaceAddVertex(new Vector3(p.X, y, p.Z));
+            _pathMesh.SurfaceAddVertex(new Vector3(p.X, hf.SampleWorld(p.X, p.Z) + lift, p.Z));
         }
         _pathMesh.SurfaceEnd();
         _pathLine.Visible = true;

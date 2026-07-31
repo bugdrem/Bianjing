@@ -15,8 +15,8 @@ public partial class GameClock : Node
     /// <summary>1x 速度下一个游戏小时对应的真实秒数（取自 TimeConfig）。</summary>
     public static float SecondsPerHour => TimeConfig.SecondsPerGameHour;
 
-    /// <summary>0=暂停，1/2/4=倍速。</summary>
-    public int Speed { get; set; } = 1;
+    /// <summary>0=暂停，0.5/1/2/4=倍速（浮点以支持 0.5x 慢放）。</summary>
+    public float Speed { get; set; } = 1f;
 
     public int Year { get; private set; } = 1;
     public int Month { get; private set; } = 1;
@@ -33,7 +33,7 @@ public partial class GameClock : Node
     public event Action MonthPassed;
 
     private float _acc;
-    private int _resumeSpeed = 1;
+    private float _resumeSpeed = 1f;
 
     /// <summary>十二时辰名，Hour 23-1 点为子时。</summary>
     private static readonly string[] ShichenNames =
@@ -116,9 +116,9 @@ public partial class GameClock : Node
         switch (key.Keycode)
         {
             case Key.Space: TogglePause(); break;
-            case Key.Key1: Speed = 1; break;
-            case Key.Key2: Speed = 2; break;
-            case Key.Key3: Speed = 4; break;
+            case Key.Key1: Speed = 1f; break;
+            case Key.Key2: Speed = 2f; break;
+            case Key.Key3: Speed = 4f; break;
             default: return; // 非时钟按键不拦截
         }
         GetViewport().SetInputAsHandled(); // 已处理：不再传给焦点按钮防误触

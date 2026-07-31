@@ -1379,17 +1379,19 @@ public partial class CitizenAgent : Node3D
         return null;
     }
 
-    /// <summary>脚下站面高度：桥格站桥板顶（桥悬浮在水面 -0.5 之上，顶 0.34）；
-    /// 其余处双线性采样高度场 +0.2（坡面行走平滑升降，路面抬升差无感不单独处理）。</summary>
+    /// <summary>脚下站面高度：桥格与桥旁引桥坡都取桥面实体板顶面（MapGrid.DeckSurfaceY，与渲染同源，
+    /// 过桥/上下坡不下沉）；普通路格站路面（地面 + RoadSurfaceLift）；其余双线性采高度场直接贴地。</summary>
     private static float SurfaceYAt(Vector3 pos)
     {
         var c = MapGrid.WorldToCell(pos);
         if (!MapGrid.InBounds(c))
-            return 0.2f;
+            return 0f;
         ref var cell = ref GameState.I.Map.CellAt(c);
-        if (cell.HasBridge)
-            return 0.34f;
-        return GameState.I.Map.Height.SampleWorld(pos.X, pos.Z) + 0.2f;
+        // 桥格或桥旁引桥陆地路格：贴桥面实体板顶（与 AddDeckBox 渲染同一顶面）
+        if (cell.HasBridge || (cell.HasRoad && GameState.I.Map.NearBridge(c.X, c.Y)))
+            return GameState.I.Map.DeckSurfaceY(pos.X, pos.Z);
+        float ground = GameState.I.Map.Height.SampleWorld(pos.X, pos.Z);
+        return cell.HasRoad ? ground + WorldConfig.RoadSurfaceLift : ground;
     }
 
     private void MoveAlongPath(float dt)
@@ -1554,14 +1556,18 @@ public partial class CitizenAgent : Node3D
     {
         var gs = GameState.I;
         if (gs.Buildings.TryGetValue(C.HomeId, out var home))
-            return MapGrid.CellToWorld(home.Origin) + Vector3.Up * 0.2f;
+            return GroundAt(home.Origin);
         // 无住所也从住宅/工商建筑出现，不在地图上凭空刷新
         foreach (var b in gs.Buildings.Values)
             if (b.Def.Category == "grown")
-                return MapGrid.CellToWorld(b.Origin) + Vector3.Up * 0.2f;
+                return GroundAt(b.Origin);
         var road = _manager.RandomRoadCell(_rng);
-        return road != null ? MapGrid.CellToWorld(road.Value) + Vector3.Up * 0.2f : Vector3.Up * 0.2f;
+        return road != null ? GroundAt(road.Value) : Vector3.Zero;
     }
+
+    /// <summary>某格中心的地面站位（贴地，不悬空）：高地上出生不再从地下弹出。</summary>
+    private static Vector3 GroundAt(Vector2I c)
+        => MapGrid.CellToWorld(c) + Vector3.Up * GameState.I.Map.GroundY(c);
 
     private Vector2I? NearbyRoadCell(Vector2I? center, int radius)
     {

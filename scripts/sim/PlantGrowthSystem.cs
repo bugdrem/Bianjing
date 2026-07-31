@@ -71,7 +71,8 @@ public class PlantGrowthSystem
         foreach (var (c, fruit) in seeds)
             gs.AddPlant(c, 0, fruit);
 
-        // 幼树逐月长大，需要重绘尺寸
-        EventBus.RaiseMapChanged();
+        // 幼树逐月长大，需要重绘尺寸：只刷各分块树木 MultiMesh，不重建地形网格
+        // （旧版这里全图 MapChanged，4x 下每月百万格网格重建是间歇卡顿主源之一）
+        EventBus.RaiseTreesChanged();
     }
 }

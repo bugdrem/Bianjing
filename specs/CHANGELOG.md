@@ -2,6 +2,116 @@
 
 按批次记录每次调整的要点（新规则起始于批次二十五；更早批次的详情见计划文档归档）。
 
+## 批次五十五（2026-07-28）删桥栏杆 + 村民过桥贴面
+
+- 删除桥栏杆：移除 GridRenderer.AddBridgeRails/AddRailPanel 与调用、WorldConfig.BridgeRailHeight、
+  MapGrid.BridgeCrossAxis（仅栏杆用）。
+- 村民过桥/上下引桥坡不下沉：根因是站面与渲染不同源——村民在桥格取 BridgeDeckTopAt（格心）、
+  在引桥路格取普通路面高，而实体板渲染用逐顶点 DeckVertexTop（引桥路格会抬升）。
+- 修复：把桥面顶面模型上提到 MapGrid——新增 NearBridge/DeckVertexTop/DeckSurfaceY（双线性插值四邻
+  DeckVertexTop）；GridRenderer 的 NearBridge/DeckVertexTop 改为委托；CitizenAgent.SurfaceYAt 对桥格与
+  桥旁引桥路格改取 DeckSurfaceY，与实体板顶面严丝合缝，过桥与上下坡均不下沉。
+- 编译 0 警告 0 错误；headless 冒烟：地形指标正常（山地 33.2%/平原 63.4%/水面 3.3%/最高 63m），无报错。
+- 补丁：桥下水面丢失——桥格也是水面格但 HasBridge 分支先命中不再画水；改为桥格先铺桥下水面再铺桥体板。
+
+## 批次五十四（2026-07-28）白底层 + 卷轴相切 + 扁平拱桥
+
+- 白底层：新增 WorldConfig.MapEdgeExtend 10m；Main.BuildScrollBackdrop 在地图与卷轴纸面之间
+  垫一层纯白底色（地图四周外扩 10m）；层次自上而下：地形/裙板→白底（裙板底高）→纸面（下移 0.4m）。
+- 卷轴相切：两侧圆柱轴心由 paperY+rollerR·0.35 改为 paperY+rollerR，圆柱底部刚好落在纸面画布上（相切而非中心）。
+- 扁平拱桥（不再用道路逐格高度）：MapGrid 新增 BridgeSpan/BridgeCrossAxis，BridgeDeckTopAt 改为拱形——
+  整段跨水为一座拱，两端落两岸地面高、中部拱起；拱顶（河中央）= min(两岸) + BridgeArchApexRise（1m），
+  拱形 = 弦 + 抛物鼓包 4h·t(1-t)（废旧 BridgeDeckLift）。
+- 桥栏杆：新增 WorldConfig.BridgeRailHeight 0.5m；GridRenderer 新增 AddBridgeRails/AddRailPanel——
+  沿桥跨向两长边（垂直行走方向、邻格非桥的外侧）竖栏杆面，不堵桥两端通行。
+- 桥仍等效道路可通行（LayBridgeCell 不变），画路跨水自动架桥与独立桥工具均保留，仅改造型为拱桥。
+- 编译 0 警告 0 错误；headless 冒烟：地形指标正常（山地 41.7%/平原 55.1%/水面 3.1%/最高 64m），无报错。
+
+## 批次五十三（2026-07-28）道路地基 + 桥体体积 + 引桥衔接
+
+- 道路地基：新增 WorldConfig.RoadFoundationDepth 1m；新增 AddRoadFoundation——路格四边中
+  邻格非路且非桥的边垂一面基座立面（路面顶下到 -1m），路面读作坐在 1m 高台基上（只在
+  路网轮廓垂基，内部路-路边隐藏）；_roadMat 改双面免立面被剪。
+- 桥体体积：桥面由平面改为实体板——新增 BridgeBodyThickness 0.2m（废旧 BridgeDeckThickness），
+  AddDeckBox 从桥面顶向下拉出顶/底/四侧壁（侧壁略暗），桥为实体板而非一层皮。
+- 引桥衔接（根治“桥接不上陆地”）：新增 BridgeRampCells 3、NearBridge、DeckVertexTop——
+  桥旁 ≤引桥长的陆地路格同桥体板渲染，顶面逐顶点按离桥格距从桥面高（BridgeDeckTopAt）
+  插值渐降到岸路高（顶点地高+RoadSurfaceLift）；既遮住被河床下压的岸际锟齿，又与桥、
+  与普通道路两头无缝相接（旧版桥只铺在水格、与岸路分属两网格且岸际顶点被下压，故断开）。
+- 编译 0 警告 0 错误；headless 冒烟：地形指标正常（山地 36.6%/平原 61.5%/水面 1.9%/最高 64m），无报错。
+
+## 批次五十二（2026-07-28）卷轴正向 + 水陆消隙 + 桥面三角化
+
+- 卷轴方向纠正：上批次误加宽南北向，改为东西向（卷轴圆柱所在方向）paperX ×2、paperZ 复原。
+- 寻路线偏移：AgentManager.UpdatePathLine 由固定 y=0.5 改为逐顶点采样地高度场 + 抬 0.5m——
+  山地上线不再埋入地下/飘离，与村民、任务目标同面贴地。
+- 前门居中：大门渲染位置沿墙面方向对齐到占地几何中心（偶数宽建筑旧版因卡格偏一侧），
+  后门保持偏侧错落位。
+- 河流加宽 + 嵌入消隙：河宽源头 4→6m、干流河口 14→20m、支线 8→12m；新增
+  WaterConfig.WaterEdgeOverlap 0.7m——水面四边向外扩嵌入邻格，水平面从高岸下方穿过
+  被岸地遮住，消除水陆交界的空隙与逐格锯齿。
+- 道路抬升：确认 AddDrapedQuad 逐角采地形顶点高 + RoadSurfaceLift(0.1m) 已生效（三点三角顶面）。
+- 桥梁引桥 + 三角化：桥面由悬浮方块 MultiMesh 改为三角化桥面网格（同道路顶面模式）：
+  新增 BridgeDeckVertexTop——桥心顶点坐 BridgeDeckTopAt 均值、与岸路共享的边界顶点降到
+  岸路面高，边缘桥格自成引桥斜坡与道路无隙相接；Bridge 节点由 MultiMeshInstance3D 改
+  MeshInstance3D（双面材质），废弃 _boxMesh。
+- 编译 0 警告 0 错误；headless 冒烟：山地 41.0%/平原 56.4%/水面 2.6%（河宽加宽后上升）/最高 64m，无报错。
+
+## 批次五十一（2026-07-28）呈现细节修缮 + 4x 卡顿优化 + 0.5x 慢放
+
+- 卷轴：南北向卷带宽度加宽到旧版 2 倍（paperZ ×2），卷轴画更宽展；圆柱轴头随之加长。
+- 抬升常量入 WorldConfig：RoadSurfaceLift 0.1m（渲染路面与村民路上站面共用）、
+  BuildingBaseLift 0.1m（房体/门/屋顶整体抬起免穿地表）、FoundationDepth 2m（地基深）、
+  BridgeDeckLift 0.2m（替代旧 BridgeDeckTopAboveWater）。
+- 桥面对齐：新增 MapGrid.BridgeDeckTopAt——沿桥跨向两轴各探两岸最近陆格，按本格在跨上
+  位置在两岸地面高间线性插值 + 抬升；桥面与两侧道路自然相接不再悬浮河面，村民过桥站面共用。
+- 建筑地基：GridRenderer 新增 _bldgFounds 基座层，从房体底面向下延伸 FoundationDepth，
+  斜坡上建造时遮住悬空底部；房体/屋顶/门整体按 BuildingBaseLift 抬起。
+- 放置居中：BuildController 新增 BuildingOrigin（以悬停格为占地中心反推左上角原点），
+  预览与落地同源、方块居中跟随鼠标（1×1 水井不再觉得偏右上）；悬停格改鼠标视线与
+  地形高度场求交（半格步长下探），高地/台地上预览不再偏向远处。
+- 村民贴地：SurfaceYAt 去掉 +0.2 悬浮，桥格取 BridgeDeckTopAt、路格取地面+RoadSurfaceLift、
+  余者直接贴高度场；HomePosition/出生位置改用本格地面高，高地上出生不再从地下弹出。
+- 门比例：门高 1.3/0.85 → 统一 0.55m（比成年村民约 0.46m 略高），前后门同高，
+  靠颜色（亮金大门/暗木后门）与宽度（0.5/0.28 格）区分。
+- 水面渲染：改与地形一致的顶点插值三角网格（AddWaterQuad + WaterVertexH 取共享顶点
+  邻水格 WaterH 均值），坡河上水面连续倾斜不再逐格阶梯错层。
+- 4x 间歇卡顿：EventBus 细分事件——建筑落成/拆除/扩建走 RectChanged（只重建占地矩形
+  覆盖分块，替代旧全图 MapChanged）、升级/转业走 BuildingsChanged（只重建建筑层）、
+  月度树木生长走 TreesChanged（各分块只刷树木 MultiMesh 不重建地形网格）；GridRenderer
+  相应增设树层独立脏标与限额；DesirabilitySystem 道路吸引力场改增量维护（独立场缓存 +
+  逐格差额泼溅，重算时整场拷入再叠建筑项），免每次全量重泼数千路格圆盘。
+- 0.5x 慢放：GameClock.Speed int→float，TopBar 新增 0.5x 按钮，倍速显示 {0.#}x。
+- 编译 0 警告 0 错误；headless 冒烟：地形指标正常（山地 39.2%/平原 59.9%/最高 64m），无报错。
+
+## 批次五十（2026-07-28）地形纯粹化 + 水系重制 + 卷轴画呈现
+
+- 地形纯粹性：WorldSketch 删除全部水系强制逻辑（TraceRivers/V 形压谷/湖盆强压/
+  RidgeBlocked 水域拦截），草图只管纯地形；水系挪到侵蚀完成后的成品地形上生成，
+  只读地势不改地势（唯一例外：河床相对本格水位下压 0.25→1.0m）；主动限制收拢为
+  ClampHeights 单步（MinTerrainHeight=-3 / MaxTerrainHeight=64），不侵犯基础生成算法。
+- 山体分布重调（目标山地≈2/5、可用平原≈1/2）：峰 10~14 座半径 60~120m，带深 440m
+  偏西北两侧；峰心距图缘 ≥ 峰半径（PeakEdgeMarginFactor=1，高斯尾至图缘已衰至 5%
+  不贴边）；中部/东南带外撒 3~6 座低矮独立山（3~7m 高、30~80m 半径）；脊半宽 56→46。
+- 山脚毛刺平滑：上采样细节噪声按坡度削减（amp ÷ (1+slope×DetailSlopeDamp)，陡壁
+  不再叠麻点）+ 新增热侵蚀塌方松弛 ThermalRelax（安息高差 0.65m/邻格、3 轮
+  Gauss-Seidel），坡脚自然收成缓坡；HeightField.CellSlopeDeg 对角线坡角除 √2 修正。
+- RiverGenerator 全量重写：峰间鞍部选源（按海拔降序 4~6 条、源距>40m）→ 1024² 格心
+  高上 8 邻最陡下降走线（洼地向东/东南/南强制滑行、连续 260 步弃线，中途撞水汇流）
+  → 逐格水位 Cell.WaterH：沿线地形滑动平均(窗21)→运行最小→下限 0（河以 0 为最低点，
+  接受地形起伏形成流向）；汇流处尾段水位抬平回灌；干流中后段 1~2 湖（谐波湖缘，
+  湖址水位>1.5m 弃；高于湖面 1.2m 容差内并入湖盆，更高自然留岛）；河床多源 BFS
+  离岸渐深。宽度沿程 4→14m（支流 8m）。
+- 逐格水位联动：GridRenderer 水面/河床色（LocalWaterAtVertex 取共享顶点水格最高水位）
+  /岸线补水（顺手修旧 bug：无建筑判断 BuildingId==0 应为 <0）；桥面顶=WaterH+0.8m；
+  CitizenAgent 桥面站面同步；存档 v20→v21：MapSave.WaterLevels 与 WaterCells 一一对应。
+- 卷轴画呈现：GridRenderer 新增图缘裙板（四边带状网格垂至画布面，遮地形侧向镂空）；
+  Main.BuildScrollBackdrop 地图下方大长方形卷轴纸面（1464×1204m、纸色）+ 两侧南北向
+  圆柱卷轴杆；相机新增 ClampAboveTerrain（离地净空 ≥1.5m，上抬立即回落渐变），根治
+  山体透视穿地；启动加载文案改真实描述「初入汴京 · 正在生成世界」。
+- 编译 0 警告 0 错误；headless 冒烟 4 次：山地(>5m) 32.2~42.5%（均值≈38.7，目标 2/5）、
+  可用平原 54.6~66.5%（目标约一半）、水面 1.2~2.8%、最高 57~64m，无报错。
+
 ## 批次四十九（2026-07-28）地形生成重设计：草图规划 + 水力侵蚀 + 加载画面
 
 - 新管线固定大势西北高东南低，河流一律自西北山区流向东南图缘；两级生成：

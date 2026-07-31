@@ -23,4 +23,7 @@ public static class CameraConfig
 
     /// <summary>屏幕边缘推移触发带宽度（像素）：光标贴边即平移视野。</summary>
     public const float EdgeMargin = 8f;
+
+    /// <summary>镜头离地最小净空（米）：镜头低于脚下地形+此值时抬升云台，防平移/低角度时镜头钻进山体透视。</summary>
+    public const float MinAboveTerrain = 1.5f;
 }

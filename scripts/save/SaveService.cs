@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v20：地形改顶点高度场（灰度地图），高度以 uint16 量化 blob 整张存储；旧档无顶点数据，拒读。</summary>
-    public const int FormatVersion = 20;
+    /// <summary>v21：水位改逐格变化（Cell.WaterH 随地势、下限 0），新增 WaterLevels 随档；旧档无水位数据，拒读。</summary>
+    public const int FormatVersion = 21;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -232,6 +232,7 @@ public static class SaveService
                 {
                     map.WaterCells.Add(index);
                     map.WaterFlow.Add(cell.FlowDir); // 与 WaterCells 一一对应
+                    map.WaterLevels.Add(cell.WaterH); // v21：逐格水位同步随档
                 }
                 if (cell.HasBridge)
                     map.BridgeCells.Add(index);
@@ -396,12 +397,14 @@ public static class SaveService
         }
         var waterCells = map.WaterCells ?? new List<int>();
         var waterFlow = map.WaterFlow ?? new List<int>();
+        var waterLevels = map.WaterLevels ?? new List<float>();
         for (int i = 0; i < waterCells.Count; i++)
         {
             int index = waterCells[i];
             ref var wcell = ref gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size);
             wcell.HasWater = true;
             wcell.FlowDir = i < waterFlow.Count ? (byte)waterFlow[i] : (byte)0; // v19：流向随档恢复
+            wcell.WaterH = i < waterLevels.Count ? waterLevels[i] : 0f; // v21：逐格水位随档恢复
         }
         foreach (int index in map.BridgeCells ?? new List<int>())
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasBridge = true; // HasRoad 已由 RoadCells 恢复

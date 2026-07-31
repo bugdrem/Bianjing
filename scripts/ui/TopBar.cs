@@ -46,10 +46,11 @@ public partial class TopBar : PanelContainer
         var spacer = new Control { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         box.AddChild(spacer);
 
-        AddSpeedButton(box, "暂停", 0);
-        AddSpeedButton(box, "1x", 1);
-        AddSpeedButton(box, "2x", 2);
-        AddSpeedButton(box, "4x", 4);
+        AddSpeedButton(box, "暂停", 0f);
+        AddSpeedButton(box, "0.5x", 0.5f);
+        AddSpeedButton(box, "1x", 1f);
+        AddSpeedButton(box, "2x", 2f);
+        AddSpeedButton(box, "4x", 4f);
 
         box.AddChild(new VSeparator());
         AddActionButton(box, "政策", _onPolicy);
@@ -72,7 +73,7 @@ public partial class TopBar : PanelContainer
         return label;
     }
 
-    private void AddSpeedButton(HBoxContainer box, string text, int speed)
+    private void AddSpeedButton(HBoxContainer box, string text, float speed)
     {
         var btn = new Button { Text = text };
         btn.Pressed += () => _clock.Speed = speed;
@@ -86,7 +87,7 @@ public partial class TopBar : PanelContainer
         _money.AddThemeColorOverride("font_color", gs.Money < 0 ? new Color(1f, 0.3f, 0.3f) : new Color(1f, 0.9f, 0.5f));
         _food.Text = $"粮 {gs.Food:F0}";
         _pop.Text = $"人口 {gs.Population}";
-        string speedText = _clock.Speed == 0 ? "已暂停" : $"{_clock.Speed}x";
+        string speedText = _clock.Speed == 0 ? "已暂停" : $"{_clock.Speed:0.#}x";
         string rank = Milestones.NameOf(gs.MilestoneLevel); // 当前城市里程碑称号
         _date.Text = $"{gs.CityName}【{rank}】 第{_clock.Year}年 {_clock.Month}月 {_clock.Day}日 {_clock.Shichen}  [{speedText}]";
     }

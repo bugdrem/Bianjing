@@ -6,12 +6,14 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 世界生成总控管线（批次四十九起，替代旧 SeedWorld 散调用）：
-/// ① WorldSketch 128² 草图规划（趋势/峰点/谷线河湖/山脊 + 草图级侵蚀）→
-/// ② 双线性上采样映射 1025² 顶点高度场 + 高频 fBm 细节（消上采样平滑感）→
+/// 世界生成总控管线（批次四十九起，批次五十重排水系）：
+/// ① WorldSketch 128² 草图规划（趋势/峰点/山脊/独立山 + 草图级侵蚀，纯地形无水系）→
+/// ② 双线性上采样映射 1025² 顶点高度场 + 高频 fBm 细节（坡度削减，防山脚毛刺）→
 /// ③ 全图 droplet 水力侵蚀（冲沟/冲积扇纹理）→
-/// ④ 河湖落地：草图河线放大为世界样条，沿线刻水格（源细口宽）+ 湖面 + FlowDir + 河床下压 →
-/// ⑤ 树木/野物播种照旧。
+/// ④ 热侵蚀塌方松弛（磨平侵蚀残留的坡脚毛刺，保留冲沟纹理）→
+/// ⑤ 水系落地：在成品地形上循坡走线（逐格水位、下限 0、湖岛自然涌现）+ 河床下压 →
+/// ⑥ 树木/野物播种照旧。
+/// 「主动限制」全部集中在收尾单步（ClampHeights 上下限），不侵入基础地形算法。
 /// 全程纯数据操作（Map/Plants/Animals），可在后台线程运行；
 /// 进度经 volatile 字段暴露给 LoadingScreen 主线程轮询。
 /// </summary>
@@ -56,17 +58,23 @@ public static class WorldGenerator
         Report("勾画山川", 0.05f);
         var sketch = WorldSketch.Build(rng);
 
-        Report("铺陈大地", 0.25f);
+        Report("铺陈大地", 0.2f);
         UpsampleToHeightField(sketch, gs.Map.Height, rng);
 
-        Report("冲刷侵蚀", 0.35f);
+        Report("冲刷侵蚀", 0.3f);
         HydraulicEroder.Erode(gs.Map.Height.Raw, HeightField.VertsPerSide,
             TerrainConfig.ErodeDropletsFull, TerrainConfig.ErodeBrushRadius, rng);
+
+        Report("坡脚归整", 0.55f);
+        HydraulicEroder.ThermalRelax(gs.Map.Height.Raw, HeightField.VertsPerSide);
         ClampHeights(gs.Map.Height.Raw);
 
-        Report("开凿江河", 0.7f);
-        LayRiversAndLakes(gs.Map, sketch, rng);
-        RiverGenerator.CarveBed(gs.Map);
+        Report("引水成河", 0.7f);
+        // 峰点草图坐标 ×8 放大到世界格坐标，供取河源（峰间鞍部）
+        var peaks = new List<(Vector2 pos, float h)>();
+        foreach (var (pos, h) in sketch.Peaks)
+            peaks.Add((pos * TerrainConfig.SketchScale, h));
+        RiverGenerator.BuildWaterSystem(gs.Map, peaks, rng);
 
         Report("播种林木", 0.85f);
         TreeGenerator.Scatter(gs, rng);
@@ -75,6 +83,7 @@ public static class WorldGenerator
         new WildlifeSystem().SeedInitial(gs);
 
         Report("落成", 1f);
+        PrintWorldStats(gs); // 生成指标一行日志（headless 冒烟/调参依据）
     }
 
     private static void Report(string stage, float progress)
@@ -83,20 +92,23 @@ public static class WorldGenerator
         Progress = progress;
     }
 
-    // ---- ② 上采样映射 + fBm 细节 ----
+    // ---- ② 上采样映射 + fBm 细节（坡度削减）----
 
-    /// <summary>草图（128²，1 格=8m）双线性上采样到 1025² 顶点，并叠加高频 fBm 细节；
-    /// 高度统一 clamp [负河床下限, MaxTerrainHeight]。</summary>
+    /// <summary>草图（128²，1 格=8m）双线性上采样到 1025² 顶点，再叠加高频 fBm 细节；
+    /// 细节幅度按基础地形坡度削减（陡坡少叠噪声，专治山脚毛刺），平地细节保持。
+    /// 两遍处理：先铺基础场，再读邻点坡度叠细节。</summary>
     private static void UpsampleToHeightField(WorldSketch sketch, HeightField hf, Random rng)
     {
         int s = TerrainConfig.SketchSize;
         float scale = TerrainConfig.SketchScale;
-        var detail = new ValueNoise(rng, TerrainConfig.DetailFbmWaveMeters, 3, HeightField.VertsPerSide);
+        int vps = HeightField.VertsPerSide;
+        var detail = new ValueNoise(rng, TerrainConfig.DetailFbmWaveMeters, 3, vps);
         var raw = hf.Raw;
 
-        for (int vy = 0; vy < HeightField.VertsPerSide; vy++)
+        // 第一遍：双线性上采样铺基础场
+        for (int vy = 0; vy < vps; vy++)
         {
-            for (int vx = 0; vx < HeightField.VertsPerSide; vx++)
+            for (int vx = 0; vx < vps; vx++)
             {
                 // 草图浮点坐标（钳制在最后一格内做双线性）
                 float fx = Math.Min(vx / scale, s - 1.001f);
@@ -105,60 +117,64 @@ public static class WorldGenerator
                 float tx = fx - ix, ty = fy - iy;
                 float a = sketch.H[iy * s + ix], b = sketch.H[iy * s + ix + 1];
                 float c = sketch.H[(iy + 1) * s + ix], d = sketch.H[(iy + 1) * s + ix + 1];
-                float h = Mathf.Lerp(Mathf.Lerp(a, b, tx), Mathf.Lerp(c, d, tx), ty);
+                raw[vy * vps + vx] = Mathf.Lerp(Mathf.Lerp(a, b, tx), Mathf.Lerp(c, d, tx), ty);
+            }
+        }
 
-                // 高频细节：幅度随海拔微增（山体纹理略强于平原），中值归零免整体抬升
-                float amp = TerrainConfig.DetailFbmAmp * (0.6f + 0.4f * Mathf.Clamp(h / 20f, 0f, 1f));
-                h += (detail.Sample(vx, vy) - 0.5f) * 2f * amp;
-
-                raw[vy * HeightField.VertsPerSide + vx] = h;
+        // 第二遍：叠加高频细节——幅度随海拔微增（山体纹理略强）、随坡度削减（陡坡防毛刺）
+        for (int vy = 0; vy < vps; vy++)
+        {
+            for (int vx = 0; vx < vps; vx++)
+            {
+                int i = vy * vps + vx;
+                float h = raw[i];
+                float slope = Mathf.Max(
+                    Mathf.Abs(raw[Math.Min(i + 1, raw.Length - 1)] - h),
+                    Mathf.Abs(raw[Math.Min(i + vps, raw.Length - 1)] - h));
+                float amp = TerrainConfig.DetailFbmAmp
+                    * (0.6f + 0.4f * Mathf.Clamp(h / 20f, 0f, 1f))
+                    / (1f + slope * TerrainConfig.DetailSlopeDamp);
+                raw[i] = h + (detail.Sample(vx, vy) - 0.5f) * 2f * amp;
             }
         }
         ClampHeights(raw);
     }
 
-    /// <summary>全场高度钳制：上限 MaxTerrainHeight，下限 -3m（河床极限之下留裕量）。</summary>
+    /// <summary>全场高度钳制（收尾的「主动限制」单步，不侵入基础算法）：
+    /// 上限 MaxTerrainHeight、下限 MinTerrainHeight（卷轴画布/裙板垫在其下）。</summary>
     private static void ClampHeights(float[] raw)
     {
         for (int i = 0; i < raw.Length; i++)
-            raw[i] = Mathf.Clamp(raw[i], -3f, TerrainConfig.MaxTerrainHeight);
+            raw[i] = Mathf.Clamp(raw[i], TerrainConfig.MinTerrainHeight, TerrainConfig.MaxTerrainHeight);
     }
 
-    // ---- ④ 河湖落地 ----
+    // ---- 生成指标（调参依据，headless 冒烟直接可读）----
 
-    /// <summary>把草图河线（×8 放大）落地为水格：沿线刻圆盘（宽度沿程渐宽）、
-    /// 流向沿走线切向量化八方向；湖泊用 CarveLake 生成谐波湖缘（含湖中岛，静水）。</summary>
-    private static void LayRiversAndLakes(MapGrid map, WorldSketch sketch, Random rng)
+    /// <summary>关键占比一行日志：山地（>5m）/ 水面 / 可用平原（非水、坡度可走、<5m）/ 最高点。</summary>
+    private static void PrintWorldStats(GameState gs)
     {
-        float scale = TerrainConfig.SketchScale;
-        for (int r = 0; r < sketch.Rivers.Count; r++)
+        int total = MapGrid.Size * MapGrid.Size;
+        int mountain = 0, water = 0, usable = 0;
+        float maxH = float.MinValue;
+        for (int y = 0; y < MapGrid.Size; y++)
         {
-            var pts = sketch.Rivers[r];
-            bool isMain = r == 0;
-            float mouthW = isMain ? WaterConfig.RiverWidthMouth : WaterConfig.BranchWidthMouth;
-
-            // 草图点列放大后逐段插值（段长 8m，按 1m 步进补点防断链）
-            for (int i = 0; i < pts.Count - 1; i++)
+            for (int x = 0; x < MapGrid.Size; x++)
             {
-                var w0 = pts[i] * scale;
-                var w1 = pts[i + 1] * scale;
-                float t = i / (float)Math.Max(1, pts.Count - 1);
-                float width = Mathf.Lerp(WaterConfig.RiverWidthSource, mouthW, t);
-                byte flow = RiverGenerator.EncodeFlow(Math.Sign(w1.X - w0.X), Math.Sign(w1.Y - w0.Y));
-
-                int steps = Mathf.CeilToInt(w0.DistanceTo(w1));
-                for (int st = 0; st <= steps; st++)
+                var c = new Vector2I(x, y);
+                if (gs.Map.CellAt(c).HasWater)
                 {
-                    var p = w0.Lerp(w1, st / (float)Math.Max(1, steps));
-                    RiverGenerator.CarveDisk(map, new Vector2I((int)p.X, (int)p.Y), width / 2f, flow);
+                    water++;
+                    continue;
                 }
+                float h = gs.Map.Height.CellCenterH(c);
+                maxH = Math.Max(maxH, h);
+                if (h > 5f)
+                    mountain++;
+                else if (gs.Map.Height.CellSlopeDeg(c) <= TerrainConfig.MaxWalkSlopeDeg)
+                    usable++;
             }
         }
-
-        // 湖泊：草图圆心/半径放大后落地（湖缘谐波与湖中岛由 CarveLake 内部处理）
-        foreach (var (pos, radius) in sketch.Lakes)
-            RiverGenerator.CarveLake(map, rng,
-                new Vector2I((int)(pos.X * scale), (int)(pos.Y * scale)),
-                (int)(radius * scale), islands: true);
+        GD.Print($"[worldgen] 山地(>5m) {100f * mountain / total:F1}% | 水面 {100f * water / total:F1}% | " +
+            $"可用平原 {100f * usable / total:F1}% | 最高 {maxH:F1}m");
     }
 }

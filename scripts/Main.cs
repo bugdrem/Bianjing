@@ -34,8 +34,9 @@ public partial class Main : Node3D
         GameState.I = new GameState(BuildingDef.LoadAll());
 
         // 世界生成走后台线程（此时渲染节点未建，生成只动纯数据 Map/Plants/Animals，线程安全）；
-        // 加载画面主线程轮询进度，完成回调 FinishSetup 装配全部节点与系统
-        var loading = new LoadingScreen(GameState.I.CityName) { OnFinished = FinishSetup };
+        // 加载画面主线程轮询进度，完成回调 FinishSetup 装配全部节点与系统。
+        // 启动阶段确实在生成世界（主菜单背后的城市），标题如实描述——阶段文案由 WorldGenerator 实时上报
+        var loading = new LoadingScreen("初入汴京 · 正在生成世界") { OnFinished = FinishSetup };
         AddChild(loading);
         WorldGenerator.GenerateAsync(GameState.I);
     }
@@ -269,17 +270,65 @@ public partial class Main : Node3D
         };
         AddChild(new WorldEnvironment { Environment = env });
 
-                // 地面背景平面：垫在最深河床（约 -2.1m）之下作图外背景；图内地表由逐块地形三角网格覆盖
-        float extent = MapGrid.Size * MapGrid.CellSize + 80f;
-        var ground = new MeshInstance3D
+                // 卷轴背景：游戏世界坐在一幅横卷「画」上——大于地图的长方形纸面垫在地形之下，
+        // 东西两侧各横一根卷轴圆柱（轴向南北）；图内地表由地形三角网格覆盖，
+        // 图缘镂空由 GridRenderer 裙板遮住（裙板底与纸面同高）
+        BuildScrollBackdrop();
+    }
+
+    /// <summary>卷轴背景布景：白底（地图四周外扩 MapEdgeExtend 的白边）+ 纸面（长方形，东西向更宽）
+    /// + 两根横卧卷轴圆柱。层次自上而下：地形/裙板 → 白底 → 纸面；圆柱底部与纸面画布相切。</summary>
+    private void BuildScrollBackdrop()
+    {
+        float mapSize = MapGrid.Size * MapGrid.CellSize;
+        float baseY = TerrainConfig.MinTerrainHeight - 0.2f;   // 白底 = 裙板底，地形断面→裙板→白底无缝
+        float paperY = baseY - 0.4f;                            // 纸面垫在白底之下
+        float paperX = (mapSize + 440f) * 2f;  // 东西向（卷轴圆柱所在方向）加宽到旧版 2 倍，卷轴画更宽展
+        float paperZ = mapSize + 180f;  // 南北向留窄白边，成横卷比例
+
+        // 白底：地图四周外扩 MapEdgeExtend 的纯白底色，垫在地图与卷轴纸面之间
+        float baseSize = mapSize + 2f * WorldConfig.MapEdgeExtend;
+        AddChild(new MeshInstance3D
         {
-            Mesh = new PlaneMesh { Size = new Vector2(extent, extent) },
-            Position = new Vector3(0f, -2.6f, 0f),
+            Mesh = new PlaneMesh { Size = new Vector2(baseSize, baseSize) },
+            Position = new Vector3(0f, baseY, 0f),
             MaterialOverride = new StandardMaterial3D
             {
-                AlbedoColor = new Color(0.63f, 0.59f, 0.44f), // 同地形低处淡麦黄绿
+                AlbedoColor = new Color(0.96f, 0.96f, 0.94f), // 白底（略暖白）
+            },
+        });
+
+        var paper = new MeshInstance3D
+        {
+            Mesh = new PlaneMesh { Size = new Vector2(paperX, paperZ) },
+            Position = new Vector3(0f, paperY, 0f),
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.84f, 0.78f, 0.62f), // 绢帛暖米色（宋画手卷纸面）
             },
         };
-        AddChild(ground);
+        AddChild(paper);
+
+        // 两侧卷轴：深色漆木圆柱横卧东西两端（轴向南北，即绕 X 轴旋 90°），底部与纸面画布相切
+        const float rollerR = 14f;
+        var rollerMesh = new CylinderMesh
+        {
+            TopRadius = rollerR,
+            BottomRadius = rollerR,
+            Height = paperZ + 60f, // 两端微出纸面，像轴头
+        };
+        var rollerMat = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.20f, 0.12f) }; // 深色漆木
+        foreach (float sx in new[] { -1f, 1f })
+        {
+            AddChild(new MeshInstance3D
+            {
+                Mesh = rollerMesh,
+                MaterialOverride = rollerMat,
+                // 圆柱默认轴向 Y：绕 X 轴旋 90° 后轴向 Z（南北横卧）
+                RotationDegrees = new Vector3(90f, 0f, 0f),
+                // 底部与纸面相切：轴心抬高一个半径（圆柱底刚好落在 paperY）
+                Position = new Vector3(sx * (paperX / 2f - rollerR * 0.4f), paperY + rollerR, 0f),
+            });
+        }
     }
 }

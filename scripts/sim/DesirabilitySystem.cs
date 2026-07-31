@@ -1,21 +1,35 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace Bianjing;
 
-/// <summary>吸引力场：建筑变化后全图重算。吸引力 = 井/衙门/宫殿等正向覆盖（线性衰减）− 工坊污染。</summary>
+/// <summary>吸引力场：建筑/道路变化后重算。吸引力 = 井/衙门/宫殿等正向覆盖（线性衰减）− 工坊污染
+/// + 道路临街加成。道路项数量大（数千格 × 半径12圆盘）且逐格增量变化，
+/// 用独立场缓存增量维护（只泼溅新增/移除/变种的路格），重算时整场拷入再叠建筑项——
+/// 免每次全量重泼全部路格（4x 下村民频繁铺小路/建房触发重算，全量重泼是间歇卡顿源之一）。</summary>
 public class DesirabilitySystem
 {
     private bool _dirty = true;
 
+    /// <summary>道路吸引力场缓存（与地图同尺寸一维数组）：增量维护，重算时整场拷入。</summary>
+    private readonly float[] _roadField = new float[MapGrid.Size * MapGrid.Size];
+
+    /// <summary>已泼溅进 _roadField 的路格 → 当时的泼溅幅度（变种/拆除时按差额补泼）。</summary>
+    private readonly Dictionary<Vector2I, float> _roadSplat = new();
+
     public DesirabilitySystem()
     {
-        EventBus.MapChanged += MarkDirty;
-        EventBus.CellChanged += MarkDirtyCell; // 铺路/拆路等单格变更同样影响吸引力场
+        EventBus.MapChanged += MarkDirty;          // 读档/新局：全量重算（含道路场重建）
+        EventBus.CellChanged += MarkDirtyCell;     // 铺路/拆路等单格变更同样影响吸引力场
+        EventBus.RectChanged += MarkDirtyRect;     // 建筑落成/拆除/扩建（不再走全图 MapChanged）
+        EventBus.BuildingsChanged += MarkDirty;    // 转业改变污染/加成来源
     }
 
     private void MarkDirty() => _dirty = true;
 
     private void MarkDirtyCell(Vector2I _) => _dirty = true;
+
+    private void MarkDirtyRect(Vector2I _, Vector2I __) => _dirty = true;
 
     public void EnsureUpdated(GameState gs)
     {
@@ -23,9 +37,13 @@ public class DesirabilitySystem
             return;
         _dirty = false;
 
-        for (int x = 0; x < MapGrid.Size; x++)
-            for (int y = 0; y < MapGrid.Size; y++)
-                gs.Map.CellAt(x, y).Desirability = 0f;
+        // 1) 增量同步道路场：只泼溅「新增/变种/拆除」的路格差额，存量路格零开销
+        SyncRoadField(gs);
+
+        // 2) 道路场整场拷入作底，其上叠加建筑正负覆盖
+        for (int y = 0; y < MapGrid.Size; y++)
+            for (int x = 0; x < MapGrid.Size; x++)
+                gs.Map.CellAt(x, y).Desirability = _roadField[y * MapGrid.Size + x];
 
         foreach (var b in gs.Buildings.Values)
         {
@@ -34,30 +52,54 @@ public class DesirabilitySystem
             if (b.Def.Pollution > 0f)
                 Splat(gs, b, -b.Def.Pollution, b.Def.PollutionRadius);
         }
-
-        // 道路也带来临街吸引力：主路/辅路小量叠加，桥面（RoadKind.None）不加成；
-        // 幅度/归一系数/泼溅半径均见 configs/GrowthConfig 吸引力段；
-        // 只遍历增量维护的道路格列表，大地图下不再全图扫描
-        foreach (var rc in gs.RoadCells)
-        {
-            var cell = gs.Map.CellAt(rc);
-            if (!cell.HasRoad)
-                continue;
-            float bonus = cell.RoadKind switch
-            {
-                RoadKind.Main => GrowthConfig.DesirMainRoadBonus / GrowthConfig.DesirRoadScale,
-                RoadKind.Side => GrowthConfig.DesirSideRoadBonus / GrowthConfig.DesirRoadScale,
-                _ => 0f,
-            };
-            if (bonus <= 0f)
-                continue;
-            SplatCell(gs, rc.X, rc.Y, bonus, GrowthConfig.DesirRoadRadius);
-        }
     }
 
-    /// <summary>以某格为圆心线性衰减地叠加吸引力（道路用）。</summary>
-    private static void SplatCell(GameState gs, int cx, int cy, float amount, float radius)
+    /// <summary>某路格当前应有的泼溅幅度：主路/辅路小量加成，小路与桥面（RoadKind.None）不加成；
+    /// 幅度/归一系数/泼溅半径均见 configs/GrowthConfig 吸引力段。</summary>
+    private static float RoadBonusOf(in Cell cell) => !cell.HasRoad ? 0f : cell.RoadKind switch
     {
+        RoadKind.Main => GrowthConfig.DesirMainRoadBonus / GrowthConfig.DesirRoadScale,
+        RoadKind.Side => GrowthConfig.DesirSideRoadBonus / GrowthConfig.DesirRoadScale,
+        _ => 0f,
+    };
+
+    /// <summary>把道路场与当前路网增量对齐：新增路格正泼、拆除负泼、变种（辅路升主路）补差额。
+    /// 只遍历增量维护的道路格列表与既有泼溅记录，典型帧内差额为个位数路格。</summary>
+    private void SyncRoadField(GameState gs)
+    {
+        // 新增/变种：现值与记录不符则按差额补泼
+        foreach (var rc in gs.RoadCells)
+        {
+            float want = RoadBonusOf(gs.Map.CellAt(rc));
+            _roadSplat.TryGetValue(rc, out float has);
+            if (Mathf.Abs(want - has) < 0.0001f)
+                continue;
+            SplatRoad(rc.X, rc.Y, want - has);
+            if (want == 0f)
+                _roadSplat.Remove(rc);
+            else
+                _roadSplat[rc] = want;
+        }
+
+        // 拆除：记录里还在、格上已无路（或已出 RoadCells）→ 负泼回收；
+        // 移除项攒列表后删，避免遍历中改字典
+        List<Vector2I> gone = null;
+        foreach (var (c, has) in _roadSplat)
+        {
+            if (RoadBonusOf(gs.Map.CellAt(c)) != 0f)
+                continue;
+            SplatRoad(c.X, c.Y, -has);
+            (gone ??= new List<Vector2I>()).Add(c);
+        }
+        if (gone != null)
+            foreach (var c in gone)
+                _roadSplat.Remove(c);
+    }
+
+    /// <summary>以某路格为圆心线性衰减地叠加进道路场缓存（幅度可负，用于回收）。</summary>
+    private void SplatRoad(int cx, int cy, float amount)
+    {
+        float radius = GrowthConfig.DesirRoadRadius;
         int r = Mathf.CeilToInt(radius);
         for (int x = Mathf.Max(0, cx - r); x <= Mathf.Min(MapGrid.Size - 1, cx + r); x++)
             for (int y = Mathf.Max(0, cy - r); y <= Mathf.Min(MapGrid.Size - 1, cy + r); y++)
@@ -65,7 +107,7 @@ public class DesirabilitySystem
                 float dist = Mathf.Sqrt((x - cx) * (x - cx) + (y - cy) * (y - cy));
                 if (dist > radius)
                     continue;
-                gs.Map.CellAt(x, y).Desirability += amount * (1f - dist / radius);
+                _roadField[y * MapGrid.Size + x] += amount * (1f - dist / radius);
             }
     }
 
