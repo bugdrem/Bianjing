@@ -5,9 +5,10 @@ namespace Bianjing;
 
 /// <summary>
 /// 新地图地形成形（水系之前运行一次，顶点高度场随存档保存）：
-/// ① 连绵山脉——若干条蠕蜒脊线，沿脊高低起伏、两侧二次 falloff 降到平地，成"连绵起伏"的可走山体；
-/// ② 平原缓丘——双八度 value noise 阈上平滑隆起（0~HillAmplitude 米），高低差连续无台阶；
-/// ③ 桂林石峰——若干孤峰（超椭圆剖面：顶平壁陡），一格落差数米，坡度天然超上限、人不可攀。
+/// ① 图缘山带——随机两条相邻图缘向内的 L 形基底隆起（约覆盖半图），另半图保持平原；
+/// ② 连绵山脉——若干条蠕蜒脊线集中在山带内叠加（脊顶 7~10m），沿脊高低起伏，
+///    余弦剖面最大坡 ≈29° 恰在可走上限内，成高而可翻的群山主体；
+/// ③ 平原缓丘——双八度 value noise 阈上平滑隆起（0~HillAmplitude 米），高低差连续无台阶。
 /// 连续高度场天然平滑，无需旧整数台地时代的削壁/侵蚀收尾；平地占比由 HillThreshold 控制。
 /// 水系其后生成并按深度下压河床（山体被河切穿处自然成峡谷）。
 /// </summary>
@@ -16,20 +17,64 @@ public static class MountainGenerator
     public static void Raise(MapGrid map, Random rng)
     {
         var hf = map.Height;
-        RaiseRanges(hf, rng);  // 山脉先立，缓丘可在其上叠纹理
+        int corner = rng.Next(4); // 山带所依的角：0=西北 1=东北 2=东南 3=西南（决定两条相邻图缘）
+        RaiseBelt(hf, rng, corner);   // 图缘山带基底先铺：半图群山半图平原的大格局
+        RaiseRanges(hf, rng, corner); // 脊线山脉叠在带内基底上，成连绵群山
         RaiseHills(hf, rng);
-        RaisePillars(hf, rng);
     }
 
-    /// <summary>① 连绵山脉：脊线逐米蠕蜒推进，沿脊高度随正弦起伏（连绵而非等高），
-    /// 两侧按二次 falloff 连续降到平地——半宽 14m 内最多爬升 2.5m，坡度天然可走。</summary>
-    private static void RaiseRanges(HeightField hf, Random rng)
+    /// <summary>顶点到山带所依两条图缘的距离（米）：取两缘距离的较小者，越小越深入山区。</summary>
+    private static float EdgeDist(int corner, int vx, int vy)
+    {
+        int last = HeightField.VertsPerSide - 1;
+        float dx = (corner == 0 || corner == 3) ? vx : last - vx; // 西缘 / 东缘
+        float dy = (corner == 0 || corner == 1) ? vy : last - vy; // 北缘 / 南缘
+        return Math.Min(dx, dy);
+    }
+
+    /// <summary>① 图缘山带基底：两条相邻图缘向内 BeltDepth 米的 L 形地带平滑隆起（缘高 BeltBaseHeight → 带界 0），
+    /// 带界由噪声推拉蜿蜒，基底高度另叠大尺度起伏噪声免成均匀斜坡；坡度极缓处处可走。</summary>
+    private static void RaiseBelt(HeightField hf, Random rng, int corner)
+    {
+        var edgeNoise = MakeLattice(rng, TerrainConfig.BeltNoiseWave);   // 带界扭曲
+        var reliefNoise = MakeLattice(rng, 64);                          // 基底起伏调制
+        for (int vx = 0; vx < HeightField.VertsPerSide; vx++)
+        {
+            for (int vy = 0; vy < HeightField.VertsPerSide; vy++)
+            {
+                // 带界噪声推拉 ±BeltNoiseAmp：山缘蜿蜒成自然山脚线
+                float d = EdgeDist(corner, vx, vy)
+                    + (SampleLattice(edgeNoise, TerrainConfig.BeltNoiseWave, vx, vy) - 0.5f) * 2f * TerrainConfig.BeltNoiseAmp;
+                if (d >= TerrainConfig.BeltDepth)
+                    continue;
+                float t = 1f - Math.Max(0f, d) / TerrainConfig.BeltDepth;
+                t = t * t * (3f - 2f * t); // smoothstep：山脚接平原无棱线
+                // 起伏调制 0.6~1.3：基底本身高低起伏，免成单调斜面
+                float relief = 0.6f + 0.7f * SampleLattice(reliefNoise, 64, vx, vy);
+                float extra = TerrainConfig.BeltBaseHeight * t * relief;
+                if (hf.VertexH(vx, vy) < extra)
+                    hf.SetVertex(vx, vy, extra);
+            }
+        }
+    }
+
+    /// <summary>② 连绵山脉：脊线逐米蠕蜒推进，沿脊高度随正弦起伏（连绵而非等高），
+    /// 两侧按二次 falloff 连续降到平地——半宽 14m 内最多爬升 2.5m，坡度天然可走；
+    /// 起点采样限在图缘山带内，脊线叠在带基底上成群山主体。</summary>
+    private static void RaiseRanges(HeightField hf, Random rng, int corner)
     {
         int count = TerrainConfig.MinRanges + rng.Next(TerrainConfig.MaxRanges - TerrainConfig.MinRanges + 1);
         for (int i = 0; i < count; i++)
         {
-            double px = 40 + rng.Next(MapGrid.Size - 80);
-            double py = 40 + rng.Next(MapGrid.Size - 80);
+            // 起点重采样到山带内（留 0.85 余带免贴带界）；采不中则退而求其次用最后一次采样
+            double px = 0, py = 0;
+            for (int tries = 0; tries < 40; tries++)
+            {
+                px = 40 + rng.Next(MapGrid.Size - 80);
+                py = 40 + rng.Next(MapGrid.Size - 80);
+                if (EdgeDist(corner, (int)px, (int)py) < TerrainConfig.BeltDepth * 0.85f)
+                    break;
+            }
             double angle = rng.NextDouble() * Math.PI * 2;
             int length = TerrainConfig.RangeLenMin + rng.Next(TerrainConfig.RangeLenMax - TerrainConfig.RangeLenMin + 1);
             double phase = rng.NextDouble() * Math.PI * 2;
@@ -50,7 +95,8 @@ public static class MountainGenerator
         }
     }
 
-    /// <summary>山脊横断面：以 (cx,cy) 为脊心，半宽 RangeHalfWidth 内的顶点按二次 falloff 抬高（中心 peak → 缘 0）。</summary>
+    /// <summary>山脊横断面：以 (cx,cy) 为脊心，半宽 RangeHalfWidth 内的顶点按余弦剖面抬高
+    /// （中心 peak → 缘 0，最大坡处坡角 ≈29° 仍可走），峰值 clamp 世界上限。</summary>
     private static void RaiseRidgeBand(HeightField hf, int cx, int cy, float peak)
     {
         int hw = TerrainConfig.RangeHalfWidth;
@@ -60,7 +106,9 @@ public static class MountainGenerator
                 float d = new Vector2(ox, oy).Length() / hw;
                 if (d > 1f)
                     continue;
-                float extra = peak * (1f - d) * (1f - d); // 二次 falloff 更圆润
+                // 余弦剖面：顶平缓、中腰最陡（≈πp/2hw）、山脚渐平，比二次 falloff 更像山体
+                float extra = Mathf.Min(peak, TerrainConfig.MaxTerrainHeight)
+                    * (0.5f + 0.5f * Mathf.Cos(Mathf.Pi * d));
                 int vx = cx + ox, vy = cy + oy;
                 float h = hf.VertexH(vx, vy);
                 if (h < extra)
@@ -68,7 +116,7 @@ public static class MountainGenerator
             }
     }
 
-    /// <summary>② 平原缓丘：双八度 value noise（与树木密度场同款手法），阈上部分平滑映射为 0~HillAmplitude 米附加高度；
+    /// <summary>③ 平原缓丘：双八度 value noise（与树木密度场同款手法），阈上部分平滑映射为 0~HillAmplitude 米附加高度；
     /// smoothstep 映射保证丘缘与平地连续衔接、无台阶。</summary>
     private static void RaiseHills(HeightField hf, Random rng)
     {
@@ -89,39 +137,6 @@ public static class MountainGenerator
                 float h = hf.VertexH(vx, vy);
                 if (h < extra)
                     hf.SetVertex(vx, vy, extra);
-            }
-        }
-    }
-
-    /// <summary>③ 桂林石峰：孤峰散布（避图缘），超椭圆剖面 1-(d/r)^k——k 越大顶越平、壁越陡；
-    /// 峰壁一格落差数米，坡角远超上限，村民不可攀，成为纯景观地标。顶面叠细噪声免死平。</summary>
-    private static void RaisePillars(HeightField hf, Random rng)
-    {
-        var topNoise = MakeLattice(rng, 8); // 峰顶细噪声（8m 波长，±0.5m 起伏）
-        int count = TerrainConfig.MinPillars + rng.Next(TerrainConfig.MaxPillars - TerrainConfig.MinPillars + 1);
-        for (int i = 0; i < count; i++)
-        {
-            int radius = TerrainConfig.PillarMinRadius + rng.Next(TerrainConfig.PillarMaxRadius - TerrainConfig.PillarMinRadius + 1);
-            // 峰心避开图缘一圈（半径+8米）
-            int cx = radius + 8 + rng.Next(MapGrid.Size - 2 * (radius + 8));
-            int cy = radius + 8 + rng.Next(MapGrid.Size - 2 * (radius + 8));
-            float peak = Mathf.Lerp(TerrainConfig.PillarMinHeight, TerrainConfig.PillarMaxHeight, (float)rng.NextDouble());
-
-            for (int vx = cx - radius; vx <= cx + radius; vx++)
-            {
-                for (int vy = cy - radius; vy <= cy + radius; vy++)
-                {
-                    float d = new Vector2(vx - cx, vy - cy).Length() / radius;
-                    if (d > 1f)
-                        continue;
-                    // 超椭圆剖面：中心 1 → 缘 0，PillarShapePower 越大顶部越平坦
-                    float t = 1f - Mathf.Pow(d, TerrainConfig.PillarShapePower);
-                    // 顶面细噪声：±0.5m 平滑起伏（保留"顶平"大观感，不再是死平一块）
-                    float jitter = (SampleLattice(topNoise, 8, vx, vy) - 0.5f) * t;
-                    float h = hf.VertexH(vx, vy) + peak * t + jitter;
-                    if (h > hf.VertexH(vx, vy))
-                        hf.SetVertex(vx, vy, Mathf.Min(h, TerrainConfig.MaxTerrainHeight));
-                }
             }
         }
     }

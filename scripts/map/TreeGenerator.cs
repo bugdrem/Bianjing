@@ -32,7 +32,8 @@ public static class TreeGenerator
                 sampleSum += ChanceAt(coarse, fine, x, y);
         double scale = sampleSum > 0 ? TargetTrees / (sampleSum * 16) : 0;
 
-        // 2) 正式播种：逐格按校准后的概率落树（水面/占用格由 AddPlant 自动拦截）
+        // 2) 正式播种：逐格按校准后的概率落树（水面/占用格由 AddPlant 自动拦截）；
+        // 噪声密度场不看海拔，图缘山带高地照常成林（高于 ForageMaxHeight 的为景观树）
         for (int x = 0; x < MapGrid.Size; x++)
         {
             for (int y = 0; y < MapGrid.Size; y++)
@@ -42,19 +43,6 @@ public static class TreeGenerator
                     continue;
                 // 月龄随机（林子老幼混杂）；约每十一株出一株果树（果树:普通树≈1:10）
                 gs.AddPlant(new Vector2I(x, y), 6 + rng.Next(19), rng.Next(11) == 0);
-            }
-        }
-
-        // 3) 峰上落树：石峰域（高海拔格）按保底概率补树，保证「山上会生成树木」不受林区噪声左右；
-        // 峰上皆普通树（人不可攀，纯景观，采集目标选择已按 ForageMaxHeight 豁免）
-        for (int x = 0; x < MapGrid.Size; x++)
-        {
-            for (int y = 0; y < MapGrid.Size; y++)
-            {
-                if (gs.Map.GroundY(new Vector2I(x, y)) < TerrainConfig.PillarZoneMinHeight)
-                    continue;
-                if (rng.NextDouble() < TerrainConfig.PillarTreeChance)
-                    gs.AddPlant(new Vector2I(x, y), 6 + rng.Next(19), false);
             }
         }
     }

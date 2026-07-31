@@ -234,15 +234,27 @@ public partial class Main : Node3D
         {
             RotationDegrees = new Vector3(-55f, -35f, 0f),
             ShadowEnabled = true,
+            LightColor = new Color(1f, 0.96f, 0.88f), // 微暖阳光，去冷白感
+            LightEnergy = 0.95f,
         };
         AddChild(sun);
 
         var env = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Sky,
-            Sky = new Sky { SkyMaterial = new ProceduralSkyMaterial() },
+            Sky = new Sky { SkyMaterial = new ProceduralSkyMaterial
+            {
+                // 地平线暖灰（参考宋画素净色调），降低天空蓝对环境光的染色
+                SkyHorizonColor = new Color(0.78f, 0.75f, 0.67f),
+                GroundHorizonColor = new Color(0.78f, 0.75f, 0.67f),
+            } },
             AmbientLightSource = Godot.Environment.AmbientSource.Sky,
-            AmbientLightEnergy = 0.7f,
+            AmbientLightEnergy = 0.55f,
+            // Filmic 色调映射压高光 + 全局降饱和：整体去卡通鲜艳、归素雅
+            TonemapMode = Godot.Environment.ToneMapper.Filmic,
+            AdjustmentEnabled = true,
+            AdjustmentSaturation = 0.85f,
+            AdjustmentBrightness = 0.97f,
         };
         AddChild(new WorldEnvironment { Environment = env });
 
@@ -254,7 +266,7 @@ public partial class Main : Node3D
             Position = new Vector3(0f, -2.6f, 0f),
             MaterialOverride = new StandardMaterial3D
             {
-                AlbedoColor = new Color(0.45f, 0.5f, 0.32f),
+                AlbedoColor = new Color(0.63f, 0.59f, 0.44f), // 同地形低处淡麦黄绿
             },
         };
         AddChild(ground);

@@ -12,19 +12,19 @@ namespace Bianjing;
 /// </summary>
 public partial class GridRenderer : Node3D
 {
-    private static readonly Color RoadColor = new(0.25f, 0.25f, 0.28f);
-    private static readonly Color WaterColor = new(0.2f, 0.38f, 0.62f);
-    private static readonly Color BridgeColor = new(0.55f, 0.42f, 0.26f);
-    private static readonly Color TreeColor = new(0.2f, 0.45f, 0.2f);
-    private static readonly Color FruitTreeColor = new(0.5f, 0.52f, 0.16f); // 果树：暖黄绿树冠，一眼可辨
-    private static readonly Color TrunkColor = new(0.42f, 0.3f, 0.2f); // 树干木褐
+    private static readonly Color RoadColor = new(0.56f, 0.53f, 0.46f); // 浅石板土路（主路提亮近白石街）
+    private static readonly Color WaterColor = new(0.45f, 0.49f, 0.40f); // 灰绿浑水（参考宋画运河色，去蓝去艳）
+    private static readonly Color BridgeColor = new(0.62f, 0.60f, 0.54f); // 石桥灰白（原木褐偏艳）
+    private static readonly Color TreeColor = new(0.30f, 0.40f, 0.26f);   // 灰绿树冠（压饱和度）
+    private static readonly Color FruitTreeColor = new(0.46f, 0.47f, 0.24f); // 果树：暖黄绿树冠，一眼可辨
+    private static readonly Color TrunkColor = new(0.38f, 0.30f, 0.22f); // 树干木褐
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
     private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
 
-    // 地形顶点色：低处同草地基底色，高处/陡坡渐变岩褐灰褐；水下河床泥沙色
-    private static readonly Color TerrainLowColor = new(0.45f, 0.5f, 0.32f); // 同 Main 地面草绿
-    private static readonly Color TerrainHighColor = new(0.5f, 0.46f, 0.4f);  // 山顶/陡壁岩褐
-    private static readonly Color BedColor = new(0.5f, 0.44f, 0.3f);          // 水下河床泥沙
+    // 地形顶点色：低处淡麦黄绿（参考宋画平原色），高处/陡坡渐变灰褐岩；水下河床泥沙色
+    private static readonly Color TerrainLowColor = new(0.63f, 0.59f, 0.44f); // 同 Main 背景平面色
+    private static readonly Color TerrainHighColor = new(0.51f, 0.47f, 0.41f); // 山顶/陡壁灰褐岩
+    private static readonly Color BedColor = new(0.47f, 0.43f, 0.33f);         // 水下河床泥沙
 
     /// <summary>门标记颜色：大门亮金（显眼），后门暗木色（低调）。</summary>
     private static readonly Color MainDoorColor = new(0.85f, 0.7f, 0.35f);
@@ -32,6 +32,9 @@ public partial class GridRenderer : Node3D
 
     /// <summary>建筑主体透明度（能看清屋内居民）。</summary>
     private const float BodyAlpha = 0.55f;
+
+    /// <summary>水面透明度：微浑而仍透见河床。</summary>
+    private const float WaterAlpha = 0.85f;
 
     /// <summary>分块边长（格）：128 图 2×2 块，1024 图 16×16 块，单块重建量恒定。</summary>
     private const int ChunkCells = 64;
@@ -353,7 +356,7 @@ public partial class GridRenderer : Node3D
                 else if (cell.HasWater)
                 {
                     // 水面：统一水位的半透平面，河床（地形网格已下压）透水可见
-                    var wc = new Color(WaterColor.R, WaterColor.G, WaterColor.B, 0.78f);
+                    var wc = new Color(WaterColor.R, WaterColor.G, WaterColor.B, WaterAlpha);
                     AddFlatQuad(waterV, waterN, waterC, waterI, x, y, WaterConfig.WaterLevelAt(new Vector2I(x, y)), wc);
                 }
                 else if (cell.HasRoad)
@@ -372,6 +375,13 @@ public partial class GridRenderer : Node3D
                             lift = 0.05f; rc = RoadColor; break;
                     }
                     AddDrapedQuad(hf, roadV, roadN, roadC, roadI, x, y, lift, rc);
+                }
+                else if (cell.BuildingId == 0 && hf.CellMinH(new Vector2I(x, y)) < WaterConfig.WaterLevel)
+                {
+                    // 贴岸陆格（共享顶点被河床下压到水位下）也补一片水面：
+                    // 水线落在水面与地形斜面的交线上，沿岸连续平滑，消除逐格锯齿
+                    var wc = new Color(WaterColor.R, WaterColor.G, WaterColor.B, WaterAlpha);
+                    AddFlatQuad(waterV, waterN, waterC, waterI, x, y, WaterConfig.WaterLevelAt(new Vector2I(x, y)), wc);
                 }
 
                 // 树木：植物实体驱动，尺寸随生长进度放大（块内格→实体查询，重建量与块大小成正比）。

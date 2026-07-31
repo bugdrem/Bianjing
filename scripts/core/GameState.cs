@@ -784,7 +784,7 @@ public class GameState
     }
 
     /// <summary>找最近的树木格（线性扫描植物实体，免大半径环扫全图；伐木选目标用）；
-    /// 石峰上的景观树不入选（人不可攀，海拔高于 ForageMaxHeight 即跳过）。</summary>
+    /// 高山上的景观树不入选（海拔高于 ForageMaxHeight 即跳过）。</summary>
     public Vector2I? FindNearestTreeCell(Vector2I from, int maxRadius)
     {
         PlantObj best = null;
@@ -792,7 +792,7 @@ public class GameState
         foreach (var p in Plants.Values)
         {
             if (Map.GroundY(new Vector2I(p.X, p.Y)) > TerrainConfig.ForageMaxHeight)
-                continue; // 峰上景观树不可及
+                continue; // 高山景观树不可及
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)
             {
@@ -803,7 +803,7 @@ public class GameState
         return best != null ? new Vector2I(best.X, best.Y) : null;
     }
 
-    /// <summary>找最近的挂果果树（至少一份可摘；普通树不挂果，字段双重过滤防误摘）；峰上树同样豁免。</summary>
+    /// <summary>找最近的挂果果树（至少一份可摘；普通树不挂果，字段双重过滤防误摘）；高山树同样豁免。</summary>
     public PlantObj FindNearestFruitTree(Vector2I from, int maxRadius)
     {
         PlantObj best = null;
@@ -813,7 +813,7 @@ public class GameState
             if (!p.IsFruitTree || !p.Mature || p.FruitStock < 1)
                 continue;
             if (Map.GroundY(new Vector2I(p.X, p.Y)) > TerrainConfig.ForageMaxHeight)
-                continue; // 峰上景观树不可及
+                continue; // 高山景观树不可及
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)
             {
