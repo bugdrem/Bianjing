@@ -225,8 +225,8 @@ public class ZoneGrowthSystem
     
     /// <summary>在可建设区内按选址偏好挑一处合法落位自建住宅（house）：
     /// 偏好叠加打分（SiteScore：主路 &gt; 辅路 &gt; 河道 &gt; 水井/已有建筑，河边十字路口分最高），
-    /// 地价 = HouseBaseCost + LandPricePerScore×分；达到 SiteThreshold 的可负担候选中随机挑一处
-    /// （不逐最优，避免村民一味沿路排屋），无达标者退而选可负担中分最高处；
+    /// 地价 = HouseBaseCost + LandPricePerScore×分；达到 SiteThreshold 的可负担候选按分数加权抽签
+    /// （高分地段大概率中签、达标冷清处保留小概率，既聚居又不死板），无达标者退选最高分；
     /// 全买不起或无合法落位返回 false，成功输出新宅与实际地价（调用方扣款）。</summary>
     public static bool TryBuildHouse(GameState gs, double budget, out BuildingInstance built, out double cost)
     {
@@ -237,8 +237,8 @@ public class ZoneGrowthSystem
         // 近王爷府加成（用户需求：村民建房候选地叠加王爷府数值）：预取府邸中心，供逐候选格按距加分
         Vector2I? mansion = PrinceMansionCenter(gs);
     
-        // 可负担候选分两组：达标集（随机挑）与全集最高分（兜底）
-        var qualified = new List<(Vector2I Cell, double Price)>();
+        // 可负担候选分两组：达标集（按分加权抽签）与全集最高分（兜底）
+        var qualified = new List<(Vector2I Cell, double Price, double Weight)>();
         Vector2I bestFallback = default;
         double bestScore = double.MinValue, bestPrice = 0;
         bool afford = false;
@@ -254,7 +254,7 @@ public class ZoneGrowthSystem
                 continue; // 该地段负担不起
             afford = true;
             if (score >= GrowthConfig.SiteThreshold)
-                qualified.Add((c, price));
+                qualified.Add((c, price, GrowthConfig.SiteWeightOf(score)));
             if (score > bestScore)
             {
                 bestScore = score;
@@ -266,11 +266,11 @@ public class ZoneGrowthSystem
         if (!afford)
             return false; // 全买不起 / 无合法落位
     
-        // 达标候选中随机挑一处（各候选均“足够好”，不强求最优）；无达标者退而取全集最高分
+        // 达标候选按分数加权抽签：邻居多/地段好处大概率中签，达标冷清处仍有小概率；无达标者退取全集最高分
         Vector2I chosen;
         if (qualified.Count > 0)
         {
-            var pick = qualified[_siteRng.Next(qualified.Count)];
+            var pick = qualified[WeightedPick(qualified)];
             chosen = pick.Cell;
             cost = pick.Price;
         }
@@ -286,6 +286,22 @@ public class ZoneGrowthSystem
 
     /// <summary>选址随机源（静态方法内使用，与实例 _rng 分开）。</summary>
     private static readonly Random _siteRng = new();
+
+    /// <summary>按权重轮盘抽签：返回中签候选的下标（总权重内掏一点，逐个扣减定位）。</summary>
+    private static int WeightedPick(List<(Vector2I Cell, double Price, double Weight)> cands)
+    {
+        double total = 0;
+        foreach (var q in cands)
+            total += q.Weight;
+        double roll = _siteRng.NextDouble() * total;
+        for (int i = 0; i < cands.Count; i++)
+        {
+            roll -= cands[i].Weight;
+            if (roll <= 0)
+                return i;
+        }
+        return cands.Count - 1; // 浮点尾差兜底
+    }
 
     /// <summary>全局唯一王爷府的占地中心（无则 null）：供“近府邸”选址加成。</summary>
     private static Vector2I? PrinceMansionCenter(GameState gs)
@@ -309,12 +325,14 @@ public class ZoneGrowthSystem
         return PrinceMansionConfig.SiteScore * (1.0 - (double)d / PrinceMansionConfig.SiteRadius);
     }
 
-    /// <summary>选址叠加打分：占地外扩 SiteScanDist 米内含主路/辅路/河道/已有建筑（含水井）各计一次分，
-    /// 可叠加——河边十字路口（主+辅+河）分最高；自带小路不计分（到处都有，无区分度）。</summary>
+    /// <summary>选址叠加打分：占地外扩 SiteScanDist 米内——主路/辅路/河道各计一次分，
+    /// 邻居按密度计分（每栋建筑去重计分，栋数封顶）：邻居越多越想挨着建，使民居成片聚居；
+    /// 可叠加——河边十字路口且邻居多处分最高；自带小路不计分（到处都有，无区分度）。</summary>
     private static double SiteScore(GameState gs, Vector2I origin, int sx, int sy)
     {
         int r = GrowthConfig.SiteScanDist;
-        bool hasMain = false, hasSide = false, hasRiver = false, hasNeighbor = false;
+        bool hasMain = false, hasSide = false, hasRiver = false;
+        var neighborIds = new HashSet<int>(); // 邻近建筑按实例去重，防大占地（如王爷府）按格数灌分
         for (int x = origin.X - r; x < origin.X + sx + r; x++)
         {
             for (int y = origin.Y - r; y < origin.Y + sy + r; y++)
@@ -332,14 +350,16 @@ public class ZoneGrowthSystem
                 if (cell.HasWater)
                     hasRiver = true;
                 if (cell.BuildingId >= 0)
-                    hasNeighbor = true; // 水井或任意已有建筑（有人烟/设施的地方）
+                    neighborIds.Add(cell.BuildingId); // 水井或任意已有建筑（有人烟/设施的地方）
             }
         }
         double score = 0;
         if (hasMain) score += GrowthConfig.SiteMainRoadScore;
         if (hasSide) score += GrowthConfig.SiteSideRoadScore;
         if (hasRiver) score += GrowthConfig.SiteRiverScore;
-        if (hasNeighbor) score += GrowthConfig.SiteNeighborScore;
+        // 邻居密度：每栋加分、栋数封顶（3 栋即与主路同档，聚落可脱离主辅路向外扩片）
+        score += GrowthConfig.SiteNeighborScorePerBuilding
+            * Math.Min(neighborIds.Count, GrowthConfig.SiteNeighborCountCap);
         return score;
     }
 

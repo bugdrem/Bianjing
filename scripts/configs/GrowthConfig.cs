@@ -20,15 +20,28 @@ public static class GrowthConfig
     /// <summary>选址扫描半径（米）：占地外扩此距内找偏好要素（主/辅路、河道、邻居）。</summary>
     public const int SiteScanDist = 4;
 
-    /// <summary>选址分项：主路 / 辅路 / 河道 / 水井或已有建筑（各计一次，可叠加）。</summary>
+    /// <summary>选址分项：主路 / 辅路 / 河道各计一次，可叠加；邻居改按密度计分（见下）。</summary>
     public const double SiteMainRoadScore = 3;
     public const double SiteSideRoadScore = 2;
     public const double SiteRiverScore = 1.5;
-    public const double SiteNeighborScore = 1;
 
-    /// <summary>选址“足够好”阈值：达标候选中随机挑一处（不逐最优，避免村民一味沿路排屋）；
+    /// <summary>邻居密度计分：扫描范围内每栋建筑（按实例去重）加此分，计分栋数封顶——
+    /// 3 栋即满 3.6 分与主路同档，使民居明显倾向贴着已有建筑成片聚居（可脱离主辅路向外扩片）。</summary>
+    public const double SiteNeighborScorePerBuilding = 1.2;
+    public const int SiteNeighborCountCap = 3;
+
+    /// <summary>选址“足够好”阈值：达标候选按分数加权抽签（见 SiteWeightOf）；
     /// 无达标者退而选可负担候选中分最高处。</summary>
     public const double SiteThreshold = 3;
+
+    /// <summary>加权抽签的分数幂次：权重 = 分数^此幂——越大越向高分地段（邻居多/地段好）集中，
+    /// 但达标的冷清地段仍保留小概率中签（如两个十字路口一热闹一空旷：大部分人挨着热闹处建，
+    /// 少量人仍去空旷路口落户）。</summary>
+    public const double SitePickPower = 2;
+
+    /// <summary>公式：选址分 → 抽签权重（幂次放大分差；下限 0.1 防零分候选权重归零）。</summary>
+    public static double SiteWeightOf(double score) =>
+        Math.Pow(Math.Max(0.1, score), SitePickPower);
 
     /// <summary>每点选址分的地价系数：贴主路/临河等好地段越贵。</summary>
     public const double LandPricePerScore = 5;
