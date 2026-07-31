@@ -14,23 +14,23 @@ namespace Bianjing;
 /// </summary>
 public partial class CitizenAgent : Node3D
 {
-    // 调参均集中在 configs 目录（MovementConfig/AgentConfig），此处只留短名转发便于阅读
+    // 调参均集中在 configs 目录（MovementConfig/VillagerConfig），此处只留短名转发便于阅读
     private const float BaseSpeed = MovementConfig.BaseSpeed;
     private const float OffRoadFactor = MovementConfig.OffRoadFactor; // 脱离道路的减速惩罚
-    private const float TiredThreshold = AgentConfig.TiredThreshold;
-    private const float BoredThreshold = AgentConfig.BoredThreshold;
+    private const float TiredThreshold = VillagerConfig.TiredThreshold;
+    private const float BoredThreshold = VillagerConfig.BoredThreshold;
     private const float StayUntilDone = 9999f; // 驻留到条件触发（如下班）而非计时（程序哨兵值非调参）
-    private const float LaneJitterRange = AgentConfig.LaneJitterRange; // 车道偏移幅度
-    private const float ChopDamage = AgentConfig.ChopDamage; // 每斧砍伐伤害
-    private const double WoodPerHp = AgentConfig.WoodPerHp; // 血量→柴薪折算：一斧恰好一担
+    private const float LaneJitterRange = VillagerConfig.LaneJitterRange; // 车道偏移幅度
+    private const float ChopDamage = VillagerConfig.ChopDamage; // 每斧砍伐伤害
+    private const double WoodPerHp = VillagerConfig.WoodPerHp; // 血量→柴薪折算：一斧恰好一担
 
     // 家庭储备目标（份/人）：低于目标一半触发补货/打水，补到目标为止
-    private const double FoodPerResident = AgentConfig.FoodPerResident;
-    private const double WoodPerResident = AgentConfig.WoodPerResident;
-    private const double WaterPerResident = AgentConfig.WaterPerResident;
+    private const double FoodPerResident = VillagerConfig.FoodPerResident;
+    private const double WoodPerResident = VillagerConfig.WoodPerResident;
+    private const double WaterPerResident = VillagerConfig.WaterPerResident;
 
-    /// <summary>就近采集半径（米，见 AgentConfig）：打水不受此限。</summary>
-    private const int ForageRadius = AgentConfig.ForageRadius;
+    /// <summary>就近采集半径（米，见 VillagerConfig）：打水不受此限。</summary>
+    private const int ForageRadius = VillagerConfig.ForageRadius;
 
     public Citizen C { get; }
 
@@ -390,7 +390,7 @@ public partial class CitizenAgent : Node3D
         }
 
         if (C.Gender == Gender.Female && C.IsMarried && C.Activity != ActivityType.Shopping
-            && _rng.NextDouble() < AgentConfig.HousewifeShopChance)
+            && _rng.NextDouble() < VillagerConfig.HousewifeShopChance)
         {
             // 主妇：外出采购，回程自然衔接下次决策
             StartActivity(ActivityType.Shopping, ShoppingAnchor(gs), 2.5f);
@@ -399,7 +399,7 @@ public partial class CitizenAgent : Node3D
 
         if (C.IsElder)
         {
-            if (_rng.NextDouble() < AgentConfig.ElderStrollChance)
+            if (_rng.NextDouble() < VillagerConfig.ElderStrollChance)
                 StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);
             else
                 StartRestHome(gs, 4f);
@@ -489,11 +489,11 @@ public partial class CitizenAgent : Node3D
 
     /// <summary>今日是否为本人的休息日：按绝对天数每 RestCycleDays 天休一天，叠加个体 Id 错峰（不全城同日停工）。</summary>
     private bool IsRestDayToday()
-        => (_clock.AbsoluteDay + C.Id) % ScheduleConfig.RestCycleDays == 0;
+        => (_clock.AbsoluteDay + C.Id) % TimeConfig.RestCycleDays == 0;
 
     /// <summary>当前是否处于上班时段（早晨上工、下午收工，不含收工时）。</summary>
     private bool IsWorkHourNow()
-        => _clock.Hour >= ScheduleConfig.WorkStartHour && _clock.Hour < ScheduleConfig.WorkEndHour;
+        => _clock.Hour >= TimeConfig.WorkStartHour && _clock.Hour < TimeConfig.WorkEndHour;
 
     /// <summary>当前是否该上工（非休息日且处于上班时段）：驻工下班判定用。</summary>
     private bool IsWorkTimeNow() => !IsRestDayToday() && IsWorkHourNow();
@@ -532,7 +532,7 @@ public partial class CitizenAgent : Node3D
 
     /// <summary>是否已退休：过退休年龄且已离岗（无业）的成年人（致仕判定在数据层 JobSystem）。</summary>
     private bool IsRetiredNow()
-        => C.JobKind == JobKind.None && !C.IsChild && C.AgeYears >= RetireConfig.Age;
+        => C.JobKind == JobKind.None && !C.IsChild && C.AgeYears >= LifeConfig.RetireAge;
 
     /// <summary>退休生活安排：家中告急仍去补（打水/采购/自采，属“采集等”范畴）；
     /// 否则：富裕家庭闲逛消遣，寒门则上山采薪采果补贴家用。</summary>
@@ -566,7 +566,7 @@ public partial class CitizenAgent : Node3D
             perCapita = fam.TotalAssets(gs) / fam.MemberIds.Count;
         else
             perCapita = C.Money;
-        return perCapita >= RetireConfig.WealthyPerCapitaAssets;
+        return perCapita >= LifeConfig.WealthyPerCapitaAssets;
     }
 
     /// <summary>闲逛消遣（退休富户/闲人）：当前仅四处闲逛。
@@ -726,7 +726,7 @@ public partial class CitizenAgent : Node3D
     }
 
     /// <summary>市集每货备货线（份）：市集存量低于此线即构成收购需求。</summary>
-    private const double MarketStockLine = 20;
+    private const double MarketStockLine = EconomyConfig.MarketStockLine;
 
     /// <summary>找对某原始货品有收购需求的建筑（null=全城无需求）：市集备货线以下 /
     /// 专营该货铺面半仓以下 / 工坊商铺配方原料不足两担；各条款均叠加在途认领量再比较，
@@ -811,7 +811,7 @@ public partial class CitizenAgent : Node3D
     // ---- 工坊/商铺物流：补料与成品外销 ----
 
     /// <summary>采买判定半径（米）：此范围内有备货的市集/铺面就去买，否则自主采集。</summary>
-    private const int BuySearchRadius = 160;
+    private const int BuySearchRadius = EconomyConfig.BuySearchRadius;
 
     /// <summary>工坊/商铺雇工的物流决策：
     /// 1) 工坊成品攒够一担 → 挑去商铺寄卖（商铺自产自销不外运）；

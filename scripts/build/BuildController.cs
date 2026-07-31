@@ -424,7 +424,8 @@ public partial class BuildController : Node
 
         var gs = GameState.I;
         const float step = MapGrid.CellSize / 2f; // 半格步长，不漏格不超距
-        const float maxObjTop = 22f; // 石峰 15m + 峰上树 + 余量：此高度以上无可拾物件，直接快进
+        // 最高可拾面：地形最高海拔（随 TerrainConfig 联动，免硬编码过时）+ 峰上树冠/最高建筑余量；其上无可拾物件，直接快进
+        const float maxObjTop = (TerrainConfig.MaxMountainLayer - TerrainConfig.BaseLayers) * TerrainConfig.LayerHeight + 7.5f;
         float t = from.Y > maxObjTop ? (maxObjTop - from.Y) / dir.Y : 0f;
 
         for (int i = 0; i < 4096; i++, t += step)

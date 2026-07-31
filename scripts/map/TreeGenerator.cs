@@ -11,13 +11,13 @@ namespace Bianjing;
 public static class TreeGenerator
 {
     /// <summary>密度阈值：噪声值低于此线的格子无树（决定林地覆盖率）。</summary>
-    private const float Threshold = 0.55f;
+    private const float Threshold = PlantConfig.ForestNoiseThreshold;
 
     /// <summary>密核落树概率上限（棵/格）：约 0.2 已是遮天蔽日的密林观感。</summary>
-    private const float MaxDensity = 0.2f;
+    private const float MaxDensity = PlantConfig.ForestMaxDensity;
 
     /// <summary>初始树木目标总量（校准基准；此后由月度散播自然消长，上限 MaxPlants）。</summary>
-    private const int TargetTrees = 5000;
+    private const int TargetTrees = PlantConfig.InitialTreeTarget;
 
     public static void Scatter(GameState gs, Random rng)
     {

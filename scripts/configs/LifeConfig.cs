@@ -3,7 +3,8 @@ using System;
 namespace Bianjing;
 
 /// <summary>
-/// 寿命与死亡配置：年龄门槛与 Gompertz 死亡率曲线（业务归属：LifecycleSystem 老化/死亡，Citizen 派生属性）。
+/// 寿命与死亡配置：年龄门槛（含致仕）与 Gompertz 死亡率曲线
+/// （业务归属：LifecycleSystem 老化/死亡，Citizen 派生属性，JobSystem 退休判定，CitizenAgent 退休行为）。
 /// 死亡率模型：年死亡率 = 基础底噪 + 幅值 A × e^((age-陡增起点)/尺度)，主要死亡区间约 55-65 岁；
 /// 健康值经放大系数影响死亡率（当前健康恒满为中性，健康系统接入后自动生效）。
 /// </summary>
@@ -24,6 +25,17 @@ public static class LifeConfig
     /// <summary>生育年龄区间（岁）：下限同成年门槛，上限见此。</summary>
     public const int FertileMinAgeYears = AdultAgeYears;
     public const int FertileMaxAgeYears = 45;
+
+    // ---- 致仕（原 RetireConfig 并入）：退休年龄与退休后的行为分流 ----
+
+    /// <summary>普通雇工退休年龄（岁）：达此退出当前岗位。</summary>
+    public const int RetireAge = 50;
+
+    /// <summary>店主/家族产业内的人延迟退休年龄（岁）。</summary>
+    public const int FamilyBusinessRetireAge = 60;
+
+    /// <summary>家庭人均资产高于此视为富裕（退休后闲逛而非采集）。</summary>
+    public const double WealthyPerCapitaAssets = 200;
 
     /// <summary>任何年龄的基础年死亡率（意外/疾病等与龄无关的底噪）。</summary>
     public const float BaseAnnualMortality = 0.005f;

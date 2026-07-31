@@ -36,7 +36,7 @@ public class DesirabilitySystem
         }
 
         // 道路也带来临街吸引力：主路/辅路小量叠加，桥面（RoadKind.None）不加成；
-        // 幅度/归一系数/泼溅半径均见 configs/DesirabilityConfig；
+        // 幅度/归一系数/泼溅半径均见 configs/GrowthConfig 吸引力段；
         // 只遍历增量维护的道路格列表，大地图下不再全图扫描
         foreach (var rc in gs.RoadCells)
         {
@@ -45,13 +45,13 @@ public class DesirabilitySystem
                 continue;
             float bonus = cell.RoadKind switch
             {
-                RoadKind.Main => DesirabilityConfig.MainRoadBonus / DesirabilityConfig.RoadBonusScale,
-                RoadKind.Side => DesirabilityConfig.SideRoadBonus / DesirabilityConfig.RoadBonusScale,
+                RoadKind.Main => GrowthConfig.DesirMainRoadBonus / GrowthConfig.DesirRoadScale,
+                RoadKind.Side => GrowthConfig.DesirSideRoadBonus / GrowthConfig.DesirRoadScale,
                 _ => 0f,
             };
             if (bonus <= 0f)
                 continue;
-            SplatCell(gs, rc.X, rc.Y, bonus, DesirabilityConfig.RoadRadius);
+            SplatCell(gs, rc.X, rc.Y, bonus, GrowthConfig.DesirRoadRadius);
         }
     }
 

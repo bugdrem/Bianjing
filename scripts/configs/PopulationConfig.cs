@@ -3,8 +3,9 @@ using System;
 namespace Bianjing;
 
 /// <summary>
-/// 人口配置：迁入/婚配/生育/交友/迁出的日月频概率与生育概率公式
-/// （业务归属：LifecycleSystem——概率均为「日频」直接取值，1x 下一游戏日 ≈ 20 现实秒）。
+/// 人口配置：迁入/婚配/生育/交友/迁出的日月频概率、生育概率公式与流民自带资产
+/// （业务归属：LifecycleSystem——概率均为「日频」直接取值，1x 下一游戏日 ≈ 20 现实秒；
+/// 人口增长靠「迁入+分家建房」驱动，迁入细则见文中「迁入」段）。
 /// </summary>
 public static class PopulationConfig
 {
@@ -52,6 +53,23 @@ public static class PopulationConfig
 
     /// <summary>成年分家新立家庭的初始公产（贯）。</summary>
     public const double SplitFamilyAssets = 15;
+
+    // ---- 迁入（原 ImmigrationConfig 并入）：流民自带资产与自建门槛 ----
+
+    /// <summary>迁入者随机自带资产区间（家庭公产初值，扣除建房地价后余额入公产）。</summary>
+    public const double ArriveAssetsMin = 20;
+    public const double ArriveAssetsMax = 120;
+
+    /// <summary>单身自建住宅门槛：资产达此值且有合法落位才自建，否则寄居店坊当暂住雇工。</summary>
+    public const double SelfBuildAssets = 80;
+
+    /// <summary>迁入成人的年龄区间（起始岁数 + 随机跨度）。</summary>
+    public const int ArriveAgeMin = 18;
+    public const int ArriveAgeSpan = 18;
+
+    /// <summary>迁入成人的随身私产区间（起始 + 随机跨度，贯）。</summary>
+    public const double ArriveMoneyMin = 10;
+    public const double ArriveMoneySpan = 20;
 
     /// <summary>公式：胎次 → 生育系数（1~3 胎最大，之后递减，第六胎起指数衰减永不归零）。</summary>
     public static double BirthCountFactor(int kids) =>

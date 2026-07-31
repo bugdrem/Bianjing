@@ -1,7 +1,8 @@
 namespace Bianjing;
 
 /// <summary>
-/// 植物配置：树林消长、挂果落果与血量制砍伐（业务归属：PlantGrowthSystem 生长驱动、PlantObj 派生属性）。
+/// 植物配置：开局树林生成、树林消长、挂果落果与血量制砍伐
+/// （业务归属：TreeGenerator 开局播种、PlantGrowthSystem 生长驱动、PlantObj 派生属性）。
 /// 血量模型：满血上限随树龄按米氏式渐进增长（永不超过 BaseHp+HpGainCap），
 /// 0月=20，1年≈47，2年=60，5年≈77，20年≈93。
 /// </summary>
@@ -9,6 +10,17 @@ public static class PlantConfig
 {
     /// <summary>全图植物上限，防树林无限蔓延吞噬地图（世界面积扩大四倍后同比上调）。</summary>
     public const int MaxPlants = 8800;
+
+    // ---- 开局树林生成（TreeGenerator 密度场方案）----
+
+    /// <summary>密度阈值：噪声值低于此线的格子无树（决定林地覆盖率）。</summary>
+    public const float ForestNoiseThreshold = 0.55f;
+
+    /// <summary>密核落树概率上限（棵/格）：约 0.2 已是遮天蔽日的密林观感。</summary>
+    public const float ForestMaxDensity = 0.2f;
+
+    /// <summary>初始树木目标总量（校准基准；此后由月度散播自然消长，上限 MaxPlants）。</summary>
+    public const int InitialTreeTarget = 5000;
 
     /// <summary>成熟大树每月散播幼体概率与散播范围（±米，幼体继承母树类型）。</summary>
     public const float SeedChance = 0.03f;

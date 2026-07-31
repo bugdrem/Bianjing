@@ -11,12 +11,12 @@ namespace Bianjing;
 /// </summary>
 public class MaintenanceSystem
 {
-    // 全部调参转发自 MaintenanceConfig（调参集中在 configs 目录）
-    private static float AgingPerMonth => MaintenanceConfig.AgingPerMonth;
-    private static float RepairPerWorker => MaintenanceConfig.RepairPerWorker;
-    private static double RepairWorkerCost => MaintenanceConfig.RepairWorkerCost;
-    private static float ResidentRepairAmount => MaintenanceConfig.ResidentRepairAmount;
-    private static double RepairFeePerResident => MaintenanceConfig.RepairFeePerResident;
+    // 全部调参转发自 EconomyConfig（调参集中在 configs 目录）
+    private static float AgingPerMonth => EconomyConfig.BuildingAgingPerMonth;
+    private static float RepairPerWorker => EconomyConfig.RepairPerWorker;
+    private static double RepairWorkerCost => EconomyConfig.RepairWorkerCost;
+    private static float ResidentRepairAmount => EconomyConfig.ResidentRepairAmount;
+    private static double RepairFeePerResident => EconomyConfig.RepairFeePerResident;
 
     private static int Days => GameClock.DaysPerMonth;
 

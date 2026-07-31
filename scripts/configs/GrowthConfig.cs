@@ -63,6 +63,19 @@ public static class GrowthConfig
     /// <summary>住宅扩建边长上限（米）。</summary>
     public const int ExpandMaxSide = 8;
 
+    // ---- 吸引力（原 DesirabilityConfig 并入）：道路临街加成，业务归属 DesirabilitySystem；
+    // 建筑自身的加成/污染在 buildings.json 的 desirabilityBonus/pollution 字段，数据驱动不在此 ----
+
+    /// <summary>主路 / 辅路每格的吸引力幅度（除以密度归一系数后泼溅；桥面不加成）。</summary>
+    public const float DesirMainRoadBonus = 1.0f;
+    public const float DesirSideRoadBonus = 0.4f;
+
+    /// <summary>幅度归一系数（1m 格密度是旧版 4m 格的 16 倍，不除会把吸引力场吹胀十几倍）。</summary>
+    public const float DesirRoadScale = 16f;
+
+    /// <summary>道路吸引力泼溅半径（米，线性衰减）。</summary>
+    public const float DesirRoadRadius = 12f;
+
     // ---- 转业 ----
 
     /// <summary>住宅转业（商铺/工坊）的最小占地（平米）：起步 2×2=4，扩建一次（2×3=6）即够格开店。</summary>

@@ -2,6 +2,23 @@
 
 按批次记录每次调整的要点（新规则起始于批次二十五；更早批次的详情见计划文档归档）。
 
+## 批次四十二（2026-07-28）重构：配置类按业务合并 + 散落控制常量收编 configs
+
+- 配置类合并（21 → 14 个，数值全部不变）：ScheduleConfig→TimeConfig（时间+作息）、
+  ImmigrationConfig→PopulationConfig（人口+迁入）、RetireConfig→LifeConfig（寿命+致仕）、
+  Jobs/Maintenance/TaxConfig→EconomyConfig（经济+家计/修缮/税制）、DesirabilityConfig→GrowthConfig
+  （生长+吸引力）、AgentConfig→VillagerConfig（村民模型+行为层）。改名消歧义：
+  Age→RetireAge、FamilyBusinessAge→FamilyBusinessRetireAge、AssetsMin/Max→ArriveAssetsMin/Max、
+  RatePerLevel→TaxRatePerLevel、AgingPerMonth→BuildingAgingPerMonth、吸引力四项加 Desir 前缀。
+- 散落控制常量收编：新建 CameraConfig（相机距离/俯仰/屏缘推移五参数，原 RtsCameraRig 硬编码）；
+  树林生成三参数（噪声阈值/密度上限/初始树数）入 PlantConfig；市集备货线与采买半径入
+  EconomyConfig；主/辅路宽与桥宽入 WorldConfig（GameState 保留转发）。
+- 修复○BuildController 拾取高度上限 22f 硬编码：改为由 TerrainConfig 最高层推导的 const 表达式
+  （同值），地形参数改动后不再静默过时。
+- 有意不收编（表现层/数据表）：渲染色板、UI 尺寸与刷新间隔、活动手感参数；
+  Goods/Milestones/TaxDefs/NameGenerator 属数据定义模块（mod 可扩展），维持原位。
+- 无存档格式变动。编译 0 警告 0 错误，CodeReview 全部检查项通过。
+
 ## 批次四十一（2026-07-28）调整：建房选址更倾向已有建筑旁（邻居密度计分 + 加权抽签）
 
 - 邻居项由布尔加分（有无建筑一律 +1，四项垫底）改为密度计分：扫描范围内每栋建筑

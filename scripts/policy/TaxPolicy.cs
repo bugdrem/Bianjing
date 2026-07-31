@@ -27,8 +27,8 @@ public static class TaxDefs
             Id = "land",
             Name = "田赋（两税）",
             Description = "基础经济层：按粮田与在籍户数征收",
-            MonthlyBase = gs => gs.CountByDef("farm") * TaxConfig.FarmBasePerFarm
-                + gs.Families.Count * TaxConfig.FarmBasePerFamily,
+            MonthlyBase = gs => gs.CountByDef("farm") * EconomyConfig.FarmBasePerFarm
+                + gs.Families.Count * EconomyConfig.FarmBasePerFamily,
         },
         new TaxDef
         {
@@ -49,7 +49,7 @@ public static class TaxDefs
             Id = "maritime",
             Name = "市舶税（海外关税）",
             Description = "探索与扩张层：需开设港口市舶司（待后续版本）",
-            MonthlyBase = gs => SumTaxBonus(gs, "port") + gs.CountByDef("port") * TaxConfig.PortBasePerPort,
+            MonthlyBase = gs => SumTaxBonus(gs, "port") + gs.CountByDef("port") * EconomyConfig.PortBasePerPort,
         },
     };
 
@@ -76,6 +76,6 @@ public class TaxPolicy
 
     public void SetLevel(string taxId, int level) => Levels[taxId] = Math.Clamp(level, 0, MaxLevel);
 
-    /// <summary>档位税率倍数（步长取自 TaxConfig）：免征0 / 轻0.5 / 中1.0 / 重1.5。</summary>
-    public static double RateOf(int level) => level * TaxConfig.RatePerLevel;
+    /// <summary>档位税率倍数（步长取自 EconomyConfig）：免征0 / 轻0.5 / 中1.0 / 重1.5。</summary>
+    public static double RateOf(int level) => level * EconomyConfig.TaxRatePerLevel;
 }

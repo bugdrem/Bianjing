@@ -15,11 +15,11 @@ public class GameState
     /// <summary>两种道路造价（每延米，不计宽度，调参见 configs/WorldConfig）。</summary>
     public static int RoadCostOf(RoadKind kind) => kind == RoadKind.Main ? WorldConfig.MainRoadCost : WorldConfig.SideRoadCost;
 
-    /// <summary>道路占地宽度（米/格）：主路 4，辅路 2。</summary>
-    public static int RoadWidthOf(RoadKind kind) => kind == RoadKind.Main ? 4 : 2;
+    /// <summary>道路占地宽度（米/格，调参见 configs/WorldConfig）。</summary>
+    public static int RoadWidthOf(RoadKind kind) => kind == RoadKind.Main ? WorldConfig.MainRoadWidth : WorldConfig.SideRoadWidth;
 
-    /// <summary>桥梁宽度（米/格）。</summary>
-    public const int BridgeWidth = 4;
+    /// <summary>桥梁宽度（米/格，调参见 configs/WorldConfig）。</summary>
+    public const int BridgeWidth = WorldConfig.BridgeWidth;
 
     /// <summary>城市名（新建游戏时命名，随存档保存）。</summary>
     public string CityName = "汴京";

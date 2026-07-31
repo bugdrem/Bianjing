@@ -151,7 +151,7 @@ public class LifecycleSystem
         if (_rng.NextDouble() < SingleChancePerDay)
         {
             double assets = RandomImmigrantAssets();
-            if (assets >= ImmigrationConfig.SelfBuildAssets
+            if (assets >= PopulationConfig.SelfBuildAssets
                 && ZoneGrowthSystem.TryBuildHouse(gs, assets, out var house, out double cost))
             {
                 SpawnSingle(gs, house, occupancy, assets - cost, false);
@@ -168,8 +168,8 @@ public class LifecycleSystem
 
     /// <summary>迁入者随机自带资产（家庭公产初值）。</summary>
     private double RandomImmigrantAssets()
-        => ImmigrationConfig.AssetsMin
-           + _rng.NextDouble() * (ImmigrationConfig.AssetsMax - ImmigrationConfig.AssetsMin);
+        => PopulationConfig.ArriveAssetsMin
+           + _rng.NextDouble() * (PopulationConfig.ArriveAssetsMax - PopulationConfig.ArriveAssetsMin);
 
     /// <summary>找可寄居的工坊/商铺（居住格未满，BuildingOccupancy &lt; 容量）；无则 null。</summary>
     private static BuildingInstance FindLodging(GameState gs)
@@ -273,9 +273,9 @@ public class LifecycleSystem
             Surname = surname,
             Name = fullName,
             Gender = gender,
-            // 迁入成人的年龄与随身私产：区间取自 ImmigrationConfig（钱为整数贯，同旧版分布）
-            AgeMonths = (ImmigrationConfig.ArriveAgeMin + _rng.Next(ImmigrationConfig.ArriveAgeSpan)) * 12 + _rng.Next(12),
-            Money = ImmigrationConfig.ArriveMoneyMin + _rng.Next((int)ImmigrationConfig.ArriveMoneySpan),
+            // 迁入成人的年龄与随身私产：区间取自 PopulationConfig（钱为整数贯，同旧版分布）
+            AgeMonths = (PopulationConfig.ArriveAgeMin + _rng.Next(PopulationConfig.ArriveAgeSpan)) * 12 + _rng.Next(12),
+            Money = PopulationConfig.ArriveMoneyMin + _rng.Next((int)PopulationConfig.ArriveMoneySpan),
         });
     }
 
@@ -614,7 +614,7 @@ public class LifecycleSystem
             if (c.FamilyId >= 0 && !seen.Add(c.FamilyId))
                 continue; // 同家庭只处理一次
             double budget = FamilyPerCapitaAssets(gs, c);
-            if (budget < ImmigrationConfig.SelfBuildAssets)
+            if (budget < PopulationConfig.SelfBuildAssets)
                 continue;
             if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var house, out double cost))
                 MoveFamilyToNewHouse(gs, c, house, occupancy, cost);
