@@ -15,6 +15,10 @@ public class HeightField
     /// <summary>顶点高度数组（行主序 vy*VertsPerSide+vx），米。</summary>
     private readonly float[] _h = new float[VertsPerSide * VertsPerSide];
 
+    /// <summary>原始顶点数组直接访问（行主序）：仅供世界生成期批量写入/水力侵蚀使用，
+    /// 常规读写一律走 VertexH/SetVertex（越界钳制/忽略语义）。</summary>
+    public float[] Raw => _h;
+
     /// <summary>顶点读（越界钳制到边缘，图外视同边缘高度）。</summary>
     public float VertexH(int vx, int vy)
     {

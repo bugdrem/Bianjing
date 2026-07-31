@@ -32,8 +32,18 @@ public partial class Main : Node3D
         GameSettings.Apply();
 
         GameState.I = new GameState(BuildingDef.LoadAll());
-        SeedWorld();
 
+        // 世界生成走后台线程（此时渲染节点未建，生成只动纯数据 Map/Plants/Animals，线程安全）；
+        // 加载画面主线程轮询进度，完成回调 FinishSetup 装配全部节点与系统
+        var loading = new LoadingScreen(GameState.I.CityName) { OnFinished = FinishSetup };
+        AddChild(loading);
+        WorldGenerator.GenerateAsync(GameState.I);
+    }
+
+    /// <summary>世界生成完毕后的装配收尾（主线程）：环境/渲染器/相机/时钟/系统/HUD/菜单。
+    /// GameMenu 最后加入并自行暂停全树展示主菜单。</summary>
+    private void FinishSetup()
+    {
         SetupEnvironment();
 
         var renderer = new GridRenderer();
@@ -154,31 +164,32 @@ public partial class Main : Node3D
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
 
-    /// <summary>新地图初始化：先隆起山体地形，再开凿河道（按深度下压河床，岸形自然涌现），后铺树投放野物。</summary>
-    private static void SeedWorld()
-    {
-        var rng = new Random();
-        MountainGenerator.Raise(GameState.I.Map, rng); // 地形先行：河流其后切地而过，高地成峡、平原成滩
-        RiverGenerator.Carve(GameState.I.Map, rng);
-        TreeGenerator.Scatter(GameState.I, rng);
-        new WildlifeSystem().SeedInitial(GameState.I);
-    }
-
-    /// <summary>新建城池：重置世界、重新生成地表、归零日历。</summary>
+    /// <summary>新建城池：重置世界数据后全树暂停，挂加载画面走后台生成；
+    /// 完成回调（主线程）恢复暂停、归零日历并广播刷新（渲染器据 MapChanged 全量重建）。</summary>
     private void NewGame(string cityName)
     {
         GameState.I = new GameState(GameState.I.Defs) { CityName = cityName };
-        SeedWorld();
-        _clock.SetDate(1, 1);
-        _autoSaveTimer = 0f;
 
-        GameState.I.CurYear = 1;
-        GameState.I.CurMonth = 1;
+        // 生成期间整树暂停（LoadingScreen 自身 ProcessMode=Always 不受影响），防系统碰半成品数据
+        GetTree().Paused = true;
+        var loading = new LoadingScreen(cityName)
+        {
+            OnFinished = () =>
+            {
+                GetTree().Paused = false;
+                _clock.SetDate(1, 1);
+                _autoSaveTimer = 0f;
+                GameState.I.CurYear = 1;
+                GameState.I.CurMonth = 1;
 
-        EventBus.RaiseMapChanged();
-        EventBus.RaiseZonesChanged();
-        EventBus.RaiseStatsChanged();
-        EventBus.RaiseGameLoaded();
+                EventBus.RaiseMapChanged();
+                EventBus.RaiseZonesChanged();
+                EventBus.RaiseStatsChanged();
+                EventBus.RaiseGameLoaded();
+            },
+        };
+        AddChild(loading);
+        WorldGenerator.GenerateAsync(GameState.I);
     }
 
     private void SaveNamed(string saveName)

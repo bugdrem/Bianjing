@@ -3,12 +3,12 @@ using System;
 namespace Bianjing;
 
 /// <summary>
-/// 地形配置：顶点级 float 高度场（灰度地图）与坡度规则（业务归属：MountainGenerator 生成、
-/// GridRenderer 三角网格渲染、CitizenAgent 通行、PlacementValidator 建造校验、HeightField 数据）。
-/// 模型：全图 (Size+1)² 顶点高度，y=0 为平原基准；水面统一 WaterConfig.WaterLevel（-0.5m），
-/// 河床由水系生成按深度下压顶点（岸形随地势自然呈浅滩或陡岸）。
-/// 图缘山带铺连绵群山（约半图），平原上另散布可走缓丘；
-/// 建筑落位自动整平垫基（占地高差在限内即可建，放置时压平成台面）。
+/// 地形配置：顶点级 float 高度场（灰度地图）与坡度规则（业务归属：WorldSketch 草图规划、
+/// HydraulicEroder 水力侵蚀、WorldGenerator 生成管线、GridRenderer 渲染、CitizenAgent 通行、
+/// PlacementValidator 建造校验、HeightField 数据）。
+/// 生成模型（批次四十九起）：128² 内存草图先定宏观大势——西北高东南低、峰点半包围、
+/// 谷线河湖、山脊连接——再上采样映射 1025² 顶点并做水力侵蚀 + fBm 细节。
+/// 地形为纯地貌生成，不为通行让步；村民由 Traversable/垫基/采集豁免等机制就地适配。
 /// 地形仅世界生成期成形 + 垫基修改，后期玩家升降地形复用 HeightField 顶点写接口。
 /// </summary>
 public static class TerrainConfig
@@ -24,61 +24,116 @@ public static class TerrainConfig
     /// <summary>整平垫基允许的占地最大高差（米）：占地内最高-最低顶点超过此值不可落建筑。</summary>
     public const float MaxBuildFlattenDiff = 1.0f;
 
-    /// <summary>世界最高海拔（米）：山脊顶上限。</summary>
+    /// <summary>世界最高海拔（米）：峰顶上限（映射/侵蚀后统一 clamp）。</summary>
     public const float MaxTerrainHeight = 64f;
 
-    // ---- 图缘山带（两条相邻图缘的连绵群山，L 形覆盖约半图，另半为平原）----
+    // ---- 草图规划（SketchSize² 内存小图：先宏观后细节）----
 
-    /// <summary>山带深度（米）：从所依两条图缘向内延伸此距——(1-300/1024)²≈0.5，恰好半图群山半图平原。</summary>
-    public const float BeltDepth = 300f;
+    /// <summary>草图边长（格）：128 → 映射比 8（1024/128），一草图格 = 8 米。</summary>
+    public const int SketchSize = 128;
 
-    /// <summary>山带基底最高附加高度（米）：向图缘平滑渐升的地貌基准（脊线叠其上成峰）。</summary>
-    public const float BeltBaseHeight = 6f;
+    /// <summary>草图格对应的世界米数（映射比）。</summary>
+    public const int SketchScale = MapGrid.Size / SketchSize;
 
-    /// <summary>山带边界扭曲噪声：波长（米）与推拉幅度（米），令山缘蜿蜒不成直线。</summary>
-    public const int BeltNoiseWave = 160;
-    public const float BeltNoiseAmp = 70f;
+    /// <summary>全图大势落差（米）：西北角基准高 → 东南角 0 的对角线性趋势，
+    /// 保证「西北高、东南低」，河流走线天然流向东南。</summary>
+    public const float TrendHeight = 6f;
 
-    // ---- 平原缓丘（平原地貌的低幅起伏）----
+    /// <summary>平原缓起伏 fBm：幅度（米）与波长（米）——替代旧缓丘，铺满全图的低频地貌。</summary>
+    public const float PlainFbmAmp = 1.5f;
+    public const int PlainFbmWaveMeters = 96;
 
-    /// <summary>缓丘最大附加高度（米）：噪声阈上平滑隆起的地貌幅度。</summary>
-    public const float HillAmplitude = 1.5f;
+    // ---- 峰点（西北半包围结构）----
 
-    /// <summary>缓丘噪声阈值（0-1）：噪声高于此才隆起，控制丘陵覆盖率（越高丘越稀、平地越多）。</summary>
-    public const float HillThreshold = 0.62f;
+    /// <summary>峰点数量范围（个）：撒在西北半包围带内，构成群山骨架。</summary>
+    public const int PeakCountMin = 8;
+    public const int PeakCountMax = 14;
 
-    /// <summary>缓丘噪声波长（米）：越大丘体越宽缓。</summary>
-    public const int HillWavelength = 48;
+    /// <summary>峰顶高度范围（米）：随机抽取（趋势与细节叠加后统一 clamp MaxTerrainHeight）。</summary>
+    public const float PeakHeightMin = 30f;
+    public const float PeakHeightMax = 62f;
 
-    // ---- 连绵山脉（起伏的山脊线，比缓丘高得多）----
+    /// <summary>单峰高斯锥半径范围（米）：越大山体越浑厚。</summary>
+    public const float PeakRadiusMin = 60f;
+    public const float PeakRadiusMax = 140f;
 
-    /// <summary>山脉数量范围（条脊线，集中生在图缘山带内叠在基底上）。</summary>
-    public const int MinRanges = 5;
-    public const int MaxRanges = 8;
+    /// <summary>山区带深度（米）：顶点到西缘/北缘的较小距离小于此值即属半包围山区带。</summary>
+    public const float MountainBandDepth = 380f;
 
-    /// <summary>山脊单条长度范围（米）：逐米蠕蜒推进。</summary>
-    public const int RangeLenMin = 120;
-    public const int RangeLenMax = 300;
+    /// <summary>地图中心避让半径（米）：峰点不落在中心圆内，给城建留开阔腹地。</summary>
+    public const float CenterExclusionRadius = 280f;
 
-    /// <summary>山脊半宽（米）：脊线两侧隔此距离内隆起，越远越低（余弦剖面连续无台阶）；
-    /// 随脊高拔到 64m 同步加宽，免成尖刺。</summary>
-    public const int RangeHalfWidth = 80;
+    // ---- 山脊连接（峰对之间未被河湖拦截才连）----
 
-    /// <summary>山脊顶高范围（米，绝对海拔，与山带基底取高）：不再考虑可走——
-    /// 余弦剖面中腰最大坡 ≈ π×64/(2×80) ≈ 51°，远超可走上限，高山由 Traversable 天然拦截，
-    /// 村民只能在山脚缓坡活动，群山成天然屏障。</summary>
-    public const float RangeExtraMin = 30f;
-    public const float RangeExtraMax = 64f;
+    /// <summary>每峰尝试连接的最近邻峰数：连线成脊，群山连绵不成孤包。</summary>
+    public const int RidgeNeighborLinks = 2;
 
-    /// <summary>山脊推进方向每步抖动幅度（弧度）：越大脊线越曲折。</summary>
-    public const double RangeWaver = 0.28;
+    /// <summary>脊中部鞍部系数：脊线高度 = 两端峰高插值 × 此系数托底（中段下凹成鞍）。</summary>
+    public const float RidgeSaddleFactor = 0.62f;
 
-    /// <summary>山脊沿脊线的高低起伏波长（米）：令山脊"连绵起伏"而非等高；
-    /// 需明显大于 2×半宽，否则取高包络会把起伏抹平。</summary>
-    public const int RangeUndulateWave = 240;
+    /// <summary>山脊余弦横截面半宽（米）。</summary>
+    public const float RidgeHalfWidth = 56f;
+
+    /// <summary>沿脊高低起伏：幅度比例与波长（米），令山脊连绵起伏而非等高。</summary>
+    public const float RidgeUndulateAmp = 0.18f;
+    public const int RidgeUndulateWaveMeters = 180;
+
+    // ---- 谷线河流（草图上沿最陡下降走线，山脊之间的中心即河谷）----
+
+    /// <summary>河源数量范围（条）：源点取相邻峰对中点，先走干流后走支线（撞上即汇流）。</summary>
+    public const int RiverSourceMin = 3;
+    public const int RiverSourceMax = 5;
+
+    /// <summary>河谷 V 形压谷半宽（米）：沿程从源头到河口线性变宽（谷地随下游开阔）。</summary>
+    public const float ValleyHalfWidthSource = 24f;
+    public const float ValleyHalfWidthMouth = 90f;
+
+    /// <summary>谷底目标高（米）：沿程从源头到河口线性下降——保证河道不悬在山腰，
+    /// 山区段两侧仍高耸成峡谷，出山后与平原自然衔接。</summary>
+    public const float ValleyFloorSourceH = 1.2f;
+    public const float ValleyFloorMouthH = 0f;
+
+    // ---- fBm 细节（映射后全图叠加，消上采样平滑感）----
+
+    /// <summary>全图高频细节 fBm：幅度（米）与波长（米）。</summary>
+    public const float DetailFbmAmp = 1.1f;
+    public const int DetailFbmWaveMeters = 26;
+
+    // ---- 水力侵蚀（droplet 水滴模型，草图与全图两级复用）----
+
+    /// <summary>侵蚀水滴数：全图级（1025²）/ 草图级（128²）。滴数与耗时线性，低端机可降档。</summary>
+    public const int ErodeDropletsFull = 250_000;
+    public const int ErodeDropletsSketch = 6_000;
+
+    /// <summary>方向惯性（0-1）：越大水流越倾向保持原方向，冲沟越顺直。</summary>
+    public const float ErodeInertia = 0.08f;
+
+    /// <summary>携沙容量系数：容量 = max(坡度, MinSlope) × 流速 × 水量 × 此系数。</summary>
+    public const float ErodeCapacityFactor = 3.5f;
+
+    /// <summary>最小坡度下限：防止平地容量归零导致除零/停滞。</summary>
+    public const float ErodeMinSlope = 0.01f;
+
+    /// <summary>侵蚀速率（欠容时挖取比例）与沉积速率（超容时卸沙比例），均 0-1。</summary>
+    public const float ErodeSpeed = 0.35f;
+    public const float DepositSpeed = 0.3f;
+
+    /// <summary>每步水量蒸发比例（0-1）：水尽则滴终止。</summary>
+    public const float ErodeEvaporate = 0.02f;
+
+    /// <summary>重力加速度系数：决定流速随落差的增长。</summary>
+    public const float ErodeGravity = 4f;
+
+    /// <summary>单滴最大步数（步长 1 格）：防洼地死循环。</summary>
+    public const int ErodeMaxLifetime = 50;
+
+    /// <summary>侵蚀笔刷半径（格）：挖沙/卸沙摊到邻域，防单点尖坑。全图级用此值，草图级用 1。</summary>
+    public const int ErodeBrushRadius = 3;
+
+    // ---- 采集豁免 ----
 
     /// <summary>村民可采集目标的最高海拔（米）：高于此的树视为高山景观树，不派人去砍/摘，
-    /// 野物也不上（平原缓丘顶 1.5 可及，图缘山带深处为景观区）。</summary>
+    /// 野物也不上（平原区可及，西北山区深处为景观区）。</summary>
     public const float ForageMaxHeight = 4.5f;
 
     // ---- 公式 ----
