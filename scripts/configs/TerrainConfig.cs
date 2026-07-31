@@ -24,24 +24,24 @@ public static class TerrainConfig
     /// <summary>整平垫基允许的占地最大高差（米）：占地内最高-最低顶点超过此值不可落建筑。</summary>
     public const float MaxBuildFlattenDiff = 1.0f;
 
-    /// <summary>世界最高海拔（米）：山脊顶上限（脊高 10 取整余量）。</summary>
-    public const float MaxTerrainHeight = 11f;
+    /// <summary>世界最高海拔（米）：山脊顶上限。</summary>
+    public const float MaxTerrainHeight = 64f;
 
     // ---- 图缘山带（两条相邻图缘的连绵群山，L 形覆盖约半图，另半为平原）----
 
     /// <summary>山带深度（米）：从所依两条图缘向内延伸此距——(1-300/1024)²≈0.5，恰好半图群山半图平原。</summary>
     public const float BeltDepth = 300f;
 
-    /// <summary>山带基底最高附加高度（米）：向图缘平滑渐升，300m 爬 6m 坡度极缓可走。</summary>
+    /// <summary>山带基底最高附加高度（米）：向图缘平滑渐升的地貌基准（脊线叠其上成峰）。</summary>
     public const float BeltBaseHeight = 6f;
 
     /// <summary>山带边界扭曲噪声：波长（米）与推拉幅度（米），令山缘蜿蜒不成直线。</summary>
     public const int BeltNoiseWave = 160;
     public const float BeltNoiseAmp = 70f;
 
-    // ---- 平原缓丘（可走的高低差）----
+    // ---- 平原缓丘（平原地貌的低幅起伏）----
 
-    /// <summary>缓丘最大附加高度（米）：噪声阈上平滑隆起，全部在可走坡度内。</summary>
+    /// <summary>缓丘最大附加高度（米）：噪声阈上平滑隆起的地貌幅度。</summary>
     public const float HillAmplitude = 1.5f;
 
     /// <summary>缓丘噪声阈值（0-1）：噪声高于此才隆起，控制丘陵覆盖率（越高丘越稀、平地越多）。</summary>
@@ -50,7 +50,7 @@ public static class TerrainConfig
     /// <summary>缓丘噪声波长（米）：越大丘体越宽缓。</summary>
     public const int HillWavelength = 48;
 
-    // ---- 连绵山脉（起伏的山脊线，比缓丘高、坡缓可走）----
+    // ---- 连绵山脉（起伏的山脊线，比缓丘高得多）----
 
     /// <summary>山脉数量范围（条脊线，集中生在图缘山带内叠在基底上）。</summary>
     public const int MinRanges = 5;
@@ -60,19 +60,22 @@ public static class TerrainConfig
     public const int RangeLenMin = 120;
     public const int RangeLenMax = 300;
 
-    /// <summary>山脊半宽（米）：脊线两侧隔此距离内隆起，越远越低（余弦剖面连续无台阶）。</summary>
-    public const int RangeHalfWidth = 28;
+    /// <summary>山脊半宽（米）：脊线两侧隔此距离内隆起，越远越低（余弦剖面连续无台阶）；
+    /// 随脊高拔到 64m 同步加宽，免成尖刺。</summary>
+    public const int RangeHalfWidth = 80;
 
-    /// <summary>山脊顶高范围（米，绝对海拔，与山带基底取高）：余弦剖面最大坡
-    /// ≈ π×10/(2×28) ≈ 0.56 → 29°，恰在可走坡度上限内，群山高而仍可翻越。</summary>
-    public const float RangeExtraMin = 7f;
-    public const float RangeExtraMax = 10f;
+    /// <summary>山脊顶高范围（米，绝对海拔，与山带基底取高）：不再考虑可走——
+    /// 余弦剖面中腰最大坡 ≈ π×64/(2×80) ≈ 51°，远超可走上限，高山由 Traversable 天然拦截，
+    /// 村民只能在山脚缓坡活动，群山成天然屏障。</summary>
+    public const float RangeExtraMin = 30f;
+    public const float RangeExtraMax = 64f;
 
     /// <summary>山脊推进方向每步抖动幅度（弧度）：越大脊线越曲折。</summary>
     public const double RangeWaver = 0.28;
 
-    /// <summary>山脊沿脊线的高低起伏波长（米）：令山脊"连绵起伏"而非等高。</summary>
-    public const int RangeUndulateWave = 40;
+    /// <summary>山脊沿脊线的高低起伏波长（米）：令山脊"连绵起伏"而非等高；
+    /// 需明显大于 2×半宽，否则取高包络会把起伏抹平。</summary>
+    public const int RangeUndulateWave = 240;
 
     /// <summary>村民可采集目标的最高海拔（米）：高于此的树视为高山景观树，不派人去砍/摘，
     /// 野物也不上（平原缓丘顶 1.5 可及，图缘山带深处为景观区）。</summary>

@@ -6,8 +6,8 @@ namespace Bianjing;
 /// <summary>
 /// 新地图地形成形（水系之前运行一次，顶点高度场随存档保存）：
 /// ① 图缘山带——随机两条相邻图缘向内的 L 形基底隆起（约覆盖半图），另半图保持平原；
-/// ② 连绵山脉——若干条蠕蜒脊线集中在山带内叠加（脊顶 7~10m），沿脊高低起伏，
-///    余弦剖面最大坡 ≈29° 恰在可走上限内，成高而可翻的群山主体；
+/// ② 连绵山脉——若干条蠕蜒脊线集中在山带内叠加（脊顶 30~64m），沿脊高低起伏，
+///    余弦剖面中腰坡 ≈51° 远超可走上限——高山不可攀，成天然屏障，村民仅山脚缓坡可达；
 /// ③ 平原缓丘——双八度 value noise 阈上平滑隆起（0~HillAmplitude 米），高低差连续无台阶。
 /// 连续高度场天然平滑，无需旧整数台地时代的削壁/侵蚀收尾；平地占比由 HillThreshold 控制。
 /// 水系其后生成并按深度下压河床（山体被河切穿处自然成峡谷）。
@@ -33,7 +33,7 @@ public static class MountainGenerator
     }
 
     /// <summary>① 图缘山带基底：两条相邻图缘向内 BeltDepth 米的 L 形地带平滑隆起（缘高 BeltBaseHeight → 带界 0），
-    /// 带界由噪声推拉蜿蜒，基底高度另叠大尺度起伏噪声免成均匀斜坡；坡度极缓处处可走。</summary>
+    /// 带界由噪声推拉蜿蜒，基底高度另叠大尺度起伏噪声免成均匀斜坡；纯地貌造型，不考虑通行。</summary>
     private static void RaiseBelt(HeightField hf, Random rng, int corner)
     {
         var edgeNoise = MakeLattice(rng, TerrainConfig.BeltNoiseWave);   // 带界扭曲
@@ -59,8 +59,8 @@ public static class MountainGenerator
     }
 
     /// <summary>② 连绵山脉：脊线逐米蠕蜒推进，沿脊高度随正弦起伏（连绵而非等高），
-    /// 两侧按二次 falloff 连续降到平地——半宽 14m 内最多爬升 2.5m，坡度天然可走；
-    /// 起点采样限在图缘山带内，脊线叠在带基底上成群山主体。</summary>
+    /// 两侧按余弦剖面连续降到平地（峰高/半宽见 TerrainConfig.RangeExtra/RangeHalfWidth）；
+    /// 起点采样限在图缘山带内，脊线叠在带基底上成群山主体；陡缓由剖面自身决定，不为通行让步。</summary>
     private static void RaiseRanges(HeightField hf, Random rng, int corner)
     {
         int count = TerrainConfig.MinRanges + rng.Next(TerrainConfig.MaxRanges - TerrainConfig.MinRanges + 1);
@@ -96,7 +96,7 @@ public static class MountainGenerator
     }
 
     /// <summary>山脊横断面：以 (cx,cy) 为脊心，半宽 RangeHalfWidth 内的顶点按余弦剖面抬高
-    /// （中心 peak → 缘 0，最大坡处坡角 ≈29° 仍可走），峰值 clamp 世界上限。</summary>
+    /// （中心 peak → 缘 0，中腰坡 ≈51° 不可走，高山即屏障），峰值 clamp 世界上限。</summary>
     private static void RaiseRidgeBand(HeightField hf, int cx, int cy, float peak)
     {
         int hw = TerrainConfig.RangeHalfWidth;
