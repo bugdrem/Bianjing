@@ -168,6 +168,8 @@ public class ZoneGrowthSystem
         int fx = b.FootX, fy = b.FootY;
         if (fx * fy >= MaxSide * MaxSide)
             return false;
+
+        float padH = gs.Map.GroundY(b.Origin); // 原垫基台面高：扩建条带压到同高，房体不悬空
     
         bool expanded = false;
         if (fx < MaxSide)
@@ -196,6 +198,8 @@ public class ZoneGrowthSystem
         }
         if (expanded)
         {
+            // 新占地整体重新整平到原台面高（含新并入条带），与 PlaceBuilding 垫基规则一致
+            gs.Map.Height.FlattenRect(b.Origin, b.FootX, b.FootY, padH);
             gs.LayBuildingLaneRing(b); // 小路环随占地前移：在新边界外重新环一圈
             EventBus.RaiseMapChanged();
         }
@@ -363,10 +367,10 @@ public class ZoneGrowthSystem
         return score;
     }
 
-    /// <summary>以 origin 为原点的 sx×sy 占地是否全部为可建设区内的无树空地且整块同高（平地）。</summary>
+    /// <summary>以 origin 为原点的 sx×sy 占地是否全部为可建设区内的无树空地，且高差在垫基限内（落位时自动整平）。</summary>
     private static bool FootprintBuildable(GameState gs, Vector2I origin, int sx, int sy)
     {
-        int baseH = MapGrid.InBounds(origin) ? gs.Map.CellAt(origin).Height : 0; // 住宅也要平地
+        float minH = float.MaxValue, maxH = float.MinValue; // 住宅也走垫基规则（与 PlacementValidator 同限）
         for (int x = origin.X; x < origin.X + sx; x++)
         {
             for (int y = origin.Y; y < origin.Y + sy; y++)
@@ -375,11 +379,13 @@ public class ZoneGrowthSystem
                 if (!MapGrid.InBounds(c))
                     return false;
                 ref var cell = ref gs.Map.CellAt(c);
-                if (cell.Zone != ZoneType.Buildable || !cell.IsEmpty || cell.HasTree || cell.Height != baseH)
+                if (cell.Zone != ZoneType.Buildable || !cell.IsEmpty || cell.HasTree)
                     return false;
+                minH = Math.Min(minH, gs.Map.Height.CellMinH(c));
+                maxH = Math.Max(maxH, gs.Map.Height.CellMaxH(c));
             }
         }
-        return true;
+        return maxH - minH <= TerrainConfig.MaxBuildFlattenDiff;
     }
 
     /// <summary>四周一圈小路环是否可铺：每个环格须

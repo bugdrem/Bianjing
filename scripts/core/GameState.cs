@@ -266,6 +266,10 @@ public class GameState
         };
         Buildings[b.Id] = b;
 
+        // 自动整平垫基：占地顶点压平成台面（取占地顶点平均高），建筑立面天然水平；
+        // 读档重建不经此方法（高度场随档恢复），不会二次整平
+        Map.Height.FlattenRect(origin, def.SizeX, def.SizeY, Map.Height.FootprintAvgH(origin, def.SizeX, def.SizeY));
+
         for (int x = origin.X; x < origin.X + def.SizeX; x++)
         {
             for (int y = origin.Y; y < origin.Y + def.SizeY; y++)
@@ -780,14 +784,14 @@ public class GameState
     }
 
     /// <summary>找最近的树木格（线性扫描植物实体，免大半径环扫全图；伐木选目标用）；
-    /// 石峰上的景观树不入选（人不可攀，高于 ForageMaxLayer 即跳过）。</summary>
+    /// 石峰上的景观树不入选（人不可攀，海拔高于 ForageMaxHeight 即跳过）。</summary>
     public Vector2I? FindNearestTreeCell(Vector2I from, int maxRadius)
     {
         PlantObj best = null;
         int bestDist = maxRadius + 1;
         foreach (var p in Plants.Values)
         {
-            if (Map.CellAt(p.X, p.Y).Height > TerrainConfig.ForageMaxLayer)
+            if (Map.GroundY(new Vector2I(p.X, p.Y)) > TerrainConfig.ForageMaxHeight)
                 continue; // 峰上景观树不可及
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)
@@ -808,7 +812,7 @@ public class GameState
         {
             if (!p.IsFruitTree || !p.Mature || p.FruitStock < 1)
                 continue;
-            if (Map.CellAt(p.X, p.Y).Height > TerrainConfig.ForageMaxLayer)
+            if (Map.GroundY(new Vector2I(p.X, p.Y)) > TerrainConfig.ForageMaxHeight)
                 continue; // 峰上景观树不可及
             int d = Math.Max(Math.Abs(p.X - from.X), Math.Abs(p.Y - from.Y));
             if (d < bestDist)

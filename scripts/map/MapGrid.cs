@@ -10,6 +10,9 @@ public class MapGrid
 
     private readonly Cell[] _cells = new Cell[Size * Size];
 
+    /// <summary>顶点级地形高度场（灰度地图）：渲染/通行/建造的高度真相均在此，随存档保存。</summary>
+    public HeightField Height { get; } = new();
+
     public MapGrid()
     {
         for (int i = 0; i < _cells.Length; i++)
@@ -22,16 +25,16 @@ public class MapGrid
 
     public static bool InBounds(Vector2I c) => c.X >= 0 && c.X < Size && c.Y >= 0 && c.Y < Size;
 
-    /// <summary>格子中心的世界坐标（y=0，仅取平面位置；地面海拔另查 GroundY / cell.Height）。</summary>
+    /// <summary>格子中心的世界坐标（y=0，仅取平面位置；地面海拔另查 GroundY / Height 高度场）。</summary>
     public static Vector3 CellToWorld(Vector2I c)
     {
         float half = Size * CellSize / 2f;
         return new Vector3(c.X * CellSize - half + CellSize / 2f, 0f, c.Y * CellSize - half + CellSize / 2f);
     }
 
-    /// <summary>某格的地面海拔（米）：越界按平地 0。渲染/通行的 Y 基准都从这里取。</summary>
+    /// <summary>某格的地面海拔（米，四角顶点均值）：越界按平地 0。渲染/通行的 Y 基准都从这里取。</summary>
     public float GroundY(Vector2I c) =>
-        InBounds(c) ? TerrainConfig.LayerToWorldY(CellAt(c).Height) : 0f;
+        InBounds(c) ? Height.CellCenterH(c) : 0f;
 
     public static Vector2I WorldToCell(Vector3 p)
     {

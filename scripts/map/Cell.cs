@@ -45,10 +45,6 @@ public struct Cell
 
     public ZoneType Zone;
 
-    /// <summary>地形高度层（整数台地，0=平地基准，越大越高）：世界海拔 = Height×TerrainConfig.LayerHeight。
-    /// 相邻格层差即台阶，通行/铺路是否可行见 TerrainConfig.Traversable。仅世界生成期由山体隆起赋值。</summary>
-    public int Height;
-
     /// <summary>吸引力缓存，由 DesirabilitySystem 重算。</summary>
     public float Desirability;
 

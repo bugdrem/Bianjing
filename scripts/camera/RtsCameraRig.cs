@@ -23,7 +23,7 @@ public partial class RtsCameraRig : Node3D
     {
         _pitchPivot = new Node3D();
         AddChild(_pitchPivot);
-        Cam = new Camera3D { Far = 4000f, Current = true };
+        Cam = new Camera3D { Far = CameraConfig.FarClip, Current = true };
         _pitchPivot.AddChild(Cam);
         ApplyTransform();
     }

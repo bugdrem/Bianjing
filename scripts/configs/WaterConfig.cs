@@ -3,10 +3,29 @@ namespace Bianjing;
 /// <summary>
 /// 水系生成配置（业务归属：RiverGenerator 生成一次，随存档保存）：
 /// 一条贯穿全图的干流 + 递归分叉的支流/小溪（树状水系，带水流方向）+ 若干扭曲大湖（含湖中岛、坐落河上形成入/出水口）。
+/// 顶点高度场下水系不只标水面格，还按深度把河床顶点下压（中心深、边缘浅），
+/// 岸形由地势自然涌现：平原岸缓入水成浅滩，山体被河切穿处成峡谷陡岸。
 /// 集中调参遵循 configs/*Config.cs 约定。
 /// </summary>
 public static class WaterConfig
 {
+    // ---- 水位与河床深度（顶点高度场）----
+
+    /// <summary>全图统一水面高度（米，低于平原基准 0）。后期水源模块/分段水位接入时，
+    /// 换掉 WaterLevelAt 的实现即可，调用方无需改动。</summary>
+    public const float WaterLevel = -0.5f;
+
+    /// <summary>某格的水面高度：本版全图统一返回 WaterLevel（分段水位预留收口）。</summary>
+    public static float WaterLevelAt(Godot.Vector2I c) => WaterLevel;
+
+    /// <summary>河床下压深度（米，水面以下）：水体边缘 / 深水中心，按离岸距离插值——
+    /// 边缘浅压出浅滩带，中心深压出河槽/湖盆。</summary>
+    public const float BedDepthEdge = 0.3f;
+    public const float BedDepthCenter = 1.6f;
+
+    /// <summary>达到满深度的离岸距离（米）：离岸超过此距的水格一律按中心深度下压。</summary>
+    public const int BedFalloffDist = 6;
+
     // ---- 主干河（一条完整干流，自西源蜿蜒东流入海口）----
 
     /// <summary>河口（下游）最大河宽（米）：干流越往下游越宽。</summary>

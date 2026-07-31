@@ -45,13 +45,13 @@ public static class TreeGenerator
             }
         }
 
-        // 3) 峰上落树：石峰域（高层格）按保底概率补树，保证「山上会生成树木」不受林区噪声左右；
-        // 峰上皆普通树（人不可攀，纯景观，采集目标选择已按 ForageMaxLayer 豁免）
+        // 3) 峰上落树：石峰域（高海拔格）按保底概率补树，保证「山上会生成树木」不受林区噪声左右；
+        // 峰上皆普通树（人不可攀，纯景观，采集目标选择已按 ForageMaxHeight 豁免）
         for (int x = 0; x < MapGrid.Size; x++)
         {
             for (int y = 0; y < MapGrid.Size; y++)
             {
-                if (gs.Map.CellAt(x, y).Height < TerrainConfig.PillarLayerMin)
+                if (gs.Map.GroundY(new Vector2I(x, y)) < TerrainConfig.PillarZoneMinHeight)
                     continue;
                 if (rng.NextDouble() < TerrainConfig.PillarTreeChance)
                     gs.AddPlant(new Vector2I(x, y), 6 + rng.Next(19), false);

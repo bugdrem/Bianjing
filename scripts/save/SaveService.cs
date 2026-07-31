@@ -15,8 +15,8 @@ namespace Bianjing;
 /// </summary>
 public static class SaveService
 {
-    /// <summary>v19：水系重制为树状水系（干流+支流树+扭曲大湖/湖中岛）并新增水流方向；地形新增连绵山脉。旧档无流向数据，拒读。</summary>
-    public const int FormatVersion = 19;
+    /// <summary>v20：地形改顶点高度场（灰度地图），高度以 uint16 量化 blob 整张存储；旧档无顶点数据，拒读。</summary>
+    public const int FormatVersion = 20;
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -235,16 +235,11 @@ public static class SaveService
                 }
                 if (cell.HasBridge)
                     map.BridgeCells.Add(index);
-                // 高度稀疏存“偏离默认值”的格（水面默认 0 / 陆地默认基准层）：
-                // 基准抬升后全图陆地皆为基准层，若仍按“非零”存会退化成百万条全量表
-                int defaultH = cell.HasWater ? 0 : TerrainConfig.BaseLayers;
-                if (cell.Height != defaultH)
-                {
-                    map.HeightCells.Add(index);
-                    map.HeightLayers.Add(cell.Height); // 存绝对层数
-                }
             }
         }
+
+        // v20：顶点高度场整张导出为 uint16 灰度 blob（约 2.1MB，LMDB 直存）
+        map.HeightMap = gs.Map.Height.ToBlob(out map.HeightMin, out map.HeightStep);
 
         var buildings = new List<BuildingSave>(gs.Buildings.Count);
         foreach (var b in gs.Buildings.Values)
@@ -411,15 +406,8 @@ public static class SaveService
         foreach (int index in map.BridgeCells ?? new List<int>())
             gs.Map.CellAt(index % MapGrid.Size, index / MapGrid.Size).HasBridge = true; // HasRoad 已由 RoadCells 恢复
 
-        // v16：先铺默认高度（水面 0 / 陆地基准层，须在水体恢复之后），再覆盖稀疏异常格（缓丘/石峰）
-        for (int i = 0; i < MapGrid.Size * MapGrid.Size; i++)
-        {
-            ref var cell = ref gs.Map.CellAt(i % MapGrid.Size, i / MapGrid.Size);
-            cell.Height = cell.HasWater ? 0 : TerrainConfig.BaseLayers;
-        }
-        var hCells = map.HeightCells ?? new List<int>();
-        for (int i = 0; i < hCells.Count; i++)
-            gs.Map.CellAt(hCells[i] % MapGrid.Size, hCells[i] / MapGrid.Size).Height = map.HeightLayers[i];
+        // v20：顶点高度场从灰度 blob 整张恢复（高度随档回来，建筑垫基台面也在其中，读档不再整平）
+        gs.Map.Height.FromBlob(map.HeightMap, map.HeightMin, map.HeightStep);
 
         foreach (var p in plants ?? new List<PlantObj>())
         {

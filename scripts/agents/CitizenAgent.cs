@@ -1325,9 +1325,8 @@ public partial class CitizenAgent : Node3D
         return !cell.HasWater || cell.HasBridge || cell.HasRoad;
     }
 
-    /// <summary>相邻两格能否步行相通：既是旱路，且层差在可翻越范围内（降壁/降坡不可跨）。
-    /// 涉水豁免：基准抬升后岸陆比水面/桥面高 1 米，上下桥属水陆分界而非陡壁，不受坡度限制。
-    /// 山体生成已削平陡壁（全图坡度≤上限），此守卫主要为后续玩家塑形（b 方案）预留。</summary>
+    /// <summary>相邻两格能否步行相通：既是旱路，且高差/坡度在可翻越范围内（陡壁不可跨）。
+    /// 涉水豁免：岸陆与水面/桥面的落差属水陆分界而非陡壁，上下桥不受坡度限制。</summary>
     private static bool StepTraversable(Vector2I from, Vector2I to)
     {
         if (!IsDryCell(to))
@@ -1336,7 +1335,7 @@ public partial class CitizenAgent : Node3D
         ref var ct = ref GameState.I.Map.CellAt(to);
         if (cf.HasWater || ct.HasWater)
             return true; // 上下桥/岸沿落差不作陡壁论
-        return TerrainConfig.Traversable(cf.Height, ct.Height);
+        return TerrainConfig.Traversable(GameState.I.Map.GroundY(from), GameState.I.Map.GroundY(to));
     }
 
     /// <summary>四向 BFS 找旱路（含起终格）；搜索量封顶防卡帧，找不到返回 null。
@@ -1380,8 +1379,8 @@ public partial class CitizenAgent : Node3D
         return null;
     }
 
-    /// <summary>脚下站面高度：地形海拔叠加地面厚度——桥格站桥板顶（桥悬浮在水面 -0.5 之上，顶 0.34），
-    /// 其余格为本格地面海拔 +0.2（路面顶约 0.24 与基准差无感，不单独处理）。</summary>
+    /// <summary>脚下站面高度：桥格站桥板顶（桥悬浮在水面 -0.5 之上，顶 0.34）；
+    /// 其余处双线性采样高度场 +0.2（坡面行走平滑升降，路面抬升差无感不单独处理）。</summary>
     private static float SurfaceYAt(Vector3 pos)
     {
         var c = MapGrid.WorldToCell(pos);
@@ -1390,7 +1389,7 @@ public partial class CitizenAgent : Node3D
         ref var cell = ref GameState.I.Map.CellAt(c);
         if (cell.HasBridge)
             return 0.34f;
-        return TerrainConfig.LayerToWorldY(cell.Height) + 0.2f;
+        return GameState.I.Map.Height.SampleWorld(pos.X, pos.Z) + 0.2f;
     }
 
     private void MoveAlongPath(float dt)

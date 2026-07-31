@@ -3,34 +3,42 @@ using System;
 namespace Bianjing;
 
 /// <summary>
-/// 地形配置：整数台地高度体系与坡度规则（业务归属：MountainGenerator 生成、GridRenderer 渲染、
-/// CitizenAgent 通行、PlacementValidator 建造校验；地形仅世界生成期成形，玩家暂不可改）。
-/// 模型：每格一个整数高度层 Height——水面/河床恒 0 层，陆地基准 BaseLayers；
-/// 竖直原点对齐到陆地基准（平原 = y 0 米），故水面在陆地之下 BaseLayers×LayerHeight = 0.5 米（水面 y=-0.5）。
-/// 平原上散布可走缓丘，另立桂林石峰式孤峰（平顶陡壁，人不可攀，峰上长树）。
-/// 相邻格层差即"台阶"：层差 ≤ StepClimb 可直接跨上；更陡处按坡度规则限制通行与建造。
+/// 地形配置：顶点级 float 高度场（灰度地图）与坡度规则（业务归属：MountainGenerator 生成、
+/// GridRenderer 三角网格渲染、CitizenAgent 通行、PlacementValidator 建造校验、HeightField 数据）。
+/// 模型：全图 (Size+1)² 顶点高度，y=0 为平原基准；水面统一 WaterConfig.WaterLevel（-0.5m），
+/// 河床由水系生成按深度下压顶点（岸形随地势自然呈浅滩或陡岸）。
+/// 平原上散布可走缓丘与连绵山脉，另立桂林石峰（陡壁人不可攀，峰上长树）；
+/// 建筑落位自动整平垫基（占地高差在限内即可建，放置时压平成台面）。
+/// 地形仅世界生成期成形 + 垫基修改，后期玩家升降地形复用 HeightField 顶点写接口。
 /// </summary>
 public static class TerrainConfig
 {
-    /// <summary>单个高度层的世界高度（米/层）：Height×此值 = 该格地面海拔。</summary>
-    public const float LayerHeight = 0.5f;
+    // ---- 通行 / 坡度 / 建造规则 ----
 
-    /// <summary>陆地基准层数：平原地面即竖直原点 y=0；水面/河床保持 0 层，落在陆地之下 BaseLayers 层
-    /// （= 0.5 米，即水面 y=-0.5，暂不考虑水体流动）。</summary>
-    public const int BaseLayers = 1;
+    /// <summary>免坡度判定可直接跨越的相邻格高差（米）：小台阶等同平地通行。</summary>
+    public const float MaxStepHeight = 0.5f;
+
+    /// <summary>可通行/可铺路的最大坡度（度）：相邻格高差换算成的坡角 ≤此值才准过人与铺路。</summary>
+    public const float MaxWalkSlopeDeg = 30f;
+
+    /// <summary>整平垫基允许的占地最大高差（米）：占地内最高-最低顶点超过此值不可落建筑。</summary>
+    public const float MaxBuildFlattenDiff = 1.0f;
+
+    /// <summary>世界最高海拔（米）：石峰顶上限（缓丘 1.5 + 石峰 13 取整余量）。</summary>
+    public const float MaxTerrainHeight = 14.5f;
 
     // ---- 平原缓丘（可走的高低差）----
 
-    /// <summary>缓丘最大附加层数（丘顶 = 基准 + 此值）：全部在可走坡度内。</summary>
-    public const int HillAmplitudeLayers = 3;
+    /// <summary>缓丘最大附加高度（米）：噪声阈上平滑隆起，全部在可走坡度内。</summary>
+    public const float HillAmplitude = 1.5f;
 
-    /// <summary>缓丘噪声阈值（0-1）：噪声高于此才隆起，控制丘陵覆盖率（越高丘越稀，渲染实例越少）。</summary>
+    /// <summary>缓丘噪声阈值（0-1）：噪声高于此才隆起，控制丘陵覆盖率（越高丘越稀、平地越多）。</summary>
     public const float HillThreshold = 0.62f;
 
     /// <summary>缓丘噪声波长（米）：越大丘体越宽缓。</summary>
     public const int HillWavelength = 48;
 
-    // ---- 连绵山脉（起伏的山脊线，比缓丘高、削壁后仍可走）----
+    // ---- 连绵山脉（起伏的山脊线，比缓丘高、坡缓可走）----
 
     /// <summary>山脉数量范围（条脊线）。</summary>
     public const int MinRanges = 2;
@@ -40,20 +48,20 @@ public static class TerrainConfig
     public const int RangeLenMin = 120;
     public const int RangeLenMax = 300;
 
-    /// <summary>山脊半宽（米）：脊线两侧隔此距离内隆起，越远越低。</summary>
+    /// <summary>山脊半宽（米）：脊线两侧隔此距离内隆起，越远越低（二次 falloff 连续无台阶）。</summary>
     public const int RangeHalfWidth = 14;
 
-    /// <summary>山脊附加高度范围（层，叠在基准之上）：峰高 = 基准 + 此值；上限低于 PillarLayerMin 以保留可侵蚀空间。</summary>
-    public const int RangeExtraMin = 3;
-    public const int RangeExtraMax = 5;
+    /// <summary>山脊附加高度范围（米，叠在平原之上）：半宽 14m 内爬升 ≤2.5m，坡度天然可走。</summary>
+    public const float RangeExtraMin = 1.5f;
+    public const float RangeExtraMax = 2.5f;
 
-    /// <summary>山脊推进方向每步抑动幅度（弧度）：越大脊线越曲折。</summary>
+    /// <summary>山脊推进方向每步抖动幅度（弧度）：越大脊线越曲折。</summary>
     public const double RangeWaver = 0.28;
 
-    /// <summary>山脊沿脊线的高低起伏波长（米）：令山脊“连绵起伏”而非等高。</summary>
+    /// <summary>山脊沿脊线的高低起伏波长（米）：令山脊"连绵起伏"而非等高。</summary>
     public const int RangeUndulateWave = 40;
 
-    // ---- 桂林石峰（孤峰柱，陡壁不可攀）----
+    // ---- 桂林石峰（孤峰，陡壁不可攀）----
 
     /// <summary>石峰数量范围（座）。</summary>
     public const int MinPillars = 10;
@@ -63,51 +71,35 @@ public static class TerrainConfig
     public const int PillarMinRadius = 5;
     public const int PillarMaxRadius = 14;
 
-    /// <summary>石峰相对地面的高度范围（层）：16~26 层即 8~13 米。</summary>
-    public const int PillarMinLayers = 16;
-    public const int PillarMaxLayers = 26;
+    /// <summary>石峰相对地面的高度范围（米）。</summary>
+    public const float PillarMinHeight = 8f;
+    public const float PillarMaxHeight = 13f;
 
     /// <summary>石峰截面幂次：越大顶越平、壁越陡（超椭圆剖面 1-(d/r)^k）。</summary>
     public const float PillarShapePower = 5f;
 
-    /// <summary>视为"峰域"的最低层数（缓丘最高 BaseLayers+HillAmplitudeLayers=5，取 7 与之留隙）：
-    /// 峰域格保底落树（TreeGenerator）、且其上树木不作村民采伐目标（人不可攀）。</summary>
-    public const int PillarLayerMin = 7;
+    /// <summary>视为"峰域"的最低海拔（米，缓丘+山脉最高 ≈4，取 5 与之留隙）：
+    /// 峰域格保底落树（TreeGenerator），保证"山上会生成树木"。</summary>
+    public const float PillarZoneMinHeight = 5f;
 
-    /// <summary>峰域格保底落树概率（棵/格）：保证"山上会生成树木"，不受林区噪声左右。</summary>
+    /// <summary>峰域格保底落树概率（棵/格）：不受林区噪声左右。</summary>
     public const float PillarTreeChance = 0.06f;
 
-    /// <summary>村民可采集目标的最高地形层：高于此层的树视为峰上景观树，不派人去砍/摘。</summary>
-    public const int ForageMaxLayer = BaseLayers + HillAmplitudeLayers;
+    /// <summary>村民可采集目标的最高海拔（米）：高于此的树视为峰上/高山景观树，不派人去砍/摘，
+    /// 野物也不上（缓丘顶 1.5 + 山脉顶 2.5 皆可及，仅石峰域被隔离）。</summary>
+    public const float ForageMaxHeight = 4.5f;
 
-    // ---- 通行/坡度规则 ----
+    // ---- 公式 ----
 
-    /// <summary>村民免坡度可直接跨越的最大层差（层）：≤此层差的台阶等同平地通行。</summary>
-    public const int StepClimb = 1;
+    /// <summary>公式：相邻格（水平 1 米）高差 → 坡角（度）= atan(dh / 1m)。</summary>
+    public static float SlopeDegForDrop(float dh) =>
+        (float)(Math.Atan(Math.Abs(dh) / MapGrid.CellSize) * 180.0 / Math.PI);
 
-    /// <summary>可通行/可铺路的最大坡度（度）：相邻格层差换算成的坡角 ≤此值才准过人与铺路。</summary>
-    public const float MaxWalkSlopeDeg = 30f;
-
-    /// <summary>世界最高层数（石峰顶上限 = BaseLayers+HillAmplitudeLayers+PillarMaxLayers 取整余量）。</summary>
-    public const int MaxMountainLayer = 30;
-
-    /// <summary>公式：层差 → 相邻格（水平 1 米）间的坡角（度）= atan(d×LayerHeight / 1m)。</summary>
-    public static float SlopeDegForLayerDiff(int layerDiff) =>
-        (float)(Math.Atan(Math.Abs(layerDiff) * LayerHeight / MapGrid.CellSize) * 180.0 / Math.PI);
-
-    /// <summary>相邻两格之间能否供人通行/铺路：层差在免爬范围内，或坡角未超上限。
-    /// 石峰边缘层差十余层，坡角远超上限 → 天然不可攀（对"山体挡通行"的落实）。</summary>
-    public static bool Traversable(int fromLayer, int toLayer)
+    /// <summary>相邻两格之间能否供人通行/铺路：高差在免爬范围内，或坡角未超上限。
+    /// 石峰边缘一格落差数米，坡角远超上限 → 天然不可攀（对"山体挡通行"的落实）。</summary>
+    public static bool Traversable(float hFrom, float hTo)
     {
-        int d = Math.Abs(fromLayer - toLayer);
-        return d <= StepClimb || SlopeDegForLayerDiff(d) <= MaxWalkSlopeDeg;
+        float d = Math.Abs(hFrom - hTo);
+        return d <= MaxStepHeight || SlopeDegForDrop(d) <= MaxWalkSlopeDeg;
     }
-
-    /// <summary>层数 → 世界海拔高度（米）：以陆地基准层为原点——平原(BaseLayers)=0 米，水面(0 层)=-0.5 米，缓丘/石峰在其上。</summary>
-    public static float LayerToWorldY(int layer) => (layer - BaseLayers) * LayerHeight;
-
-    // ---- 平地占比保障 ----
-
-    /// <summary>平地（非水、高度=基准层）占全图的最低比例：生成收尾若不足此值，按“从山缘逐层侵蚀”削回到达标（MountainGenerator.EnforceFlatRatio）。</summary>
-    public const float FlatLandTarget = 0.5f;
 }

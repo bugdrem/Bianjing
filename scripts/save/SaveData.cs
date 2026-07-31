@@ -76,10 +76,11 @@ public class MapSave
 
     public List<int> BridgeCells = new();
 
-    /// <summary>v16：地形高度稀疏表——只存“偏离默认值（水面 0 / 陆地基准层）”的格：
-    /// HeightCells（一维索引）与 HeightLayers（对应绝对层数）一一对应，基准平地不入表保持稀疏。</summary>
-    public List<int> HeightCells = new();
-    public List<int> HeightLayers = new();
+    /// <summary>v20：顶点高度场灰度图——uint16 量化 blob（每顶点 2 字节小端，JSON 自动 base64），
+    /// height = HeightMin + v × HeightStep；替代旧版整数层稀疏表（HeightCells/HeightLayers 已删）。</summary>
+    public byte[] HeightMap;
+    public float HeightMin;
+    public float HeightStep;
 }
 
 /// <summary>建筑实例 DTO（BuildingInstance 含 Godot 类型与 Def 引用，不直接序列化）。</summary>

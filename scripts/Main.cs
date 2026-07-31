@@ -154,12 +154,12 @@ public partial class Main : Node3D
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
 
-    /// <summary>新地图初始化：开凿河道、隆起山体、随机铺树、投放野物。</summary>
+    /// <summary>新地图初始化：先隆起山体地形，再开凿河道（按深度下压河床，岸形自然涌现），后铺树投放野物。</summary>
     private static void SeedWorld()
     {
         var rng = new Random();
+        MountainGenerator.Raise(GameState.I.Map, rng); // 地形先行：河流其后切地而过，高地成峡、平原成滩
         RiverGenerator.Carve(GameState.I.Map, rng);
-        MountainGenerator.Raise(GameState.I.Map, rng); // 河后山前：山形定了再决定哪长树
         TreeGenerator.Scatter(GameState.I, rng);
         new WildlifeSystem().SeedInitial(GameState.I);
     }
@@ -246,12 +246,12 @@ public partial class Main : Node3D
         };
         AddChild(new WorldEnvironment { Environment = env });
 
-        // 地面背景平面：落在水面（y=-0.5）之下作河床/图外背景；陆地靠逐格土柱立于其上（顶 0），故河道自然下凹
+                // 地面背景平面：垫在最深河床（约 -2.1m）之下作图外背景；图内地表由逐块地形三角网格覆盖
         float extent = MapGrid.Size * MapGrid.CellSize + 80f;
         var ground = new MeshInstance3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(extent, extent) },
-            Position = new Vector3(0f, -0.6f, 0f),
+            Position = new Vector3(0f, -2.6f, 0f),
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.45f, 0.5f, 0.32f),

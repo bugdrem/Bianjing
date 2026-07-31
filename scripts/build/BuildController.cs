@@ -424,15 +424,15 @@ public partial class BuildController : Node
 
         var gs = GameState.I;
         const float step = MapGrid.CellSize / 2f; // 半格步长，不漏格不超距
-        // 最高可拾面：地形最高海拔（随 TerrainConfig 联动，免硬编码过时）+ 峰上树冠/最高建筑余量；其上无可拾物件，直接快进
-        const float maxObjTop = (TerrainConfig.MaxMountainLayer - TerrainConfig.BaseLayers) * TerrainConfig.LayerHeight + 7.5f;
+        // 最高可拾面：地形最高海拔（随 TerrainConfig 联动）+ 峰上树冠/最高建筑余量；其上无可拾物件，直接快进
+        const float maxObjTop = TerrainConfig.MaxTerrainHeight + 7.5f;
         float t = from.Y > maxObjTop ? (maxObjTop - from.Y) / dir.Y : 0f;
 
         for (int i = 0; i < 4096; i++, t += step)
         {
             var p = from + dir * t;
-            if (p.Y < -1f)
-                break; // 已穿透水面基准以下，再无可拾
+            if (p.Y < -3f)
+                break; // 已穿透最深河床（约 -2.1m）以下，再无可拾
             var c = MapGrid.WorldToCell(p);
             if (!MapGrid.InBounds(c))
                 continue;

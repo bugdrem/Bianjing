@@ -1,3 +1,4 @@
+using System;
 using Godot;
 
 namespace Bianjing;
@@ -22,22 +23,19 @@ public static class PlacementValidator
         return GameSettings.InfiniteMoney || gs.Money >= GameState.RoadCostOf(kind);
     }
 
-    /// <summary>本格坡度是否可供人行/铺路：与四邻的层差均在可翻越范围内（不处在陡壁边缘）。
-    /// 水邻豁免：基准抬升后岸陆比水面高 1 米，岸沿落差属水陆分界而非陡坡（下水自有桥渡把关），
-    /// 否则沿河一圈全铺不了路。山体生成已削平陡壁，此检查主为后续玩家塑形（b 方案）预留。</summary>
+    /// <summary>本格坡度是否可供人行/铺路：格内四角顶点最大高差换算坡角 ≤上限（不处在陡壁上）。
+    /// 水邻豁免：岸沿格的顶点被河床下压拉斜，落差属水陆分界而非陡坡（下水自有桥渡把关），
+    /// 否则沿河一圈全铺不了路。</summary>
     public static bool SlopeWalkable(GameState gs, Vector2I c)
     {
-        int h = gs.Map.CellAt(c).Height;
         Vector2I[] dirs = { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
         foreach (var d in dirs)
         {
             var n = c + d;
-            if (!MapGrid.InBounds(n) || gs.Map.CellAt(n).HasWater)
-                continue; // 图缘/水面邻格不参与坡度判定
-            if (!TerrainConfig.Traversable(h, gs.Map.CellAt(n).Height))
-                return false;
+            if (MapGrid.InBounds(n) && gs.Map.CellAt(n).HasWater)
+                return true; // 贴岸格豁免坡度判定（岸坡属水陆分界）
         }
-        return true;
+        return gs.Map.Height.CellSlopeDeg(c) <= TerrainConfig.MaxWalkSlopeDeg;
     }
 
     /// <summary>桥梁：只能架在没有桥的水面上。</summary>
@@ -51,7 +49,7 @@ public static class PlacementValidator
         return cell.HasWater && !cell.HasBridge && (GameSettings.InfiniteMoney || gs.Money >= GameState.BridgeCost);
     }
 
-    /// <summary>建筑：里程碑已解锁、占地全部为空格、在界内、占地整块同高（平地）、至少一边临路、钱够。
+    /// <summary>建筑：里程碑已解锁、占地全部为空格、在界内、占地高差在垫基限内（落位时自动整平）、至少一边临路、钱够。
     /// 开局首建门槛：未建成王爷府前只能放王爷府本体；王爷府免临路要求（作为首建可平地直接落下，自环小路）；全局唯一者不重建。</summary>
     public static bool CanPlaceBuilding(GameState gs, BuildingDef def, Vector2I origin, bool checkCost = true)
     {
@@ -69,8 +67,8 @@ public static class PlacementValidator
         if (def.MilestoneRequired > gs.MilestoneLevel)
             return false;
 
-        // 建筑要求平地：占地内每格高度须一致（origin 越界时取 0，循环内 InBounds 兼底返回 false）
-        int baseH = MapGrid.InBounds(origin) ? gs.Map.CellAt(origin).Height : 0;
+        // 占地逐格空地校验 + 高差汇总：最高-最低顶点超垫基限不可建（落位时整平成台面）
+        float minH = float.MaxValue, maxH = float.MinValue;
         for (int x = origin.X; x < origin.X + def.SizeX; x++)
         {
             for (int y = origin.Y; y < origin.Y + def.SizeY; y++)
@@ -78,10 +76,12 @@ public static class PlacementValidator
                 var c = new Vector2I(x, y);
                 if (!MapGrid.InBounds(c) || !gs.Map.CellAt(c).IsEmpty)
                     return false;
-                if (gs.Map.CellAt(c).Height != baseH)
-                    return false; // 坡地不可建（后续 b 方案再支持依坡垫基）
+                minH = Math.Min(minH, gs.Map.Height.CellMinH(c));
+                maxH = Math.Max(maxH, gs.Map.Height.CellMaxH(c));
             }
         }
+        if (maxH - minH > TerrainConfig.MaxBuildFlattenDiff)
+            return false; // 坡地高差过大，垫基也填不平
 
         if (isMansion)
         {

@@ -5,11 +5,13 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 新地图水系生成（树状水系，带水流方向；仅新图运行一次，水面/流向随存档保存）：
+/// 新地图水系生成（树状水系，带水流方向；仅新图运行一次，地形之后——水面/流向/河床随存档保存）：
 /// ① 主干河——一条自西源蜿蜒东流入海口的完整干流，越往下游越宽，中心线点列供支流取源，水流指向河口；
 /// ② 支流树——从干流递归分叉出支流与小溪（二叉树式），逐级变细变短，水流指向汇入的母河（下游）；
 /// ③ 湖泊——多正弦谐波扭曲的大湖（湖缘呈不规则湾汊），可含湖中岛；坐落河上者天然带入水口/出水口，
-///    离河独立的小湖另凿一条出水渠连向最近水体。参数集中在 WaterConfig。
+///    离河独立的小湖另凿一条出水渠连向最近水体；
+/// ④ 河床下压——按离岸距离把水格顶点压到水面以下（边缘浅、中心深），
+///    岸形由地势自然涌现：平原岸缓入水成浅滩，山体被河切穿处成峡谷陡岸。参数集中在 WaterConfig。
 /// </summary>
 public static class RiverGenerator
 {
@@ -49,6 +51,81 @@ public static class RiverGenerator
                 radius + 8 + rng.Next(MapGrid.Size - 2 * (radius + 8)));
             CarveLake(map, rng, center, radius, islands: rng.NextDouble() < 0.4);
             CarveOutlet(map, rng, center, radius);
+        }
+
+        // 5) 河床下压：水体拓扑定型后，按离岸距离把所有水格顶点压到水面之下（岸形自然涌现）
+        CarveBed(map);
+    }
+
+    /// <summary>河床下压（顶点高度场）：多源 BFS 算每个水格的离岸距离，
+    /// 深度按距离从 BedDepthEdge 插值到 BedDepthCenter（BedFalloffDist 处满深），
+    /// 把水格四角顶点压到「水面 - 深度」（只降不升）。
+    /// 岸缘共享顶点被拉到浅滩深度：平原岸缓入水；若河道切穿山体，高岸顶点落差巨大，自然呈陡岸/峡谷。</summary>
+    private static void CarveBed(MapGrid map)
+    {
+        var hf = map.Height;
+        // 1) 多源 BFS：从贴岸水格（四邻含陆地/图缘）向水体内部扩散，得每个水格离岸距离（贴岸=1）
+        var dist = new int[MapGrid.Size * MapGrid.Size];
+        var queue = new Queue<int>();
+        Span<Vector2I> dirs = stackalloc Vector2I[] { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
+        for (int y = 0; y < MapGrid.Size; y++)
+        {
+            for (int x = 0; x < MapGrid.Size; x++)
+            {
+                if (!map.CellAt(x, y).HasWater)
+                    continue;
+                bool shore = false;
+                foreach (var d in dirs)
+                {
+                    var n = new Vector2I(x + d.X, y + d.Y);
+                    if (!MapGrid.InBounds(n) || !map.CellAt(n).HasWater)
+                    {
+                        shore = true;
+                        break;
+                    }
+                }
+                if (shore)
+                {
+                    dist[y * MapGrid.Size + x] = 1;
+                    queue.Enqueue(y * MapGrid.Size + x);
+                }
+            }
+        }
+        while (queue.Count > 0)
+        {
+            int idx = queue.Dequeue();
+            int cx = idx % MapGrid.Size, cy = idx / MapGrid.Size;
+            for (int i = 0; i < 4; i++)
+            {
+                var n = new Vector2I(cx + (i == 0 ? 1 : i == 1 ? -1 : 0), cy + (i == 2 ? 1 : i == 3 ? -1 : 0));
+                if (!MapGrid.InBounds(n) || !map.CellAt(n).HasWater)
+                    continue;
+                int ni = n.Y * MapGrid.Size + n.X;
+                if (dist[ni] != 0)
+                    continue;
+                dist[ni] = dist[idx] + 1;
+                queue.Enqueue(ni);
+            }
+        }
+
+        // 2) 逐水格下压四角顶点：目标高度 = 水面 - 深度（离岸越远越深，只降不升）
+        for (int y = 0; y < MapGrid.Size; y++)
+        {
+            for (int x = 0; x < MapGrid.Size; x++)
+            {
+                if (!map.CellAt(x, y).HasWater)
+                    continue;
+                int d = dist[y * MapGrid.Size + x];
+                if (d <= 0)
+                    d = WaterConfig.BedFalloffDist; // 孤立未达格兜底：按满深处理
+                float t = Mathf.Min(1f, (d - 1) / (float)WaterConfig.BedFalloffDist);
+                float target = WaterConfig.WaterLevelAt(new Vector2I(x, y))
+                    - Mathf.Lerp(WaterConfig.BedDepthEdge, WaterConfig.BedDepthCenter, t);
+                for (int vx = x; vx <= x + 1; vx++)
+                    for (int vy = y; vy <= y + 1; vy++)
+                        if (hf.VertexH(vx, vy) > target)
+                            hf.SetVertex(vx, vy, target);
+            }
         }
     }
 
