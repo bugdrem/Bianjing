@@ -34,7 +34,7 @@ public static class WorldConfig
 
     /// <summary>拱桥拱顶高出「两岸较低者地面」的封顶抬升（米）：整段跨水为一座拱，
     /// 拱顶（河中央）= min(两岸地面高) + 此值（见 MapGrid.BridgeDeckTopAt）；渲染桥体与村民过桥站面共用。</summary>
-    public const float BridgeArchApexRise = 1f;
+    public const float BridgeArchApexRise = 2f;
 
     /// <summary>桥体厚（米）：桥面为实体板而非平面，从桥面顶向下拉出此厚度的侧壁与底面。</summary>
     public const float BridgeBodyThickness = 0.2f;
@@ -45,7 +45,7 @@ public static class WorldConfig
 
     /// <summary>地图向外扩展的白底边室宽（米）：地图与卷轴之间垫一层白底，
     /// 白底在地图四周外扩此距离（形成地图到卷轴画布的白边过渡）。</summary>
-    public const float MapEdgeExtend = 64f;
+    public const float MapEdgeExtend = 32f;
 
     /// <summary>开局官库钱（贯）/ 官粮（份）。</summary>
     public const double StartMoney = 5000;
