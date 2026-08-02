@@ -54,11 +54,28 @@ public class BuildingDef
     /// <summary>商铺/工坊每月额外税收。</summary>
     public int TaxBonus { get; set; }
 
-    /// <summary>提供的岗位数量（0 表示不雇工）。</summary>
+    /// <summary>提供的岗位数量（0 表示不雇工）。每级岗位数见 JobSlotsByLevel，为 null 时本字段当固定数。</summary>
     public int JobSlots { get; set; }
 
-    /// <summary>雇工每月工资。</summary>
-    public double Salary { get; set; }
+    /// <summary>雇工每月工资（文）。</summary>
+    public long Salary { get; set; }
+
+    /// <summary>每级岗位数（长度 3，索引 0=一级；null 时沿用 JobSlots 固定值）。</summary>
+    public int[] JobSlotsByLevel { get; set; }
+
+    /// <summary>每级最低技能经验值要求（长度 3，索引 0=一级；0=无要求；null 时无技能要求）。</summary>
+    public float[] MinSkillExpByLevel { get; set; }
+
+    /// <summary>每级加工效率倍率（长度 3，索引 0=一级，默认全 1.0；null 时恒 1.0）。</summary>
+    public double[] EfficiencyByLevel { get; set; }
+
+    /// <summary>商铺每级服务范围（格，长度 3，索引 0=一级；-1=全城；null 时不适用）。</summary>
+    public int[] ServiceRangeByLevel { get; set; }
+
+    public int JobSlotsAt(int level) => JobSlotsByLevel?.Length >= level ? JobSlotsByLevel[level - 1] : JobSlots;
+    public double EfficiencyAt(int level) => EfficiencyByLevel?.Length >= level ? EfficiencyByLevel[level - 1] : 1.0;
+    public int ServiceRangeAt(int level) => ServiceRangeByLevel?.Length >= level ? ServiceRangeByLevel[level - 1] : 0;
+    public float MinSkillExpAt(int level) => MinSkillExpByLevel?.Length >= level ? MinSkillExpByLevel[level - 1] : 0;
 
     /// <summary>储存上限（份）：住宅存家用物资，商铺/工坊存专营货品，农田存待运粮食。</summary>
     public int StorageCapacity { get; set; }

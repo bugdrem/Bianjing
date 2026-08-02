@@ -141,6 +141,7 @@ public partial class Main : Node3D
     private void OnMonthPassed()
     {
         var gs = GameState.I;
+        _economy.PayMonthlySalary(gs); // 王爷月俸先入账
         _lifecycle.TickMonth(gs);
         _taxes.TickMonth(gs);
         _goods.TickMonth(gs); // 农田到期收获，收成散落田格

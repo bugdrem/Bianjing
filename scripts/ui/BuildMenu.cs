@@ -138,9 +138,9 @@ public partial class BuildMenu : PanelContainer
             else
             {
                 // 道路/桥按长度计价（每延米，不计宽度），标价带单位一目了然
-                AddButton(_itemRow, $"主路 {GameState.RoadCostOf(RoadKind.Main)}/米", () => _build.SetRoadMode(RoadKind.Main));
-                AddButton(_itemRow, $"辅路 {GameState.RoadCostOf(RoadKind.Side)}/米", () => _build.SetRoadMode(RoadKind.Side));
-                AddButton(_itemRow, $"桥梁 {GameState.BridgeCost}/米", () => _build.SetBridgeMode());
+                AddButton(_itemRow, $"主路 {CurrencyHelper.FormatWen(GameState.RoadCostOf(RoadKind.Main))}/米", () => _build.SetRoadMode(RoadKind.Main));
+                AddButton(_itemRow, $"辅路 {CurrencyHelper.FormatWen(GameState.RoadCostOf(RoadKind.Side))}/米", () => _build.SetRoadMode(RoadKind.Side));
+                AddButton(_itemRow, $"桥梁 {CurrencyHelper.FormatWen(GameState.BridgeCost)}/米", () => _build.SetBridgeMode());
                 AddButton(_itemRow, "树木", () => _build.SetTreeMode());
             }
         }
@@ -171,7 +171,7 @@ public partial class BuildMenu : PanelContainer
                     $"人口达 {Milestones.Of(captured.MilestoneRequired).PopulationRequired} 晋级后解锁");
                 continue;
             }
-            AddButton(_itemRow, $"{captured.Name} {captured.Cost}", () => _build.SetBuildingMode(captured));
+            AddButton(_itemRow, $"{captured.Name} {CurrencyHelper.FormatWen(captured.Cost)}", () => _build.SetBuildingMode(captured));
         }
     }
 

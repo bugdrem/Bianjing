@@ -17,13 +17,15 @@ public static class GoodsColors
         Goods.Wood => new Color(0.5f, 0.36f, 0.2f),
         Goods.Fruit => new Color(0.78f, 0.3f, 0.28f),
         Goods.Game => new Color(0.42f, 0.26f, 0.22f),
-        Goods.Ore => new Color(0.45f, 0.5f, 0.55f),
-        Goods.Salt => new Color(0.9f, 0.9f, 0.88f),
+        Goods.IronOre => new Color(0.45f, 0.5f, 0.55f),
+        Goods.RawSalt => new Color(0.9f, 0.9f, 0.88f),
         Goods.Timber => new Color(0.66f, 0.5f, 0.3f),
         Goods.Wine => new Color(0.6f, 0.32f, 0.5f),
         Goods.Ironware => new Color(0.3f, 0.32f, 0.38f),
         Goods.Cured => new Color(0.55f, 0.33f, 0.18f),
         Goods.Water => new Color(0.3f, 0.5f, 0.75f),
+        Goods.Weapon => new Color(0.52f, 0.52f, 0.58f),
+        Goods.Book => new Color(0.42f, 0.35f, 0.25f),
         _ => Fallback,
     };
 }

@@ -9,9 +9,8 @@ namespace Bianjing;
 /// </summary>
 public static class PopulationConfig
 {
-    /// <summary>每日迁入概率：夫妻户 / 单身流民（有合法落位/寄居空位才成行）。</summary>
-    public const float CoupleChancePerDay = 0.1f;
-    public const float SingleChancePerDay = 0.05f;
+    /// <summary>每日迁入事件概率（四类流民按权重抽一，成行还需流民营/店坊有寄居空位；见 LifecycleSystem.Immigration）。</summary>
+    public const float ImmigrationChancePerDay = 0.1f;
 
     /// <summary>单身迁入者为男性的概率。</summary>
     public const float SingleMaleChance = 0.6f;
@@ -44,32 +43,45 @@ public static class PopulationConfig
     public const double BirthAgeSlowPerYear = 0.05;
     public const double BirthAgeFactorMin = 0.2;
 
-    /// <summary>富裕度对第五胎后生育的抑制尺度（家庭人均资产达此值时降至下限）与系数下限。</summary>
-    public const double WealthEase = 400;
+    /// <summary>富裕度对高胎次生育的抑制尺度（人均资产 40,000 文时降至下限）。</summary>
+    public const double WealthEase = 40_000;
     public const double BirthWealthFactorMin = 0.3;
 
     /// <summary>朋友数上限（社交预留）。</summary>
     public const int MaxFriends = 5;
 
-    /// <summary>成年分家新立家庭的初始公产（贯）。</summary>
-    public const double SplitFamilyAssets = 15;
+    /// <summary>成年分家新立家庭的初始公产（文）。</summary>
+    public const long SplitFamilyAssets = 1_500;
 
-    // ---- 迁入（原 ImmigrationConfig 并入）：流民自带资产与自建门槛 ----
+    // ---- 迁入（需求 §2.2 四类流民模型：归民/寓商/散勇/客士，权重与资产区间见下；
+    // 流民现金买不起地（§8.2），须先寄居流民营/店坊就业攒钱，再由 BuildUpFromLodging 自建迁出）----
 
-    /// <summary>迁入者随机自带资产区间（家庭公产初值，扣除建房地价后余额入公产）。</summary>
-    public const double ArriveAssetsMin = 20;
-    public const double ArriveAssetsMax = 120;
+    /// <summary>四类流民权重（归一化抽签：归民最多，客士极少）。</summary>
+    public const double ImmigrantWeightSettler = 0.50;
+    public const double ImmigrantWeightMerchant = 0.25;
+    public const double ImmigrantWeightSoldier = 0.20;
+    public const double ImmigrantWeightScholar = 0.05;
 
-    /// <summary>单身自建住宅门槛：资产达此值且有合法落位才自建，否则寄居店坊当暂住雇工。</summary>
-    public const double SelfBuildAssets = 80;
+    /// <summary>各类流民随身现金区间（文，寓商最富，客士最穷；携带有价物者另加变卖价值）。</summary>
+    public const long SettlerAssetsMin = 5;
+    public const long SettlerAssetsMax = 15;
+    public const long MerchantAssetsMin = 2_000;
+    public const long MerchantAssetsMax = 5_000;
+    public const long SoldierAssetsMin = 100;
+    public const long SoldierAssetsMax = 300;
+    public const long ScholarAssetsMin = 0;
+    public const long ScholarAssetsMax = 50;
+
+    /// <summary>寄居者攒够自建住宅的门槛（文）：对齐普通宅基地地价，预算达此值且有落位才自建迁出。</summary>
+    public const long SelfBuildAssets = 10_000;
 
     /// <summary>迁入成人的年龄区间（起始岁数 + 随机跨度）。</summary>
     public const int ArriveAgeMin = 18;
     public const int ArriveAgeSpan = 18;
 
-    /// <summary>迁入成人的随身私产区间（起始 + 随机跨度，贯）。</summary>
-    public const double ArriveMoneyMin = 10;
-    public const double ArriveMoneySpan = 20;
+    /// <summary>迁入成人的随身私产区间（起始 + 随机跨度，文）。</summary>
+    public const long ArriveMoneyMin = 5;
+    public const long ArriveMoneySpan = 5000;
 
     /// <summary>公式：胎次 → 生育系数（1~3 胎最大，之后递减，第六胎起指数衰减永不归零）。</summary>
     public static double BirthCountFactor(int kids) =>
@@ -83,7 +95,51 @@ public static class PopulationConfig
         ageYears <= BirthAgeSlowStart ? 1.0
         : Math.Max(BirthAgeFactorMin, 1.0 - (ageYears - BirthAgeSlowStart) * BirthAgeSlowPerYear);
 
-    /// <summary>公式：家庭人均资产 → 高胎次生育系数（越富越不易再生，钳制在下限与 1 之间）。</summary>
-    public static double BirthWealthFactor(double perCapitaAssets) =>
-        Math.Clamp(1.0 - perCapitaAssets / WealthEase, BirthWealthFactorMin, 1.0);
+    /// <summary>公式：家庭人均资产（文） → 高胎次生育系数（越富越不易再生，钳制在下限与 1 之间）。</summary>
+    public static double BirthWealthFactor(long perCapitaAssets) =>
+        Math.Clamp(1.0 - perCapitaAssets / 40_000.0, BirthWealthFactorMin, 1.0);
+
+    /// <summary>流民类型（需求 §2.2）：归民（务农无技能）/ 寓商（经商）/ 散勇（携兵刃）/ 客士（携书籍）。</summary>
+    public enum ImmigrantType
+    {
+        Settler,   // 归民：无技能，占比高
+        Merchant,  // 寓商：商业技能，占比低
+        Soldier,   // 散勇：战斗技能 + 兵刃，占比低
+        Scholar,   // 客士：文化技能 + 书籍，占比极低
+    }
+
+    /// <summary>类型 → 随身现金下限（文）。</summary>
+    public static long AssetsMinOf(ImmigrantType t) => t switch
+    {
+        ImmigrantType.Merchant => MerchantAssetsMin,
+        ImmigrantType.Soldier => SoldierAssetsMin,
+        ImmigrantType.Scholar => ScholarAssetsMin,
+        _ => SettlerAssetsMin,
+    };
+
+    /// <summary>类型 → 随身现金上限（文）。</summary>
+    public static long AssetsMaxOf(ImmigrantType t) => t switch
+    {
+        ImmigrantType.Merchant => MerchantAssetsMax,
+        ImmigrantType.Soldier => SoldierAssetsMax,
+        ImmigrantType.Scholar => ScholarAssetsMax,
+        _ => SettlerAssetsMax,
+    };
+
+    /// <summary>类型 → 技能（需求 §2.2：归民无技能，寓商商业，散勇战斗，客士文化）。</summary>
+    public static SkillType SkillOf(ImmigrantType t) => t switch
+    {
+        ImmigrantType.Merchant => SkillType.Commerce,
+        ImmigrantType.Soldier => SkillType.Combat,
+        ImmigrantType.Scholar => SkillType.Scholarship,
+        _ => SkillType.None,
+    };
+
+    /// <summary>类型 → 随身携带物（需求 §2.2：散勇携兵刃、客士携书籍，可变卖折入资产；无则 null）。</summary>
+    public static string CarriedOf(ImmigrantType t) => t switch
+    {
+        ImmigrantType.Soldier => Goods.Weapon,
+        ImmigrantType.Scholar => Goods.Book,
+        _ => null,
+    };
 }

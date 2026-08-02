@@ -230,10 +230,11 @@ public class ZoneGrowthSystem
     
     /// <summary>在可建设区内按选址偏好挑一处合法落位自建住宅（house）：
     /// 偏好叠加打分（SiteScore：主路 &gt; 辅路 &gt; 河道 &gt; 水井/已有建筑，河边十字路口分最高），
-    /// 地价 = HouseBaseCost + LandPricePerScore×分；达到 SiteThreshold 的可负担候选按分数加权抽签
+    /// 地价按需求 §4.1 四级（近资源点 8,000 / 普通 10,000 / 临街 15,000 / 城中心 25,000 文，见 GrowthConfig）；
+    /// 达到 SiteThreshold 的可负担候选按分数加权抽签
     /// （高分地段大概率中签、达标冷清处保留小概率，既聚居又不死板），无达标者退选最高分；
     /// 全买不起或无合法落位返回 false，成功输出新宅与实际地价（调用方扣款）。</summary>
-    public static bool TryBuildHouse(GameState gs, double budget, out BuildingInstance built, out double cost)
+    public static bool TryBuildHouse(GameState gs, long budget, out BuildingInstance built, out long cost)
     {
         built = null;
         cost = 0;
@@ -243,9 +244,10 @@ public class ZoneGrowthSystem
         Vector2I? mansion = PrinceMansionCenter(gs);
     
         // 可负担候选分两组：达标集（按分加权抽签）与全集最高分（兜底）
-        var qualified = new List<(Vector2I Cell, double Price, double Weight)>();
+        var qualified = new List<(Vector2I Cell, long Price, double Weight)>();
         Vector2I bestFallback = default;
-        double bestScore = double.MinValue, bestPrice = 0;
+        double bestScore = double.MinValue;
+        long bestPrice = 0;
         bool afford = false;
     
         foreach (var c in gs.BuildableCells)
@@ -254,7 +256,7 @@ public class ZoneGrowthSystem
             if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY) || !RingLayable(gs, c, def.SizeX, def.SizeY))
                 continue;
             double score = SiteScore(gs, c, def.SizeX, def.SizeY) + PrinceMansionBonus(mansion, c, def.SizeX, def.SizeY);
-            double price = GrowthConfig.LandPriceOf(score); // 地价公式见 GrowthConfig
+            long price = GrowthConfig.LandPriceOf(score, NearResource(gs, c, def.SizeX, def.SizeY)); // 地价公式见 GrowthConfig
             if (price > budget)
                 continue; // 该地段负担不起
             afford = true;
@@ -289,11 +291,27 @@ public class ZoneGrowthSystem
         return true;
     }
 
+    /// <summary>占地外扩 2 格内是否有资源点（树/水）：近资源的宅基地按最贱地价（需求 §4.1），鼓励定居者近资源谋生。</summary>
+    private static bool NearResource(GameState gs, Vector2I origin, int sizeX, int sizeY)
+    {
+        for (int dx = -2; dx <= sizeX + 1; dx++)
+            for (int dy = -2; dy <= sizeY + 1; dy++)
+            {
+                var c = new Vector2I(origin.X + dx, origin.Y + dy);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                ref var cell = ref gs.Map.CellAt(c);
+                if (cell.HasTree || cell.HasWater)
+                    return true;
+            }
+        return false;
+    }
+
     /// <summary>选址随机源（静态方法内使用，与实例 _rng 分开）。</summary>
     private static readonly Random _siteRng = new();
 
     /// <summary>按权重轮盘抽签：返回中签候选的下标（总权重内掏一点，逐个扣减定位）。</summary>
-    private static int WeightedPick(List<(Vector2I Cell, double Price, double Weight)> cands)
+    private static int WeightedPick(List<(Vector2I Cell, long Price, double Weight)> cands)
     {
         double total = 0;
         foreach (var q in cands)

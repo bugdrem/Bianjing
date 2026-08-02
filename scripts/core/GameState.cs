@@ -40,7 +40,7 @@ public class GameState
     /// <summary>地面物资堆，以格索引（y*Size+x）为键（一格至多一堆，拾空即消）。</summary>
     public Dictionary<int, ItemPileObj> Piles { get; } = new();
 
-    public double Money = WorldConfig.StartMoney;
+    public long Money = WorldConfig.StartMoney;
     public double Food = WorldConfig.StartFood;
 
     /// <summary>官库收支账本（本月/上月分类流水，随存档保存）。</summary>
@@ -181,13 +181,13 @@ public class GameState
         }
         if (newRoadCells > 0)
         {
-            double charge = (double)roadCost * newRoadCells / w; // 新格数/宽 = 等效延米，斜拖/重叠不多扣
+            long charge = (long)roadCost * newRoadCells / w; // 新格数/宽 = 等效延米，斜拖/重叠不多扣
             Money -= charge;
             Ledger.Add("营造道路", -charge);
         }
         if (newBridgeCells > 0)
         {
-            double charge = (double)BridgeCost * newBridgeCells / w; // 跨水段按桥梁单价
+            long charge = (long)BridgeCost * newBridgeCells / w; // 跨水段按桥梁单价
             Money -= charge;
             Ledger.Add("营造桥梁", -charge);
         }
@@ -220,7 +220,7 @@ public class GameState
         }
         if (newCells > 0)
         {
-            double charge = (double)BridgeCost * newCells / BridgeWidth;
+            long charge = (long)BridgeCost * newCells / BridgeWidth;
             Money -= charge;
             Ledger.Add("营造桥梁", -charge);
             EventBus.RaiseStatsChanged();
@@ -883,8 +883,8 @@ public class GameState
     }
 
     /// <summary>买方建筑向居民付款（收购居民背来的货）：官营走官库记账；
-    /// 民营由在店雇工凑钱（钱不够只付到见底），返回实付金额。</summary>
-    public double PayFromBuilding(BuildingInstance b, Citizen to, double amount)
+    /// 民营由在店雇工凑钱（钱不够只付到见底），返回实付金额（文）。</summary>
+    public long PayFromBuilding(BuildingInstance b, Citizen to, long amount)
     {
         if (amount <= 0)
             return 0;
@@ -898,11 +898,11 @@ public class GameState
         var staff = StaffOf(b);
         if (staff.Count == 0)
             return 0; // 无人经营付不出钱
-        double paid = 0;
-        double share = amount / staff.Count;
+        long paid = 0;
+        long share = amount / staff.Count;
         foreach (var w in staff)
         {
-            double p = Math.Min(Math.Max(0, w.Money), share);
+            long p = Math.Min(Math.Max(0, w.Money), share);
             w.Money -= p;
             paid += p;
         }
@@ -911,7 +911,7 @@ public class GameState
     }
 
     /// <summary>卖方建筑收款（居民向建筑买货）：有雇工平分、无雇工的官营入官库记账。</summary>
-    public void PayToBuilding(BuildingInstance b, double amount)
+    public void PayToBuilding(BuildingInstance b, long amount)
     {
         if (amount <= 0)
             return;

@@ -30,7 +30,7 @@ public class SaveInfo
 /// <summary>全局世界数据。</summary>
 public class WorldSave
 {
-    public double Money;
+    public long Money;
     public double Food;
     public int NextBuildingId;
     public int NextCitizenId;
@@ -39,12 +39,14 @@ public class WorldSave
     public int NextAnimalId;
     public int NextPileId;
 
-    /// <summary>税收政策：税种 Id -&gt; 档位。</summary>
-    public Dictionary<string, int> TaxLevels = new();
+    /// <summary>税收政策（批次五十六：三字段替代旧版税种-档位字典）。</summary>
+    public double LandTaxRate = EconomyConfig.LandTaxRateDefault;
+    public double TradeTaxRate = EconomyConfig.TradeTaxRateDefault;
+    public bool PollTaxEnabled;
 
     /// <summary>v3 起：官库账本（本月/上月分类流水）。</summary>
-    public Dictionary<string, double> LedgerCur = new();
-    public Dictionary<string, double> LedgerPrev = new();
+    public Dictionary<string, long> LedgerCur = new();
+    public Dictionary<string, long> LedgerPrev = new();
 
     /// <summary>v10：城市里程碑等级。</summary>
     public int MilestoneLevel;

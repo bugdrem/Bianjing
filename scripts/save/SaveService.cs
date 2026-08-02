@@ -16,7 +16,7 @@ namespace Bianjing;
 public static class SaveService
 {
     /// <summary>v21：水位改逐格变化（Cell.WaterH 随地势、下限 0），新增 WaterLevels 随档；旧档无水位数据，拒读。</summary>
-    public const int FormatVersion = 21;
+    public const int FormatVersion = 22; // 批次五十六：货币 double→long(文)，税制三税种，货品表全换
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -198,9 +198,11 @@ public static class SaveService
             NextPlantId = gs.NextPlantId,
             NextAnimalId = gs.NextAnimalId,
             NextPileId = gs.NextPileId,
-            TaxLevels = new Dictionary<string, int>(gs.Taxes.Levels),
-            LedgerCur = new Dictionary<string, double>(gs.Ledger.Current),
-            LedgerPrev = new Dictionary<string, double>(gs.Ledger.Previous),
+            LandTaxRate = gs.Taxes.LandTaxRate,
+            TradeTaxRate = gs.Taxes.TradeTaxRate,
+            PollTaxEnabled = gs.Taxes.PollTaxEnabled,
+            LedgerCur = new Dictionary<string, long>(gs.Ledger.Current),
+            LedgerPrev = new Dictionary<string, long>(gs.Ledger.Previous),
             MilestoneLevel = gs.MilestoneLevel,
             Techs = new List<string>(gs.TechsUnlocked),
             ResearchTechId = gs.ResearchTechId,
@@ -361,12 +363,17 @@ public static class SaveService
             NextPlantId = world.NextPlantId,
             NextAnimalId = world.NextAnimalId,
             NextPileId = world.NextPileId,
-            Taxes = new TaxPolicy { Levels = world.TaxLevels ?? new Dictionary<string, int>() },
+            Taxes = new TaxPolicy
+            {
+                LandTaxRate = (world.LandTaxRate > 0) ? world.LandTaxRate : EconomyConfig.LandTaxRateDefault,
+                TradeTaxRate = (world.TradeTaxRate > 0) ? world.TradeTaxRate : EconomyConfig.TradeTaxRateDefault,
+                PollTaxEnabled = world.PollTaxEnabled,
+            },
             CityName = string.IsNullOrEmpty(meta.CityName) ? "汴京" : meta.CityName,
             Ledger = new Ledger
             {
-                Current = world.LedgerCur ?? new Dictionary<string, double>(),
-                Previous = world.LedgerPrev ?? new Dictionary<string, double>(),
+                Current = world.LedgerCur ?? new Dictionary<string, long>(),
+                Previous = world.LedgerPrev ?? new Dictionary<string, long>(),
             },
             CurYear = meta.Year,
             CurMonth = meta.Month,

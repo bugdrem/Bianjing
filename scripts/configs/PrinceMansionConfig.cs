@@ -13,8 +13,8 @@ public static class PrinceMansionConfig
 
     // ---- 建成一次性开基资源 ----
 
-    /// <summary>拨入官库的钱（贯）与官粮（份）：开基家底。</summary>
-    public const double GrantMoney = 3000;
+    /// <summary>拨入官库的钱（文）与官粮（份）：开基家底（安家银，匹配 EconomyConfig.SettlementGrant）。</summary>
+    public const long GrantMoney = 100_000;
     public const double GrantFood = 400;
 
     /// <summary>拨入王爷府库存的各类货品（份）：供市易/加工链启动的开基物资。</summary>
@@ -23,8 +23,8 @@ public static class PrinceMansionConfig
         (Goods.Grain, 120),
         (Goods.Wood, 80),
         (Goods.Fruit, 40),
-        (Goods.Salt, 30),
-        (Goods.Ore, 30),
+        (Goods.RawSalt, 30),
+        (Goods.IronOre, 30),
     };
 
     // ---- 随迁的富裕年轻夫妻（暂居府中，划区后自建新宅迁出）----
@@ -36,11 +36,11 @@ public static class PrinceMansionConfig
     public const int AdultAgeMin = 20;
     public const int AdultAgeSpan = 7;
 
-    /// <summary>每对夫妻的家庭公产（贯，富裕：足以在好地段自建宅并有余）。</summary>
-    public const double CoupleAssets = 1200;
+    /// <summary>每对夫妻的家庭公产（文，富裕：足以在好地段自建宅并有余）。</summary>
+    public const long CoupleAssets = 40_000;
 
-    /// <summary>每人随身私产（贯）。</summary>
-    public const int AdultMoney = 150;
+    /// <summary>每人随身私产（文）。</summary>
+    public const long AdultMoney = 2_000;
 
     // ---- 村民建房选址倾向加成（用户需求：建房倾向叠加王爷府数值）----
 

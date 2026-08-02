@@ -12,9 +12,6 @@ public static class GrowthConfig
     /// <summary>住宅四周自动生成的小路环宽度（格）。</summary>
     public const int LaneRing = 1;
 
-    /// <summary>建房基价（地价下限，不论地段的营造成本）。</summary>
-    public const double HouseBaseCost = 20;
-
     // ---- 选址偏好打分（可叠加：河边十字路口 = 主路+辅路+河道 分最高）----
 
     /// <summary>选址扫描半径（米）：占地外扩此距内找偏好要素（主/辅路、河道、邻居）。</summary>
@@ -43,12 +40,30 @@ public static class GrowthConfig
     public static double SiteWeightOf(double score) =>
         Math.Pow(Math.Max(0.1, score), SitePickPower);
 
-    /// <summary>每点选址分的地价系数：贴主路/临河等好地段越贵。</summary>
-    public const double LandPricePerScore = 5;
+    // ---- 地价（需求 §4.1 四级：资源点近旁 8,000 / 普通 10,000 / 临街 15,000 / 城中心 25,000 文）----
 
-    /// <summary>公式：选址分 → 地价（贯）= 基价 + 系数 × 分。</summary>
-    public static double LandPriceOf(double siteScore) =>
-        HouseBaseCost + LandPricePerScore * Math.Max(0, siteScore);
+    /// <summary>资源点近旁地价（文）：近树/近水的宅基地最贱，鼓励定居者近资源谋生。</summary>
+    public const long LandPriceResource = 8_000;
+
+    /// <summary>普通宅基地地价（文）。</summary>
+    public const long LandPricePlain = 10_000;
+
+    /// <summary>临街地价（文）：选址分达“临街档”（贴主/辅路或成片聚居）即按此计价。</summary>
+    public const long LandPriceStreet = 15_000;
+
+    /// <summary>城中心地价（文）：选址高分（十字路口/河边且邻居密集）按此计价。</summary>
+    public const long LandPriceCenter = 25_000;
+
+    /// <summary>选址分分档：≥ LandPriceCenterScore 按城中心计价；≥ LandPriceStreetScore 按临街计价；否则普通地价。</summary>
+    public const double LandPriceCenterScore = 6;
+    public const double LandPriceStreetScore = 3;
+
+    /// <summary>公式：选址分 + 是否近资源点（树/水） → 地价（文）。</summary>
+    public static long LandPriceOf(double siteScore, bool nearResource) =>
+        nearResource ? LandPriceResource
+        : siteScore >= LandPriceCenterScore ? LandPriceCenter
+        : siteScore >= LandPriceStreetScore ? LandPriceStreet
+        : LandPricePlain;
 
     // ---- 升级 ----
 

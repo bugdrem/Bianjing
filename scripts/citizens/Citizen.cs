@@ -8,6 +8,19 @@ public enum Gender
     Female,
 }
 
+/// <summary>NPC 技能类型（需求 §3.3）：体力（樵夫/矿工/建筑工）、手艺（工匠/技工）、
+/// 商业（掌柜/账房）、文化（教师/医师）、战斗（散勇/兵卒）。
+/// 枚举只能尾部追加，防老档整数错位。</summary>
+public enum SkillType
+{
+    None,
+    Labor,       // 体力
+    Craft,       // 手艺
+    Commerce,    // 商业
+    Scholarship, // 文化
+    Combat,      // 战斗（散勇随身，需求 §2.2）
+}
+
 /// <summary>就业形态：无业 / 受雇于建筑（含修缮房）/ 进山自谋生路（伐木采猎）。</summary>
 public enum JobKind
 {
@@ -76,8 +89,17 @@ public class Citizen
     public JobKind JobKind = JobKind.None;
     public int WorkplaceId = -1;
 
-    /// <summary>个人资产。</summary>
-    public double Money;
+    /// <summary>个人资产（文）。</summary>
+    public long Money;
+
+    /// <summary>技能类型（批次五十六新增）。</summary>
+    public SkillType Skill = SkillType.None;
+
+    /// <summary>技能经验值（在主技能上累积，达阈值升级为 Skilled / Expert）。</summary>
+    public float SkillExp;
+
+    /// <summary>携带物品清单（迁入流民特殊携带：寓商≫散勇武器≫客士书籍），入存档。</summary>
+    public List<string> CarriedItems = new();
 
     // ---- 状态值（表现层实时驱动，随存档保存）----
     /// <summary>疲劳值 0-100，工作累积，休息消解。</summary>
@@ -135,6 +157,10 @@ public class Citizen
     {
         if (IsChild)
             return "孩童";
+        // 寄居流民营且无业的流民（受雇后按职业定身份）
+        if (JobKind == JobKind.None && HomeId >= 0
+            && gs.Buildings.TryGetValue(HomeId, out var camp) && camp.Def.Id == "refugee_camp")
+            return "流民";
         if (JobKind == JobKind.Logger)
             return "山民";
         if (JobKind == JobKind.Employed && gs.Buildings.TryGetValue(WorkplaceId, out var b))

@@ -14,9 +14,9 @@ public class MaintenanceSystem
     // 全部调参转发自 EconomyConfig（调参集中在 configs 目录）
     private static float AgingPerMonth => EconomyConfig.BuildingAgingPerMonth;
     private static float RepairPerWorker => EconomyConfig.RepairPerWorker;
-    private static double RepairWorkerCost => EconomyConfig.RepairWorkerCost;
+    private static long RepairWorkerCost => EconomyConfig.RepairWorkerCost;
     private static float ResidentRepairAmount => EconomyConfig.ResidentRepairAmount;
-    private static double RepairFeePerResident => EconomyConfig.RepairFeePerResident;
+    private static long RepairFeePerResident => EconomyConfig.RepairFeePerResident;
 
     private static int Days => GameClock.DaysPerMonth;
 
@@ -42,7 +42,7 @@ public class MaintenanceSystem
         if (repairers == 0)
             return;
 
-        double cost = repairers * RepairWorkerCost / Days;
+        long cost = Math.Max(1, repairers * RepairWorkerCost / Days);
         gs.Money -= cost;
         gs.Ledger.Add("修缮料钱", -cost);
 
@@ -84,7 +84,7 @@ public class MaintenanceSystem
                 continue;
 
             foreach (var c in list)
-                c.Money = Math.Max(0, c.Money - RepairFeePerResident / Days);
+                c.Money = Math.Max(0, c.Money - Math.Max(1, RepairFeePerResident / Days));
             b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount / Days);
         }
     }

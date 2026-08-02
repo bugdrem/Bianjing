@@ -83,7 +83,7 @@ public partial class TopBar : PanelContainer
     public override void _Process(double delta)
     {
         var gs = GameState.I;
-        _money.Text = $"钱 {gs.Money:F0}";
+        _money.Text = CurrencyHelper.FormatWen(gs.Money);
         _money.AddThemeColorOverride("font_color", gs.Money < 0 ? new Color(1f, 0.3f, 0.3f) : new Color(1f, 0.9f, 0.5f));
         _food.Text = $"粮 {gs.Food:F0}";
         _pop.Text = $"人口 {gs.Population}";

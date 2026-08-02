@@ -14,7 +14,7 @@ namespace Bianjing;
 public class JobSystem
 {
     /// <summary>每人每月生活开销：转发自 EconomyConfig。</summary>
-    private static double LivingCostPerCapita => EconomyConfig.LivingCostPerCapita;
+    private static long LivingCostPerCapita => EconomyConfig.LivingCostPerCapita;
 
     private readonly Random _rng = new();
 
@@ -186,7 +186,9 @@ public class JobSystem
     {
         foreach (var family in gs.Families.Values)
         {
-            double cost = family.MemberIds.Count * LivingCostPerCapita / GameClock.DaysPerMonth;
+            long cost = family.MemberIds.Count * LivingCostPerCapita / GameClock.DaysPerMonth;
+            if (cost <= 0)
+                continue;
             if (family.SharedAssets >= cost)
             {
                 family.SharedAssets -= cost;
@@ -200,9 +202,12 @@ public class JobSystem
                 .Select(id => gs.Citizens.GetValueOrDefault(id))
                 .Where(c => c != null && c.Money > 0)
                 .ToList();
+            if (members.Count == 0)
+                continue;
+            long sharePer = cost / members.Count;
             foreach (var member in members)
             {
-                double share = Math.Min(member.Money, cost / members.Count);
+                long share = Math.Min(member.Money, sharePer);
                 member.Money -= share;
             }
         }

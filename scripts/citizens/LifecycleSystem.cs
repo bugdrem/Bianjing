@@ -6,7 +6,7 @@ namespace Bianjing;
 
 /// <summary>
 /// 居民生命周期系统：
-/// 每日——迁入（夫妻户为主，兼有单身）→ 适龄婚配 → 生育 → 交友；
+/// 每日——迁入（需求 §2.2 四类流民模型）→ 适龄婚配 → 生育 → 交友；
 /// 每月——老化 → 死亡 → 无家处理/迁出。
 /// 概率均为「日频」直接取值：1x 下一游戏日 ≈ 20 现实秒、一游戏月 ≈ 10 现实分钟，
 /// 故迁入/婚育以「日」为单位小幅调参，约一游戏年（2 现实小时）内可把开局坊区填满。
@@ -15,8 +15,7 @@ namespace Bianjing;
 public class LifecycleSystem
 {
     // 高频引用的短名转发（调参集中在 configs/PopulationConfig）
-    private static float CoupleChancePerDay => PopulationConfig.CoupleChancePerDay;
-    private static float SingleChancePerDay => PopulationConfig.SingleChancePerDay;
+    private static float ImmigrationChancePerDay => PopulationConfig.ImmigrationChancePerDay;
     private static float MarriageChancePerDay => PopulationConfig.MarriageChancePerDay;
     private static float BirthChancePerDay => PopulationConfig.BirthChancePerDay;
     private static float FriendChancePerDay => PopulationConfig.FriendChancePerDay;
@@ -134,75 +133,92 @@ public class LifecycleSystem
         }
     }
 
-    /// <summary>迁入：夫妻户自带随机资产入城，必自建房（无合法落位/买不起则不迁）；
-    /// 单身流民资产够则自建，否则寄居有居住空位的工坊/商铺当暂住雇工（店满则不迁）。</summary>
+    /// <summary>迁入（需求 §2.2 四类流民 + §8.1 流民营启动链）：每日一次事件，按权重抽一类流民寄居；
+    /// 人口税开启时流入停滞（§4.4）；须有可寄居处（流民营优先，其次有居住空位的店坊）才成行——
+    /// 流民现金买不起地（§8.2），先落脚就业攒钱，再由 BuildUpFromLodging 攒够自建迁出。</summary>
     private void Immigration(GameState gs)
     {
+        if (gs.Taxes.PollTaxEnabled)
+            return; // 人口税开启：流入停滞（需求 §4.4）
+        if (_rng.NextDouble() >= ImmigrationChancePerDay)
+            return;
         var occupancy = gs.BuildHomeOccupancy();
-
-        if (_rng.NextDouble() < CoupleChancePerDay)
+        var host = FindLodging(gs);
+        if (host == null)
         {
-            double assets = RandomImmigrantAssets();
-            if (ZoneGrowthSystem.TryBuildHouse(gs, assets, out var house, out double cost))
-                SpawnCouple(gs, house, occupancy, assets - cost);
-            // 无合法落位 / 买不起：本轮不迁入
+            gs.PostNews("migrate-in", "流民欲入城安置，但城中尚无流民营可接纳（建设「流民营」后迁入者抵达）");
+            return;
         }
-
-        if (_rng.NextDouble() < SingleChancePerDay)
-        {
-            double assets = RandomImmigrantAssets();
-            if (assets >= PopulationConfig.SelfBuildAssets
-                && ZoneGrowthSystem.TryBuildHouse(gs, assets, out var house, out double cost))
-            {
-                SpawnSingle(gs, house, occupancy, assets - cost, false);
-            }
-            else
-            {
-                // 寄居有居住空位的工坊/商铺（占 1 居住位当暂住雇工，有空岗位则同时受雇）；店满则不迁
-                var host = FindLodging(gs);
-                if (host != null)
-                    SpawnSingle(gs, host, occupancy, assets, true);
-            }
-        }
+        SpawnImmigrant(gs, host, occupancy);
     }
 
-    /// <summary>迁入者随机自带资产（家庭公产初值）。</summary>
-    private double RandomImmigrantAssets()
-        => PopulationConfig.ArriveAssetsMin
-           + _rng.NextDouble() * (PopulationConfig.ArriveAssetsMax - PopulationConfig.ArriveAssetsMin);
+    /// <summary>按权重抽一类流民（归一化：归民最多，客士极少）。</summary>
+    private PopulationConfig.ImmigrantType RollImmigrantType()
+    {
+        double roll = _rng.NextDouble();
+        if (roll < PopulationConfig.ImmigrantWeightSettler)
+            return PopulationConfig.ImmigrantType.Settler;
+        roll -= PopulationConfig.ImmigrantWeightSettler;
+        if (roll < PopulationConfig.ImmigrantWeightMerchant)
+            return PopulationConfig.ImmigrantType.Merchant;
+        roll -= PopulationConfig.ImmigrantWeightMerchant;
+        if (roll < PopulationConfig.ImmigrantWeightSoldier)
+            return PopulationConfig.ImmigrantType.Soldier;
+        return PopulationConfig.ImmigrantType.Scholar;
+    }
 
-    /// <summary>找可寄居的工坊/商铺（居住格未满，BuildingOccupancy &lt; 容量）；无则 null。</summary>
+    /// <summary>流民随身现金（按类型区间随机，文）。</summary>
+    private long RandomImmigrantAssets(PopulationConfig.ImmigrantType type)
+        => PopulationConfig.AssetsMinOf(type)
+           + (long)(_rng.NextDouble() * (PopulationConfig.AssetsMaxOf(type) - PopulationConfig.AssetsMinOf(type)));
+
+    /// <summary>找可寄居处：流民营优先（需求 §8.1 安置主通道，纯住宿无岗位），
+    /// 其次有居住空位的店坊（前店后宅当暂住雇工）；均无则 null。</summary>
     private static BuildingInstance FindLodging(GameState gs)
     {
+        BuildingInstance fallback = null;
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.Category != "grown" || b.Def.Id == "house")
+            if (b.HousingCapacity <= 0 || gs.BuildingOccupancy(b) >= b.HousingCapacity)
                 continue;
-            if (gs.BuildingOccupancy(b) < b.HousingCapacity)
+            if (b.Def.Id == "refugee_camp")
                 return b;
+            if (b.Def.Category == "grown" && b.Def.Id != "house")
+                fallback ??= b;
         }
-        return null;
+        return fallback;
     }
 
-    private void SpawnCouple(GameState gs, BuildingInstance house, Dictionary<int, int> occupancy, double assets)
+    /// <summary>落一名流民寄居（需求 §2.2）：按类型定随身现金/技能/携带物，携带物可变卖折入资产；
+    /// 寄居处有空岗位则顺带受雇（流民营无岗位，次日由 JobSystem 寻城职）。</summary>
+    private void SpawnImmigrant(GameState gs, BuildingInstance host, Dictionary<int, int> occupancy)
     {
-        var family = gs.AddFamily(new Family { HomeId = house.Id, SharedAssets = Math.Max(0, assets) });
-
-        var husband = NewAdult(gs, Gender.Male);
-        var wife = NewAdult(gs, Gender.Female);
-        husband.SpouseId = wife.Id;
-        wife.SpouseId = husband.Id;
-
-        house.Abandoned = false;
-        foreach (var c in new[] { husband, wife })
-        {
-            c.FamilyId = family.Id;
-            family.MemberIds.Add(c.Id);
-            MoveIn(gs, c, house.Id, occupancy);
-            gs.LogLifeEvent(c, "携眷迁入汴京，自建新宅");
-        }
-        gs.PostNews("migrate-in", $"{husband.Name}携眷迁入汴京，自建新宅安家"); // 公告栏播报迁入
+        var type = RollImmigrantType();
+        long assets = RandomImmigrantAssets(type);
+        string carried = PopulationConfig.CarriedOf(type);
+        if (carried != null)
+            assets += Goods.PriceOf(carried); // 携带物价值折入资产（可变卖）
+        var immigrant = NewAdult(gs, _rng.NextDouble() < PopulationConfig.SingleMaleChance ? Gender.Male : Gender.Female);
+        immigrant.Skill = PopulationConfig.SkillOf(type);
+        if (carried != null)
+            immigrant.CarriedItems.Add(carried);
+        var family = gs.AddFamily(new Family { HomeId = host.Id, SharedAssets = Math.Max(0, assets) });
+        immigrant.FamilyId = family.Id;
+        family.MemberIds.Add(immigrant.Id);
+        host.Abandoned = false;
+        MoveIn(gs, immigrant, host.Id, occupancy);
+        gs.LogLifeEvent(immigrant, $"以{ImmigrantTypeName(type)}之身来投，寄居{host.Def.Name}");
+        gs.PostNews("migrate-in", $"{immigrant.Name}以{ImmigrantTypeName(type)}之身迁入，暂居{host.Def.Name}"); // 公告栏播报迁入
     }
+
+    /// <summary>流民类型中文名（公告/履历用）。</summary>
+    private static string ImmigrantTypeName(PopulationConfig.ImmigrantType t) => t switch
+    {
+        PopulationConfig.ImmigrantType.Merchant => "寓商",
+        PopulationConfig.ImmigrantType.Soldier => "散勇",
+        PopulationConfig.ImmigrantType.Scholar => "客士",
+        _ => "归民",
+    };
 
     /// <summary>王爷府建成时随迁安置：CoupleCount 对富裕年轻夫妻暂居府中（王爷府 capacity 提供居住位），
     /// 各自成家、家庭公产丰厚；待玩家划好可建设坊区后，由 BuildUpFromLodging（寄居→攒够自建）自然迁出、
@@ -242,27 +258,6 @@ public class LifecycleSystem
             AgeMonths = (PrinceMansionConfig.AdultAgeMin + _rng.Next(PrinceMansionConfig.AdultAgeSpan)) * 12 + _rng.Next(12),
             Money = PrinceMansionConfig.AdultMoney,
         });
-    }
-
-    private void SpawnSingle(GameState gs, BuildingInstance house, Dictionary<int, int> occupancy, double assets, bool lodger)
-    {
-        var single = NewAdult(gs, _rng.NextDouble() < PopulationConfig.SingleMaleChance ? Gender.Male : Gender.Female);
-        var family = gs.AddFamily(new Family { HomeId = house.Id, SharedAssets = Math.Max(0, assets) });
-        single.FamilyId = family.Id;
-        family.MemberIds.Add(single.Id);
-        house.Abandoned = false;
-        MoveIn(gs, single, house.Id, occupancy);
-        gs.LogLifeEvent(single, lodger ? "寄居店坊，暂谋生计" : "只身迁入汴京，自建新宅");
-        gs.PostNews("migrate-in", lodger
-            ? $"{single.Name}迁入汴京，暂寄居{house.Def.Name}"
-            : $"{single.Name}只身迁入汴京，自建新宅"); // 公告栏播报迁入
-
-        // 寄居者：若寄居的店坊有空岗位，顺带受雇（所占居住位与工作位为同一格）
-        if (lodger && house.Def.JobSlots > 0 && gs.StaffOf(house).Count < house.Def.JobSlots)
-        {
-            single.JobKind = JobKind.Employed;
-            single.WorkplaceId = house.Id;
-        }
     }
 
     private Citizen NewAdult(GameState gs, Gender gender)
@@ -344,8 +339,8 @@ public class LifecycleSystem
         }
     
         // 情形二：需另建新宅（次子随父母、寄居店坊、或本宅已满）——建得起才成婚
-        double budget = MarriageBudget(gs, man, woman);
-        if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var newHome, out double cost))
+        long budget = MarriageBudget(gs, man, woman);
+        if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var newHome, out long cost))
         {
             BindSpouses(gs, man, woman);
             MarryIntoNewHome(gs, man, woman, newHome, occupancy, cost);
@@ -379,26 +374,26 @@ public class LifecycleSystem
     }
     
     /// <summary>成婚建房预算：夫妻各自家庭公产份额估算 + 私产（非破坏性估算，供 TryBuildHouse 判断）。</summary>
-    private static double MarriageBudget(GameState gs, Citizen man, Citizen woman)
+    private static long MarriageBudget(GameState gs, Citizen man, Citizen woman)
         => SharedShare(gs, man) + man.Money + SharedShare(gs, woman) + woman.Money;
     
-    /// <summary>家庭公产的人均份额（非破坏性估算，不改动家庭）。</summary>
-    private static double SharedShare(GameState gs, Citizen c)
+    /// <summary>家庭公产的人均份额（文，非破坏性估算，不改动家庭）。</summary>
+    private static long SharedShare(GameState gs, Citizen c)
         => gs.Families.TryGetValue(c.FamilyId, out var fam) && fam.MemberIds.Count > 0
             ? fam.SharedAssets / fam.MemberIds.Count : 0;
     
     /// <summary>婚后另立门户：夫妻各从原家庭分得一份（分产 + 嫁妝），扣除房款后迁入自建新宅成立新家庭。</summary>
-    private void MarryIntoNewHome(GameState gs, Citizen man, Citizen woman, BuildingInstance newHome, Dictionary<int, int> occupancy, double cost)
+    private void MarryIntoNewHome(GameState gs, Citizen man, Citizen woman, BuildingInstance newHome, Dictionary<int, int> occupancy, long cost)
     {
-        double portion = DetachFromFamily(gs, man);  // 男方分得的家产份额
-        double dowry = DetachFromFamily(gs, woman);   // 妻子嫁妝
-        double pooled = portion + dowry - cost;       // 公产先抵房款
+        long portion = DetachFromFamily(gs, man);  // 男方分得的家产份额
+        long dowry = DetachFromFamily(gs, woman);   // 妻子嫁妝
+        long pooled = portion + dowry - cost;       // 公产先抵房款
         if (pooled < 0)
         {
             // 公产不够补房款：从二人私产找补
-            double deficit = -pooled;
-            double fromMan = Math.Min(Math.Max(0, man.Money), deficit); man.Money -= fromMan; deficit -= fromMan;
-            double fromWoman = Math.Min(Math.Max(0, woman.Money), deficit); woman.Money -= fromWoman;
+            long deficit = -pooled;
+            long fromMan = Math.Min(Math.Max(0, man.Money), deficit); man.Money -= fromMan; deficit -= fromMan;
+            long fromWoman = Math.Min(Math.Max(0, woman.Money), deficit); woman.Money -= fromWoman;
             pooled = 0;
         }
         var fam = gs.AddFamily(new Family { HomeId = newHome.Id, SharedAssets = pooled });
@@ -413,12 +408,12 @@ public class LifecycleSystem
     }
 
     /// <summary>从所在家庭剥离一名成员，返回其按人均分得的家产份额（家庭空则解散）。</summary>
-    private static double DetachFromFamily(GameState gs, Citizen c)
+    private static long DetachFromFamily(GameState gs, Citizen c)
     {
         if (!gs.Families.TryGetValue(c.FamilyId, out var fam))
             return 0;
         fam.MemberIds.Remove(c.Id);
-        double share = fam.SharedAssets / Math.Max(1, fam.MemberIds.Count + 1);
+        long share = fam.SharedAssets / Math.Max(1, fam.MemberIds.Count + 1);
         fam.SharedAssets -= share;
         if (fam.MemberIds.Count == 0)
             gs.Families.Remove(fam.Id);
@@ -517,11 +512,19 @@ public class LifecycleSystem
     }
 
     /// <summary>家庭人均资产（公产+成员私产 / 人数），用于生育富裕度修正。</summary>
-    private static double FamilyPerCapitaAssets(GameState gs, Citizen c)
+    private static long FamilyPerCapitaAssets(GameState gs, Citizen c)
     {
         if (gs.Families.TryGetValue(c.FamilyId, out var fam) && fam.MemberIds.Count > 0)
             return fam.TotalAssets(gs) / fam.MemberIds.Count;
         return c.Money;
+    }
+
+    /// <summary>家庭总资产（公产 + 成员私产，文）：寄居攒钱自建判定用。</summary>
+    private static long FamilyTotalAssets(GameState gs, Citizen c)
+    {
+        if (gs.Families.TryGetValue(c.FamilyId, out var fam) && fam.MemberIds.Count > 0)
+            return fam.TotalAssets(gs);
+        return Math.Max(0, c.Money);
     }
 
     /// <summary>简版社交：成年人小概率结识新朋友（为后续人物交互留接口）。</summary>
@@ -596,12 +599,12 @@ public class LifecycleSystem
     /// <summary>尝试一名住户自建新宅另立门户：以其家庭人均公产 + 私产为预算，建得起才迁出（否则本轮不分）。</summary>
     private void TryLeaveAndBuild(GameState gs, Citizen c, Dictionary<int, int> occupancy)
     {
-        double budget = SharedShare(gs, c) + Math.Max(0, c.Money);
-        if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var newHome, out double cost))
+        long budget = SharedShare(gs, c) + Math.Max(0, c.Money);
+        if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var newHome, out long cost))
             LeaveForNewHome(gs, c, newHome, occupancy, cost);
     }
     
-    /// <summary>赚钱自建宅：寄居工坊/商铺的家庭（非 house 居所）人均资产≥自建门槛且有落位时，建房携家搬入。</summary>
+    /// <summary>攒钱自建宅：寄居流民营/店坊的家庭（非 house 居所）全家总资产≥自建门槛且有落位时，建房携家搬入。</summary>
     private void BuildUpFromLodging(GameState gs, Dictionary<int, int> occupancy)
     {
         var seen = new HashSet<int>();
@@ -610,24 +613,40 @@ public class LifecycleSystem
             if (c.IsChild || c.HomeId < 0 || !gs.Buildings.TryGetValue(c.HomeId, out var home))
                 continue;
             if (home.Def.Id == "house" || home.HousingCapacity <= 0)
-                continue; // 只处理寄居于店坊/王爷府（非自宅、有居住位）者，攒够即自建迁出
+                continue; // 只处理寄居于流民营/店坊/王爷府（非自宅、有居住位）者，攒够即自建迁出
             if (c.FamilyId >= 0 && !seen.Add(c.FamilyId))
                 continue; // 同家庭只处理一次
-            double budget = FamilyPerCapitaAssets(gs, c);
+            // 预算 = 全家总资产（公产 + 成员私产，含寄居期间积蓄）：攒够门槛且有落位即建房携家搬入
+            long budget = FamilyTotalAssets(gs, c);
             if (budget < PopulationConfig.SelfBuildAssets)
                 continue;
-            if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var house, out double cost))
+            if (ZoneGrowthSystem.TryBuildHouse(gs, budget, out var house, out long cost))
                 MoveFamilyToNewHouse(gs, c, house, occupancy, cost);
         }
     }
     
-    /// <summary>一家携入自建新宅：扣除房款后全家从旧居迁入新宅（无家庭则单人搬入）。</summary>
-    private void MoveFamilyToNewHouse(GameState gs, Citizen anyMember, BuildingInstance house, Dictionary<int, int> occupancy, double cost)
+    /// <summary>一家携入自建新宅：房款先由公产支付、不足按成员私产补足，然后全家从旧居迁入新宅（无家庭则单人搬入）。</summary>
+    private void MoveFamilyToNewHouse(GameState gs, Citizen anyMember, BuildingInstance house, Dictionary<int, int> occupancy, long cost)
     {
         house.Abandoned = false;
         if (gs.Families.TryGetValue(anyMember.FamilyId, out var fam))
         {
-            fam.SharedAssets = Math.Max(0, fam.SharedAssets - cost);
+            // 扣款顺序：公产 → 成员私产补足（寄居积蓄多在私产）
+            long deficit = cost;
+            long fromShared = Math.Min(fam.SharedAssets, deficit);
+            fam.SharedAssets -= fromShared;
+            deficit -= fromShared;
+            foreach (var id in fam.MemberIds.ToList())
+            {
+                if (deficit <= 0)
+                    break;
+                if (gs.Citizens.TryGetValue(id, out var m) && m.Money > 0)
+                {
+                    long fromMoney = Math.Min(m.Money, deficit);
+                    m.Money -= fromMoney;
+                    deficit -= fromMoney;
+                }
+            }
             fam.HomeId = house.Id;
             foreach (var id in fam.MemberIds.ToList())
                 if (gs.Citizens.TryGetValue(id, out var m))
@@ -640,6 +659,7 @@ public class LifecycleSystem
         }
         else
         {
+            anyMember.Money = Math.Max(0, anyMember.Money - cost); // 单人：房款从私产支付
             if (occupancy.ContainsKey(anyMember.HomeId))
                 occupancy[anyMember.HomeId]--;
             MoveIn(gs, anyMember, house.Id, occupancy);
@@ -676,7 +696,7 @@ public class LifecycleSystem
     }
 
     /// <summary>分家：脱离原家庭、扣除房款、迁入自建新居、成立自己的家庭（后续婚配成家）。</summary>
-    private void LeaveForNewHome(GameState gs, Citizen c, BuildingInstance newHome, Dictionary<int, int> occupancy, double cost)
+    private void LeaveForNewHome(GameState gs, Citizen c, BuildingInstance newHome, Dictionary<int, int> occupancy, long cost)
     {
         if (gs.Families.TryGetValue(c.FamilyId, out var old))
         {

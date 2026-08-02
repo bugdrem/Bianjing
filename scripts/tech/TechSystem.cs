@@ -43,7 +43,7 @@ public class TechSystem
         }
 
         // 当日经费 = 总经费均摊；官库掏不出则当日停工（无限钱不受限）
-        double daily = def.ResearchDays > 0 ? def.CostMoney / def.ResearchDays : 0;
+        long daily = def.ResearchDays > 0 ? (long)(def.CostMoney / def.ResearchDays) : 0;
         if (!GameSettings.InfiniteMoney && gs.Money < daily)
             return;
         gs.Money -= daily;

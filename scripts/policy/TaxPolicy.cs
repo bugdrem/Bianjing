@@ -4,78 +4,61 @@ using System.Collections.Generic;
 namespace Bianjing;
 
 /// <summary>
-/// 单个税种定义：计税基数由回调从当前局面算出。
-/// 数据驱动设计——mod 可向 TaxDefs.All 注册新税种，存档只记录档位不受影响。
+/// 税收政策（批次五十六重写：三税种模型——土地税、商税、人口税）。
+/// 纯数据，随存档 JSON 序列化。老档 Levels 字段保留兼容反序列化（新档不再使用）。
 /// </summary>
-public class TaxDef
-{
-    public string Id = "";
-    public string Name = "";
-    public string Description = "";
-
-    /// <summary>月度计税基数（贯），实收 = 基数 × 档位税率。</summary>
-    public Func<GameState, double> MonthlyBase = _ => 0;
-}
-
-/// <summary>内置四大税种注册表：田赋 / 商税 / 专卖税 / 市舶税。</summary>
-public static class TaxDefs
-{
-    public static readonly List<TaxDef> All = new()
-    {
-        new TaxDef
-        {
-            Id = "land",
-            Name = "田赋（两税）",
-            Description = "基础经济层：按粮田与在籍户数征收",
-            MonthlyBase = gs => gs.CountByDef("farm") * EconomyConfig.FarmBasePerFarm
-                + gs.Families.Count * EconomyConfig.FarmBasePerFamily,
-        },
-        new TaxDef
-        {
-            Id = "trade",
-            Name = "商税（过税+住税）",
-            Description = "贸易与经济层：按城中商铺经营规模征收",
-            MonthlyBase = gs => SumTaxBonus(gs, "shop"),
-        },
-        new TaxDef
-        {
-            Id = "monopoly",
-            Name = "专卖税（盐/茶/酒）",
-            Description = "资源垄断层：按工坊与矿盐官产的榷货专卖征收",
-            MonthlyBase = gs => SumTaxBonus(gs, "workshop") + SumTaxBonus(gs, "saltworks") + SumTaxBonus(gs, "mine"),
-        },
-        new TaxDef
-        {
-            Id = "maritime",
-            Name = "市舶税（海外关税）",
-            Description = "探索与扩张层：需开设港口市舶司（待后续版本）",
-            MonthlyBase = gs => SumTaxBonus(gs, "port") + gs.CountByDef("port") * EconomyConfig.PortBasePerPort,
-        },
-    };
-
-    private static double SumTaxBonus(GameState gs, string defId)
-    {
-        double sum = 0;
-        foreach (var b in gs.Buildings.Values)
-            if (b.Def.Id == defId)
-                sum += b.Def.TaxBonus;
-        return sum;
-    }
-}
-
-/// <summary>税收政策（纯数据，随存档保存）：每税种一个档位。</summary>
 public class TaxPolicy
 {
-    public const int MaxLevel = 3;
-    public static readonly string[] LevelNames = { "免征", "轻税", "中税", "重税" };
+    /// <summary>土地税税率（1%~10% 可调，默认 3%），作用于每栋建筑的定额税基（见 TaxSystem.BuildingTaxBase）。</summary>
+    public double LandTaxRate = EconomyConfig.LandTaxRateDefault;
 
-    /// <summary>税种 Id -&gt; 档位(0-3)，未设置的税种默认轻税。</summary>
+    /// <summary>商税税率（2%~15% 可调，默认 5%），交易发生时自动扣除。</summary>
+    public double TradeTaxRate = EconomyConfig.TradeTaxRateDefault;
+
+    /// <summary>人口税是否开启（默认关闭）；开启时从雇工工资中扣 20%，持续降幸福。</summary>
+    public bool PollTaxEnabled;
+
+    /// <summary>土地税档位 0-3（兼容旧 UI：免征/轻/中/重），0→1%, 1→3%, 2→6%, 3→10%。</summary>
+    public int LandTaxLevel
+    {
+        get
+        {
+            if (LandTaxRate <= EconomyConfig.LandTaxRateMin) return 0;
+            if (LandTaxRate <= 0.03) return 1;
+            if (LandTaxRate <= 0.06) return 2;
+            return 3;
+        }
+        set => LandTaxRate = value switch
+        {
+            0 => EconomyConfig.LandTaxRateMin,
+            1 => 0.03,
+            2 => 0.06,
+            _ => EconomyConfig.LandTaxRateMax,
+        };
+    }
+
+    /// <summary>商税档位 0-3（兼容旧 UI），0→2%, 1→5%, 2→10%, 3→15%。</summary>
+    public int TradeTaxLevel
+    {
+        get
+        {
+            if (TradeTaxRate <= EconomyConfig.TradeTaxRateMin) return 0;
+            if (TradeTaxRate <= 0.05) return 1;
+            if (TradeTaxRate <= 0.10) return 2;
+            return 3;
+        }
+        set => TradeTaxRate = value switch
+        {
+            0 => EconomyConfig.TradeTaxRateMin,
+            1 => 0.05,
+            2 => 0.10,
+            _ => EconomyConfig.TradeTaxRateMax,
+        };
+    }
+
+    public static readonly string[] LevelNames = { "免征/极低", "轻税", "中税", "重税" };
+
+    /// <summary>旧档兼容：老版税种档位字典（v≤55），新档不再写入。
+    /// 反序列化时如存在则尝试迁移到新字段（见 SaveService 迁移逻辑）。</summary>
     public Dictionary<string, int> Levels = new();
-
-    public int LevelOf(string taxId) => Levels.GetValueOrDefault(taxId, 1);
-
-    public void SetLevel(string taxId, int level) => Levels[taxId] = Math.Clamp(level, 0, MaxLevel);
-
-    /// <summary>档位税率倍数（步长取自 EconomyConfig）：免征0 / 轻0.5 / 中1.0 / 重1.5。</summary>
-    public static double RateOf(int level) => level * EconomyConfig.TaxRatePerLevel;
 }

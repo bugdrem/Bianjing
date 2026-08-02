@@ -205,7 +205,11 @@ public partial class InspectPanel : PanelContainer
         sb.AppendLine($"家庭：{FamilyLine(gs, c)}");
         sb.AppendLine($"住所：{BuildingName(gs, c.HomeId, "无家可归")}");
         sb.AppendLine($"生计：{JobLine(gs, c)}");
-        sb.AppendLine($"积蓄：{c.Money:F1} 钱");
+        if (c.Skill != SkillType.None)
+            sb.AppendLine($"技能：{SkillName(c.Skill)}（{SkillLevelName(c.SkillExp)}，{c.SkillExp:F0} 经验）");
+        if (c.CarriedItems.Count > 0)
+            sb.AppendLine($"携带：{string.Join("、", c.CarriedItems.Select(Goods.NameOf))}");
+        sb.AppendLine($"积蓄：{CurrencyHelper.FormatWen(c.Money)}");
         sb.AppendLine($"正在：{ActivityName(c.Activity)}{PackLine(c)}");
         sb.AppendLine($"疲劳 {c.Fatigue:F0} / 兴致 {c.Fun:F0}");
 
@@ -422,6 +426,22 @@ public partial class InspectPanel : PanelContainer
             sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日）");
         _body.Text = sb.ToString().TrimEnd();
     }
+
+    private static string SkillName(SkillType s) => s switch
+    {
+        SkillType.Labor => "体力",
+        SkillType.Craft => "手艺",
+        SkillType.Commerce => "商业",
+        SkillType.Scholarship => "文化",
+        _ => "无",
+    };
+
+    private static string SkillLevelName(float exp) => exp switch
+    {
+        >= EconomyConfig.SkillExpExpert => "高级",
+        >= EconomyConfig.SkillExpSkilled => "熟练",
+        _ => "学徒",
+    };
 
     /// <summary>名字按性别着色（BBCode）：男青蓝、女红。</summary>
     private static string ColorName(Citizen c)

@@ -47,8 +47,8 @@ public static class WorldConfig
     /// 白底在地图四周外扩此距离（形成地图到卷轴画布的白边过渡）。</summary>
     public const float MapEdgeExtend = 32f;
 
-    /// <summary>开局官库钱（贯）/ 官粮（份）。</summary>
-    public const double StartMoney = 5000;
+    /// <summary>开局官库钱（文）/ 官粮（份）。安家银值匹配 EconomyConfig.SettlementGrant。</summary>
+    public const long StartMoney = 100_000;
     public const double StartFood = 500;
 
     /// <summary>居民履历条数上限 / 全城公告条数上限（超出移除最旧）。</summary>

@@ -1,17 +1,22 @@
-using System.Collections.Generic;
 using Godot;
 
 namespace Bianjing;
 
 /// <summary>
-/// 税收政策面板：逐税种展示说明与档位（免征/轻税/中税/重税），实时预估月入。
-/// 税种列表来自 TaxDefs 注册表，mod 新增税种自动出现在面板中。
+/// 税收政策面板（批次五十六重写：三税种模型——土地税、商税、人口税）。
+/// 土地税/商税各有四档（免征/轻税/中税/重税），人口税为开关。
+/// 实时预估月入并展示税率。
 /// </summary>
 public partial class PolicyPanel : PanelContainer
 {
     private const float RefreshInterval = 0.5f;
 
-    private readonly List<(TaxDef Def, OptionButton Option, Label Revenue)> _rows = new();
+    private OptionButton _landOption;
+    private OptionButton _tradeOption;
+    private CheckButton _pollToggle;
+    private Label _landRevenue;
+    private Label _tradeRevenue;
+    private Label _pollRevenue;
     private float _refresh;
 
     public override void _Ready()
@@ -35,49 +40,73 @@ public partial class PolicyPanel : PanelContainer
         title.AddThemeFontSizeOverride("font_size", 20);
         box.AddChild(title);
 
-        foreach (var def in TaxDefs.All)
-            box.AddChild(MakeRow(def));
+        // 土地税
+        box.AddChild(MakeSectionLabel("土地税（按建筑类型/等级定额，税率作用于税基）"));
+        var landRow = new HBoxContainer { CustomMinimumSize = new Vector2(0, 32) };
+        landRow.AddThemeConstantOverride("separation", 12);
+        _landOption = MakeLevelOption(TaxPolicy.LevelNames, 0);
+        _landOption.ItemSelected += OnLandLevelChanged;
+        landRow.AddChild(_landOption);
+        _landRevenue = MakeRevenueLabel();
+        landRow.AddChild(_landRevenue);
+        box.AddChild(landRow);
 
-        var footer = new Label { Text = "税入并入国库，用于俸禄维护与后续扩展" };
+        // 商税
+        box.AddChild(MakeSectionLabel("商税（交易发生时按成交额扣除）"));
+        var tradeRow = new HBoxContainer { CustomMinimumSize = new Vector2(0, 32) };
+        tradeRow.AddThemeConstantOverride("separation", 12);
+        _tradeOption = MakeLevelOption(TaxPolicy.LevelNames, 0);
+        _tradeOption.ItemSelected += OnTradeLevelChanged;
+        tradeRow.AddChild(_tradeOption);
+        _tradeRevenue = MakeRevenueLabel();
+        tradeRow.AddChild(_tradeRevenue);
+        box.AddChild(tradeRow);
+
+        // 人口税
+        box.AddChild(MakeSectionLabel("人口税（从雇工工资扣 20%，持续降幸福）"));
+        var pollRow = new HBoxContainer { CustomMinimumSize = new Vector2(0, 32) };
+        pollRow.AddThemeConstantOverride("separation", 12);
+        _pollToggle = new CheckButton { Text = "开征人口税" };
+        _pollToggle.Toggled += OnPollToggled;
+        pollRow.AddChild(_pollToggle);
+        _pollRevenue = MakeRevenueLabel();
+        pollRow.AddChild(_pollRevenue);
+        box.AddChild(pollRow);
+
+        var footer = new Label { Text = "税入并入国库，用于俸禄维护与朝廷采买" };
         footer.AddThemeFontSizeOverride("font_size", 12);
         footer.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f));
         box.AddChild(footer);
+
+        SyncFromState();
     }
 
-    private Control MakeRow(TaxDef def)
+    private static Label MakeSectionLabel(string text)
     {
-        var row = new HBoxContainer();
-        row.AddThemeConstantOverride("separation", 12);
+        var lbl = new Label { Text = text };
+        lbl.AddThemeFontSizeOverride("font_size", 12);
+        lbl.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.65f));
+        return lbl;
+    }
 
-        var info = new VBoxContainer
+    private static OptionButton MakeLevelOption(string[] names, int selected)
+    {
+        var opt = new OptionButton();
+        foreach (string n in names)
+            opt.AddItem(n);
+        opt.Selected = selected;
+        return opt;
+    }
+
+    private static Label MakeRevenueLabel()
+    {
+        var lbl = new Label
         {
-            SizeFlagsHorizontal = SizeFlags.ExpandFill,
-            CustomMinimumSize = new Vector2(240, 0),
-        };
-        info.AddChild(new Label { Text = def.Name });
-        var desc = new Label { Text = def.Description };
-        desc.AddThemeFontSizeOverride("font_size", 12);
-        desc.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.65f));
-        info.AddChild(desc);
-        row.AddChild(info);
-
-        var option = new OptionButton();
-        foreach (string name in TaxPolicy.LevelNames)
-            option.AddItem(name);
-        option.Selected = GameState.I.Taxes.LevelOf(def.Id);
-        option.ItemSelected += index => GameState.I.Taxes.SetLevel(def.Id, (int)index);
-        row.AddChild(option);
-
-        var revenue = new Label
-        {
-            CustomMinimumSize = new Vector2(80, 0),
+            CustomMinimumSize = new Vector2(100, 0),
             HorizontalAlignment = HorizontalAlignment.Right,
             VerticalAlignment = VerticalAlignment.Center,
         };
-        row.AddChild(revenue);
-
-        _rows.Add((def, option, revenue));
-        return row;
+        return lbl;
     }
 
     public void Toggle()
@@ -96,17 +125,56 @@ public partial class PolicyPanel : PanelContainer
             Refresh();
     }
 
-    /// <summary>同步档位选择（读档后可能变化）并刷新预估月入。</summary>
+    private void SyncFromState()
+    {
+        var gs = GameState.I;
+        _landOption.Selected = gs.Taxes.LandTaxLevel;
+        _tradeOption.Selected = gs.Taxes.TradeTaxLevel;
+        _pollToggle.ButtonPressed = gs.Taxes.PollTaxEnabled;
+    }
+
+    private void OnLandLevelChanged(long index)
+    {
+        GameState.I.Taxes.LandTaxLevel = (int)index;
+        Refresh();
+    }
+
+    private void OnTradeLevelChanged(long index)
+    {
+        GameState.I.Taxes.TradeTaxLevel = (int)index;
+        Refresh();
+    }
+
+    private void OnPollToggled(bool on)
+    {
+        GameState.I.Taxes.PollTaxEnabled = on;
+        Refresh();
+    }
+
     private void Refresh()
     {
         _refresh = RefreshInterval;
         var gs = GameState.I;
-        foreach (var (def, option, revenue) in _rows)
+        SyncFromState();
+
+        long landEst = TaxSystem.EstimateLandTax(gs);
+        long tradeEst = TaxSystem.EstimateTradeTax(gs);
+
+        _landRevenue.Text = $"{CurrencyHelper.FormatWen(landEst)}/月";
+        _tradeRevenue.Text = $"{CurrencyHelper.FormatWen(tradeEst)}/月";
+
+        if (gs.Taxes.PollTaxEnabled)
         {
-            int level = gs.Taxes.LevelOf(def.Id);
-            if (option.Selected != level)
-                option.Selected = level;
-            revenue.Text = $"{TaxSystem.Estimate(gs, def):F1}/月";
+            long pollEst = 0;
+            foreach (var c in gs.Citizens.Values)
+                if (c.JobKind == JobKind.Employed && !c.IsChild)
+                    pollEst += (long)(gs.Buildings.TryGetValue(c.WorkplaceId, out var b)
+                        ? b.Def.Salary * EconomyConfig.PollTaxRate : 0);
+            _pollRevenue.Text = $"{CurrencyHelper.FormatWen(pollEst)}/月";
+        }
+        else
+        {
+            _pollRevenue.Text = "—";
         }
     }
 }

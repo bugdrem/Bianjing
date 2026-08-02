@@ -1,58 +1,99 @@
 using System;
+using System.Collections.Generic;
 
 namespace Bianjing;
 
 /// <summary>
-/// 税收系统：按政策档位对各税种计征入国库（每日按月基数的 1/30 结算并记账）；
-/// 重税引发民怨（每月结算，成人兴趣值下降），为后续满意度/民变系统留接口。
+/// 税收系统（批次五十六重写：三税种模型）。
+/// 土地税：按建筑类型与等级的固定税额，每月逐日 1/DaysPerMonth 收缴入国库。
+/// 商税：交易发生时由买方所在格/建筑的商业行为自动扣除（见 CitizenAgent/GoodsSystem）。
+/// 人口税：可选开启，从雇工每日薪资中扣除 20%，每月降幸福。
 /// </summary>
 public class TaxSystem
 {
-    /// <summary>每项重税每月造成的民怨（成人兴趣值扣减）：转发自 EconomyConfig。</summary>
-    private static float HeavyTaxFunPenalty => EconomyConfig.HeavyTaxFunPenalty;
+    /// <summary>每栋建筑的土地税月计税额（文，对应 3% 默认税率下的实收额；需求 §4.3）。</summary>
+    public static long BuildingTaxBase(BuildingDef def, int level)
+    {
+        return def.Id switch
+        {
+            "house"    => level switch { 1 => 10, 2 => 25, 3 => 50, _ => 10 },
+            "mansion"  => level switch { 1 => 80, 2 => 150, 3 => 300, _ => 80 },
+            "workshop" => level switch { 1 => 40, 2 => 80, 3 => 150, _ => 40 },
+            "shop"     => level switch { 1 => 50, 2 => 100, 3 => 200, _ => 50 },
+            _ => 0,
+        };
+    }
 
-    /// <summary>每日征税：月基数 ÷ 30，逐税种记入账本；税所在岗吏员与钱法科技提供全局加成。</summary>
+    /// <summary>每日征税：土地税逐栋收缴 + 人口税在薪资发放时扣（见 CitizenAgent），此处仅处理土地税。</summary>
     public void TickDay(GameState gs)
     {
-        double boost = TaxBoost(gs) * gs.TechFactor("tax");
-        foreach (var def in TaxDefs.All)
+        double rateFactor = gs.Taxes.LandTaxRate / EconomyConfig.LandTaxRateDefault;
+        int days = GameClock.DaysPerMonth;
+
+        foreach (var b in gs.Buildings.Values)
         {
-            int level = gs.Taxes.LevelOf(def.Id);
-            double amount = def.MonthlyBase(gs) * TaxPolicy.RateOf(level) * boost / GameClock.DaysPerMonth;
-            if (amount <= 0)
+            long baseAmount = BuildingTaxBase(b.Def, b.Level);
+            if (baseAmount <= 0)
                 continue;
-            gs.Money += amount;
-            gs.Ledger.Add(def.Name, amount);
+            long daily = Math.Max(1, (long)(baseAmount * rateFactor / days));
+            gs.Money += daily;
+            gs.Ledger.Add("土地税", daily);
         }
     }
 
-    /// <summary>税收加成倍率 = 1 + Σ(税所类建筑在岗吏员 × 每人加成)，数据驱动自 buildings.json。</summary>
-    public static double TaxBoost(GameState gs)
-    {
-        double boost = 1.0;
-        foreach (var c in gs.Citizens.Values)
-            if (c.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(c.WorkplaceId, out var wp))
-                boost += wp.Def.TaxBoostPerWorker;
-        return boost;
-    }
-
-    /// <summary>每月结算：重税民怨。</summary>
+    /// <summary>每月结算：重税民怨 + 人口税幸福度影响。</summary>
     public void TickMonth(GameState gs)
     {
-        int heavyCount = 0;
-        foreach (var def in TaxDefs.All)
-            if (gs.Taxes.LevelOf(def.Id) >= TaxPolicy.MaxLevel)
-                heavyCount++;
+        // 土地税重税（高于 6% 视为重税）
+        if (gs.Taxes.LandTaxRate > 0.06)
+            ApplyMoralePenalty(gs, "重敛伤民");
 
-        if (heavyCount == 0)
-            return;
+        // 商税重税（高于 10% 视为重税）
+        if (gs.Taxes.TradeTaxRate > 0.10)
+            ApplyMoralePenalty(gs, "关市苛征");
 
-        foreach (var c in gs.Citizens.Values)
-            if (!c.IsChild)
-                c.Fun = Math.Max(0f, c.Fun - HeavyTaxFunPenalty * heavyCount);
+        // 人口税
+        if (gs.Taxes.PollTaxEnabled)
+        {
+            foreach (var c in gs.Citizens.Values)
+                if (!c.IsChild)
+                    c.Fun = Math.Max(0f, c.Fun - EconomyConfig.PollTaxMoraleDrop);
+        }
+        else
+        {
+            // 关闭后缓慢恢复
+            foreach (var c in gs.Citizens.Values)
+                if (!c.IsChild && c.Fun < 50f)
+                    c.Fun = Math.Min(50f, c.Fun + EconomyConfig.PollTaxMoraleRecover);
+        }
     }
 
-    /// <summary>当前档位下某税种的预估月入（政策面板展示用）。</summary>
-    public static double Estimate(GameState gs, TaxDef def) =>
-        def.MonthlyBase(gs) * TaxPolicy.RateOf(gs.Taxes.LevelOf(def.Id));
+    private static void ApplyMoralePenalty(GameState gs, string reason)
+    {
+        foreach (var c in gs.Citizens.Values)
+            if (!c.IsChild)
+                c.Fun = Math.Max(0f, c.Fun - EconomyConfig.HeavyTaxFunPenalty);
+    }
+
+    /// <summary>土地税月入预估（政策面板展示用，文）。</summary>
+    public static long EstimateLandTax(GameState gs)
+    {
+        long total = 0;
+        double rateFactor = gs.Taxes.LandTaxRate / EconomyConfig.LandTaxRateDefault;
+        foreach (var b in gs.Buildings.Values)
+            total += (long)(BuildingTaxBase(b.Def, b.Level) * rateFactor);
+        return total;
+    }
+
+    /// <summary>商税月入预估（粗略，文）。</summary>
+    public static long EstimateTradeTax(GameState gs)
+    {
+        long total = 0;
+        foreach (var b in gs.Buildings.Values)
+        {
+            if (b.Def.Id is "shop" or "workshop" or "saltworks" or "mine")
+                total += (long)(b.Def.Salary * b.Def.JobSlots * 12 * gs.Taxes.TradeTaxRate);
+        }
+        return total;
+    }
 }

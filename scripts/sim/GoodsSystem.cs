@@ -186,8 +186,10 @@ public class GoodsSystem
         if (amount <= 0)
             return 0;
 
-        double unitPrice = Goods.PriceOf(goodsId) * Goods.BuyMarkup;
-        double affordable = c.Money > 0 ? c.Money / unitPrice : 0;
+        long unitPrice = (long)(Goods.PriceOf(goodsId) * Goods.BuyMarkup);
+        if (unitPrice <= 0)
+            return 0;
+        long affordable = c.Money / unitPrice;
         double want = Math.Min(amount, affordable);
         if (want <= 0)
             return 0;
@@ -202,7 +204,7 @@ public class GoodsSystem
             if (got <= 0)
                 continue;
 
-            double pay = got * unitPrice;
+            long pay = (long)(got * unitPrice);
             c.Money -= pay;
             if (workersOf.TryGetValue(b.Id, out var staff) && staff.Count > 0)
             {

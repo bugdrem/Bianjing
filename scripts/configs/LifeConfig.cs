@@ -34,8 +34,8 @@ public static class LifeConfig
     /// <summary>店主/家族产业内的人延迟退休年龄（岁）。</summary>
     public const int FamilyBusinessRetireAge = 60;
 
-    /// <summary>家庭人均资产高于此视为富裕（退休后闲逛而非采集）。</summary>
-    public const double WealthyPerCapitaAssets = 200;
+    /// <summary>家庭人均资产高于此视为富裕（文，退休后闲逛而非采集）。</summary>
+    public const long WealthyPerCapitaAssets = 20_000;
 
     /// <summary>任何年龄的基础年死亡率（意外/疾病等与龄无关的底噪）。</summary>
     public const float BaseAnnualMortality = 0.005f;

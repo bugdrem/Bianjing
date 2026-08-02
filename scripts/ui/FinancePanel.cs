@@ -70,9 +70,9 @@ public partial class FinancePanel : PanelContainer
     }
 
     private static void AppendSection(System.Text.StringBuilder sb, string label,
-        System.Collections.Generic.Dictionary<string, double> rows)
+        System.Collections.Generic.Dictionary<string, long> rows)
     {
-        double total = 0;
+        long total = 0;
         sb.AppendLine($"—— {label} ——");
         if (rows.Count == 0)
         {
@@ -81,9 +81,9 @@ public partial class FinancePanel : PanelContainer
         }
         foreach (var (cat, amt) in rows)
         {
-            sb.AppendLine($"{cat}  {(amt >= 0 ? "+" : "")}{amt:F1}");
+            sb.AppendLine($"{cat}  {(amt >= 0 ? "+" : "")}{CurrencyHelper.FormatWen(amt)}");
             total += amt;
         }
-        sb.AppendLine($"小计  {(total >= 0 ? "+" : "")}{total:F1}");
+        sb.AppendLine($"小计  {(total >= 0 ? "+" : "")}{CurrencyHelper.FormatWen(total)}");
     }
 }

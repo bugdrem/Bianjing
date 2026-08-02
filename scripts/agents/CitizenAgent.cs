@@ -561,7 +561,7 @@ public partial class CitizenAgent : Node3D
     /// <summary>家庭是否富裕（人均资产高于阀值）：退休后闲逛与采集的分流依据。</summary>
     private bool FamilyIsWealthy(GameState gs)
     {
-        double perCapita;
+        long perCapita;
         if (gs.Families.TryGetValue(C.FamilyId, out var fam) && fam.MemberIds.Count > 0)
             perCapita = fam.TotalAssets(gs) / fam.MemberIds.Count;
         else
@@ -1054,13 +1054,13 @@ public partial class CitizenAgent : Node3D
                 // 带采买单的购物（工坊补料或家庭补货）：按基价买一担背走（量力而行），货款付给货源方（雇工分账/官库入账）；主妇闲逛式采买无需结算
                 if (_buyGoodsId != "" && gs.Buildings.TryGetValue(_buySourceId, out var src))
                 {
-                    double price = Goods.PriceOf(_buyGoodsId);
-                    double afford = price > 0 ? Math.Max(0, C.Money) / price : C.Pack.Free;
+                    long price = Goods.PriceOf(_buyGoodsId);
+                    long afford = price > 0 ? Math.Max(0, C.Money) / price : (long)C.Pack.Free;
                     double got = src.TakeGoods(_buyGoodsId, Math.Min(C.Pack.Free, afford));
                     if (got > 0)
                     {
                         C.Pack.Store(_buyGoodsId, got);
-                        double pay = price * got;
+                        long pay = (long)(price * got);
                         C.Money -= pay;
                         gs.PayToBuilding(src, pay); // 钱货两让：卖方真收到钱
                     }
@@ -1092,7 +1092,7 @@ public partial class CitizenAgent : Node3D
                         // 超限入库：背来的货全收（上限只把门不拦货）
                         double put = dest.StoreGoodsForce(s.GoodsId, s.Amount);
                         if (put > 0 && s.GoodsId == _consignGoodsId)
-                            gs.PayFromBuilding(dest, C, Goods.PriceOf(s.GoodsId) * put); // 成品卖给商铺：铺面付款
+                            gs.PayFromBuilding(dest, C, (long)(Goods.PriceOf(s.GoodsId) * put)); // 成品卖给商铺：铺面付款
                         C.Pack.Take(s.GoodsId, put);
                         stored += put;
                     }
@@ -1114,7 +1114,7 @@ public partial class CitizenAgent : Node3D
                 {
                     if (work.Def.Category == "official")
                     {
-                        double pay = work.Def.Salary / GameClock.DaysPerMonth;
+                        long pay = Math.Max(1, work.Def.Salary / GameClock.DaysPerMonth);
                         C.Money += pay;
                         gs.Money -= pay;
                         gs.Ledger.Add("雇工俸禄", -pay);
@@ -1131,7 +1131,7 @@ public partial class CitizenAgent : Node3D
                 // 修缮匠下工即结：官库发当班俸禄并记账（俸禄随修缮房定义 Salary）
                 if (gs.Buildings.TryGetValue(C.WorkplaceId, out var rh))
                 {
-                    double pay = rh.Def.Salary / GameClock.DaysPerMonth;
+                    long pay = Math.Max(1, rh.Def.Salary / GameClock.DaysPerMonth);
                     C.Money += pay;
                     gs.Money -= pay;
                     gs.Ledger.Add("修缮匠俸禄", -pay);
@@ -1183,7 +1183,7 @@ public partial class CitizenAgent : Node3D
                 double accepted = shop.StoreGoodsForce(s.GoodsId, amount);
                 if (accepted > 0)
                 {
-                    gs.PayFromBuilding(shop, C, Goods.PriceOf(s.GoodsId) * accepted); // 铺面能付多少付多少
+                    gs.PayFromBuilding(shop, C, (long)(Goods.PriceOf(s.GoodsId) * accepted)); // 铺面能付多少付多少
                     C.Pack.Take(s.GoodsId, accepted);
                     amount -= accepted;
                 }

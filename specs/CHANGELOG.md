@@ -2,6 +2,69 @@
 
 按批次记录每次调整的要点（新规则起始于批次二十五；更早批次的详情见计划文档归档）。
 
+## 批次五十六（2026-07-28）经济系统全量重构
+
+### 货币体系
+- 内部单位由「double 贯」全面切换为「long 文」（1两白银=1000文、1两黄金=10两白银=10000文）
+- 新增 `CurrencyConfig.cs`（换算常量）与 `CurrencyHelper.cs`（格式化：「XXX文」「X两Y文」「金X两银X两钱X文」）
+- 货币注入：开府安家银 100,000文（替代旧 StartMoney=5000贯）、王爷月俸 8,000文/月、朝廷赏赐 5,000~50,000文预埋
+- `EconomyConfig` 全量重写：所有金钱常量切文，新增月俸/安家银/朝廷采购/技能经验/库存联动定价/税制参数
+
+### 货品体系（全部替换）
+- 旧 11 种货品（含 `ore`/`salt`）全部替换为 22 种新货品：
+  - 食物/燃料：粮食(10文)、柴薪(3文)、果品(6文)、野味(18文)、水
+  - 采集/官营原料：原木(5)、兽皮(22)、草药(25)、粗盐(15)、铁矿石(20)、石料(8)、酒曲(12)
+  - 中间品：木板(18)←原木、皮革(40)←兽皮、精盐(40)←粗盐、铁锭(55)←铁矿石
+  - 成品：木器(50)、酒(45)、铁器(140)、腌货(60)、家具(100)、成衣(150)、丸药(80)
+- 配方表扩充：初级工坊(原料→中间品) + 高级工坊(中间品→成品)，共 11 条配方
+- 新增库存联动定价（需求 §6.3）：≥80%降价10%、≥95%降价30%、≤20%涨价10%
+
+### 公民系统
+- `Citizen.Money` double→long；新增 `SkillType` 枚举（体力/手艺/商业/文化）、`SkillExp` 经验、`CarriedItems` 携带物品
+- `Family.SharedAssets` double→long
+
+### 税收体系（全部重写）
+- 旧四大税种（田赋/商税/专卖/市舶）→ 三税种模型：
+  - 土地税：按建筑类型+等级定额（民居 10/25/50文/月…），税率 1~10%可调（默认 3%）
+  - 商税：交易发生时按 2~15%可调（默认 5%）自动扣除
+  - 人口税：可选开关，开启后扣工资 20%+持续降幸福，关闭后缓慢恢复
+- `TaxPolicy` 改为三字段（LandTaxRate/TradeTaxRate/PollTaxEnabled），保留 Levels 兼容旧档
+- `TaxSystem` 每天按定额逐栋收土地税，每月处理重税民怨+人口税幸福
+
+### 建筑系统
+- `BuildingDef` 新增：`JobSlotsByLevel`、`EfficiencyByLevel`、`ServiceRangeByLevel`、`MinSkillExpByLevel`（3 元素数组）
+- `BuildingDef.Salary` double→long（文）
+- 工坊：三级 2/4/6 岗位、效率 100%/150%/200%、经验 0/200/600 门槛
+- 商铺：三级 1/2/3 岗位、服务范围 50/100/全城格、经验 0/200/600 门槛
+- 新增 `mansion`（宅邸）建筑类型 + 三种官营产业（lumber_camp/quarry/yeast_bureau）
+- `buildings.json` 全部数值重订（造价×100~200、月薪 800~4000文、维护费×100）
+
+### 关联配置调整
+- `WorldConfig.StartMoney` double 5000→long 100_000
+- `GrowthConfig.HouseBaseCost` 20→20_000、`LandPricePerScore` 5→500、`LandPriceOf` 返回 long
+- `LifeConfig.WealthyPerCapitaAssets` 200→20_000
+- `PopulationConfig`：四类流民模型预埋（ArriveAssetsMin/Max 5/5000、SplitFamilyAssets 1500、SelfBuildAssets 8000）
+- `PrinceMansionConfig.GrantMoney` 3000→100_000、CoupleAssets 1200→40_000
+
+### 系统层修复
+- `GameState.Money` double→long，`PayFromBuilding`/`PayToBuilding` 参数 double→long
+- `Ledger` Current/Previous `Dictionary<string,double>` → `Dictionary<string,long>`
+- `EconomySystem` 新加 `PayMonthlySalary`（王爷月俸），维护费/铸币算术切 long
+- `MaintenanceSystem` 修复料钱/修缮摊派为 long 算术（`Math.Max(1, ...)` 防日除为零）
+- `GoodsSystem.BuyGoods` 货价算术切 long，加除零保护
+- `LifecycleSystem` 全部金钱变量（budget/cost/assets/share）double→long
+- `CitizenAgent` 购物/俸禄结算切为 long + `Math.Max(1, salary/days)`
+- `ZoneGrowthSystem.TryBuildHouse` 参数 `double→long`
+
+### 持久化
+- `SaveData.WorldSave.Money`/`LedgerCur`/`LedgerPrev` double→long
+- `SaveData` 新增 LandTaxRate/TradeTaxRate/PollTaxEnabled 替代 TaxLevels
+- `SaveService.FormatVersion` 21→22（旧档拒读）
+
+### UI
+- `TopBar` 货币显示改用 `CurrencyHelper.FormatWen`
+- 其余 UI（FinancePanel/InspectPanel/PolicyPanel/BuildMenu）待后续批次适配新税制/技能面板
+
 ## 批次五十五（2026-07-28）删桥栏杆 + 村民过桥贴面
 
 - 删除桥栏杆：移除 GridRenderer.AddBridgeRails/AddRailPanel 与调用、WorldConfig.BridgeRailHeight、
