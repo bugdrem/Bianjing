@@ -26,4 +26,8 @@ public static class CameraConfig
 
     /// <summary>镜头离地最小净空（米）：镜头低于脚下地形+此值时抬升云台，防平移/低角度时镜头钻进山体透视。</summary>
     public const float MinAboveTerrain = 1.5f;
+
+    /// <summary>雾化启用的相机拉距阈值（米）：拉距超过此值（视野扩到地图外卷轴/桌面）才渲染深度雾化，
+    /// 凑近地图内时关闭雾化省一次雾 pass（性能优先）。</summary>
+    public const float FogEnableDistance = 220f;
 }

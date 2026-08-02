@@ -23,6 +23,9 @@ public partial class Main : Node3D
     private Hud _hud;
     private GameMenu _menu;
 
+    private Godot.Environment _env;   // 世界环境：按相机拉距动态开关深度雾化
+    private RtsCameraRig _cameraRig;  // 相机云台：取拉距判定视角是否在地图内
+
     private float _autoSaveTimer;
 
     public override void _Ready()
@@ -55,6 +58,7 @@ public partial class Main : Node3D
 
         var cameraRig = new RtsCameraRig();
         AddChild(cameraRig);
+        _cameraRig = cameraRig;
 
         _clock = new GameClock();
         AddChild(_clock);
@@ -152,6 +156,8 @@ public partial class Main : Node3D
 
     public override void _Process(double delta)
     {
+        UpdateFog();
+
         // 自动保存：仅在游戏进行中（未暂停）累计真实时间
         if (GameSettings.AutoSaveMinutes <= 0 || GetTree().Paused)
             return;
@@ -162,6 +168,14 @@ public partial class Main : Node3D
         // 异步原子保存：主线程快照+序列化，后台线程写盘免卡帧；完成回调在后台线程，用 CallDeferred marshal 回主线程再碰 HUD
         SaveService.SaveAsync(_clock, SaveService.AutoSlot, "自动保存", ok =>
             Callable.From(() => _hud.ShowCellInfo(ok ? "已自动保存" : "自动保存失败（详见日志）")).CallDeferred());
+    }
+
+    /// <summary>深度雾化当前已关闭：每帧确保 FogEnabled=false（保留按拉距开关的骨架，后续如需重启用回下方逻辑）。
+    /// 原逻辑：拉距 > CameraConfig.FogEnableDistance（视角扩到地图外）才开雾，凑近地图内关雾省一次雾 pass。</summary>
+    private void UpdateFog()
+    {
+        if (_env != null && _env.FogEnabled)
+            _env.FogEnabled = false;
     }
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
@@ -268,68 +282,18 @@ public partial class Main : Node3D
             AdjustmentEnabled = true,
             AdjustmentSaturation = 0.85f,
             AdjustmentBrightness = 0.97f,
+            // 深度雾化：拉远看卷轴/桌面外缘时远端融入暖雾（默认关，由 _Process 按相机拉距动态开关，性能优先）
+            FogEnabled = false,
+            FogLightColor = new Color(0.80f, 0.77f, 0.70f), // 暖米雾色，融入卷轴纸调与天际
+            FogDensity = 0.001f,
+            FogAerialPerspective = 0.4f,
         };
+        _env = env;
         AddChild(new WorldEnvironment { Environment = env });
 
-                // 卷轴背景：游戏世界坐在一幅横卷「画」上——大于地图的长方形纸面垫在地形之下，
-        // 东西两侧各横一根卷轴圆柱（轴向南北）；图内地表由地形三角网格覆盖，
-        // 图缘镂空由 GridRenderer 裙板遮住（裙板底与纸面同高）
-        BuildScrollBackdrop();
-    }
-
-    /// <summary>卷轴背景布景：白底（地图四周外扩 MapEdgeExtend 的白边）+ 纸面（长方形，东西向更宽）
-    /// + 两根横卧卷轴圆柱。层次自上而下：地形/裙板 → 白底 → 纸面；圆柱底部与纸面画布相切。</summary>
-    private void BuildScrollBackdrop()
-    {
-        float mapSize = MapGrid.Size * MapGrid.CellSize;
-        float baseY = TerrainConfig.MinTerrainHeight - 0.2f;   // 白底 = 裙板底，地形断面→裙板→白底无缝
-        float paperY = baseY - 0.4f;                            // 纸面垫在白底之下
-        float paperX = (mapSize + 440f) * 2f;  // 东西向（卷轴圆柱所在方向）加宽到旧版 2 倍，卷轴画更宽展
-        float paperZ = mapSize + 180f;  // 南北向留窄白边，成横卷比例
-
-        // 白底：地图四周外扩 MapEdgeExtend 的纯白底色，垫在地图与卷轴纸面之间
-        float baseSize = mapSize + 2f * WorldConfig.MapEdgeExtend;
-        AddChild(new MeshInstance3D
-        {
-            Mesh = new PlaneMesh { Size = new Vector2(baseSize, baseSize) },
-            Position = new Vector3(0f, baseY, 0f),
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = new Color(0.96f, 0.96f, 0.94f), // 白底（略暖白）
-            },
-        });
-
-        var paper = new MeshInstance3D
-        {
-            Mesh = new PlaneMesh { Size = new Vector2(paperX, paperZ) },
-            Position = new Vector3(0f, paperY, 0f),
-            MaterialOverride = new StandardMaterial3D
-            {
-                AlbedoColor = new Color(0.84f, 0.78f, 0.62f), // 绢帛暖米色（宋画手卷纸面）
-            },
-        };
-        AddChild(paper);
-
-        // 两侧卷轴：深色漆木圆柱横卧东西两端（轴向南北，即绕 X 轴旋 90°），底部与纸面画布相切
-        const float rollerR = 14f;
-        var rollerMesh = new CylinderMesh
-        {
-            TopRadius = rollerR,
-            BottomRadius = rollerR,
-            Height = paperZ + 60f, // 两端微出纸面，像轴头
-        };
-        var rollerMat = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.20f, 0.12f) }; // 深色漆木
-        foreach (float sx in new[] { -1f, 1f })
-        {
-            AddChild(new MeshInstance3D
-            {
-                Mesh = rollerMesh,
-                MaterialOverride = rollerMat,
-                // 圆柱默认轴向 Y：绕 X 轴旋 90° 后轴向 Z（南北横卧）
-                RotationDegrees = new Vector3(90f, 0f, 0f),
-                // 底部与纸面相切：轴心抬高一个半径（圆柱底刚好落在 paperY）
-                Position = new Vector3(sx * (paperX / 2f - rollerR * 0.4f), paperY + rollerR, 0f),
-            });
-        }
+        // 卷轴装裱（地图外）独立成层：白底/绢帛纸面/卷轴圆柱/祥云置于 RenderLayers.Scroll，
+        // 与地图内（RenderLayers.Map）分层渲染；图缘裙板由 GridRenderer 生成但同归卷轴层，
+        // 地形断面→裙板→白底无缝衔接（详见 ScrollBackdrop）
+        AddChild(new ScrollBackdrop());
     }
 }

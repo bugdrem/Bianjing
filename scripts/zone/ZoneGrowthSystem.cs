@@ -255,6 +255,8 @@ public class ZoneGrowthSystem
             // 整块占地均为坊区内无树空地，且四周小路环可铺并接入既有路网（小路也算接入）
             if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY) || !RingLayable(gs, c, def.SizeX, def.SizeY))
                 continue;
+            if (NearBridge(gs, c, def.SizeX, def.SizeY))
+                continue; // 不沿桥/引桥建房
             double score = SiteScore(gs, c, def.SizeX, def.SizeY) + PrinceMansionBonus(mansion, c, def.SizeX, def.SizeY);
             long price = GrowthConfig.LandPriceOf(score, NearResource(gs, c, def.SizeX, def.SizeY)); // 地价公式见 GrowthConfig
             if (price > budget)
@@ -302,6 +304,21 @@ public class ZoneGrowthSystem
                     continue;
                 ref var cell = ref gs.Map.CellAt(c);
                 if (cell.HasTree || cell.HasWater)
+                    return true;
+            }
+        return false;
+    }
+
+    /// <summary>占地外扩 2 格内是否有桥（含引桥）：村民不沿桥/引桥建房，候选地近桥即作废。</summary>
+    private static bool NearBridge(GameState gs, Vector2I origin, int sizeX, int sizeY)
+    {
+        for (int dx = -2; dx <= sizeX + 1; dx++)
+            for (int dy = -2; dy <= sizeY + 1; dy++)
+            {
+                var c = new Vector2I(origin.X + dx, origin.Y + dy);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                if (gs.Map.CellAt(c).HasBridge)
                     return true;
             }
         return false;

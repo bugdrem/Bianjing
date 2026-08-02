@@ -668,11 +668,14 @@ public partial class CitizenAgent : Node3D
         return best;
     }
 
-    /// <summary>打水：最近水井与最近河岸取近者（河岸环扫半径以井距封顶，扫到即更近）；两者皆无则闲逛等待。</summary>
+    /// <summary>打水：偏好水井——仅当河岸显著更近（岸距×WaterWellBias < 井距）才舍井就河，否则用井；
+    /// 城中无井才用河；井河皆无则闲逛等待。</summary>
     private void StartFetchWater(GameState gs)
     {
         var pos = MapGrid.WorldToCell(Position);
-        Vector2I? target = null;
+
+        // 最近水井（记建筑与井距）
+        BuildingInstance well = null;
         int wellDist = int.MaxValue;
         foreach (var b in gs.Buildings.Values)
         {
@@ -682,12 +685,31 @@ public partial class CitizenAgent : Node3D
             if (d < wellDist)
             {
                 wellDist = d;
-                target = BuildingAnchor(b) ?? b.Origin;
+                well = b;
             }
         }
-        var shore = gs.FindNearestWaterShore(pos, Math.Min(wellDist, 192));
-        if (shore != null)
-            target = shore;
+
+        // 最近河岸（环扫放宽到 192 取真正最近岸格，与井距公平比较）
+        var shore = gs.FindNearestWaterShore(pos, 192);
+
+        Vector2I? target;
+        if (well == null)
+        {
+            target = shore; // 城中无井才用河
+        }
+        else if (shore == null)
+        {
+            target = BuildingAnchor(well) ?? well.Origin; // 有井无河用井
+        }
+        else
+        {
+            int shoreDist = Math.Max(Math.Abs(shore.Value.X - pos.X), Math.Abs(shore.Value.Y - pos.Y));
+            // 偏好水井：仅当河岸显著更近（岸距×偏好系数 < 井距）才去河岸，否则用井
+            target = shoreDist * VillagerConfig.WaterWellBias < wellDist
+                ? shore
+                : BuildingAnchor(well) ?? well.Origin;
+        }
+
         if (target == null)
         {
             StartActivity(ActivityType.Strolling, _manager.RandomRoadCell(_rng), 3f);

@@ -340,12 +340,18 @@ public partial class InspectPanel : PanelContainer
             {
                 sb.AppendLine("（无人居住）");
             }
-            else
+            else if (b.Def.Category == "grown")
             {
                 sb.AppendLine($"屋主：{ColorName(head)}");
                 // 成员按年龄降序逐行：名（性别色）+ 年龄 + 与屋主关系
                 foreach (var c in residents.OrderByDescending(r => r.AgeMonths))
-                    sb.AppendLine($"{ColorName(c)}　{c.AgeYears}岁　{RelationTo(head, c)}");
+                    sb.AppendLine($"{ColorName(c)} {c.AgeYears}岁 {RelationTo(head, c)}");
+            }
+            else
+            {
+                // 公共建筑（流民营/王爷府等）：只列住户名单，不设屋主
+                foreach (var c in residents.OrderByDescending(r => r.AgeMonths))
+                    sb.AppendLine($"{ColorName(c)} {c.AgeYears}岁");
             }
         }
         if (b.Def.JobSlots > 0)
@@ -388,7 +394,7 @@ public partial class InspectPanel : PanelContainer
         _body.Text = sb.ToString().TrimEnd();
     }
 
-    /// <summary>野物页：月龄与习性。</summary>
+    /// <summary>野物页：月龄 + 生命阶段（按月龄阈值派生）+ 习性。</summary>
     private void RenderAnimal(AnimalObj a)
     {
         _title.Text = "野物";
@@ -397,10 +403,17 @@ public partial class InspectPanel : PanelContainer
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine(a.AgeMonths >= 12 ? $"月龄：{a.AgeMonths / 12} 岁零 {a.AgeMonths % 12} 月" : $"月龄：{a.AgeMonths} 个月");
+        sb.AppendLine($"阶段：{LifeStageOf(a.AgeMonths)}");
         sb.AppendLine("习性：倚林而栖，日间小范围游走觅食");
         sb.AppendLine("可由猎户捕获，倒地化为野味供拾取");
         _body.Text = sb.ToString().TrimEnd();
     }
+
+    /// <summary>月龄 → 生命阶段：半岁内幼崽，一岁内亚成年，满一岁成年。</summary>
+    private static string LifeStageOf(int ageMonths) =>
+        ageMonths < 6 ? "幼崽"
+        : ageMonths < 12 ? "亚成年"
+        : "成年";
 
     /// <summary>地面物资堆页：堆内逐货明细（标题随主要货品，果堆即显「果品堆」）。</summary>
     private void RenderPile(ItemPileObj pile)

@@ -22,9 +22,9 @@ public static class WaterConfig
 
     // ---- 河源与走线 ----
 
-    /// <summary>河流条数范围（条）：源点取峰间鞍部，首条为干流，后续撞既有水体即汇流。</summary>
-    public const int RiverCountMin = 4;
-    public const int RiverCountMax = 6;
+    /// <summary>河流条数范围（条）：源点取峰间鞍部，首条为干流，后续撞既有水体即汇流（原值×1.5 取整）。</summary>
+    public const int RiverCountMin = 6;
+    public const int RiverCountMax = 9;
 
     /// <summary>走线卡死（洼地无未访问低邻）时向东南强制滑行的最大连续步数：
     /// 超过即弃线（防在大盆地里无限爬行）。</summary>
@@ -57,9 +57,9 @@ public static class WaterConfig
 
     // ---- 湖泊（坐落干流低平处，扭曲湖缘，岛屿自然涌现）----
 
-    /// <summary>沿干流生成的湖泊数量范围（座）：入水口/出水口由干流走线天然连通。</summary>
-    public const int RiverLakeMin = 1;
-    public const int RiverLakeMax = 2;
+    /// <summary>沿干流生成的湖泊数量范围（座）：入水口/出水口由干流走线天然连通（原值×1.5 取整）。</summary>
+    public const int RiverLakeMin = 2;
+    public const int RiverLakeMax = 3;
 
     /// <summary>成湖点的最高水位（米）：只在低平处成湖（山区不成湖，免湖面悬山腰）。</summary>
     public const float LakeMaxSiteLevel = 1.5f;

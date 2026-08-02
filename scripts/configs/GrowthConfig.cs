@@ -40,19 +40,20 @@ public static class GrowthConfig
     public static double SiteWeightOf(double score) =>
         Math.Pow(Math.Max(0.1, score), SitePickPower);
 
-    // ---- 地价（需求 §4.1 四级：资源点近旁 8,000 / 普通 10,000 / 临街 15,000 / 城中心 25,000 文）----
+    // ---- 地价（需求 §4.1 四级：资源点近旁 4,000 / 普通 5,000 / 临街 7,500 / 城中心 12,500 文；
+    // 原值减半以提速房屋生成，寄居者更快攒够自建）----
 
     /// <summary>资源点近旁地价（文）：近树/近水的宅基地最贱，鼓励定居者近资源谋生。</summary>
-    public const long LandPriceResource = 8_000;
+    public const long LandPriceResource = 4_000;
 
     /// <summary>普通宅基地地价（文）。</summary>
-    public const long LandPricePlain = 10_000;
+    public const long LandPricePlain = 5_000;
 
     /// <summary>临街地价（文）：选址分达“临街档”（贴主/辅路或成片聚居）即按此计价。</summary>
-    public const long LandPriceStreet = 15_000;
+    public const long LandPriceStreet = 7_500;
 
     /// <summary>城中心地价（文）：选址高分（十字路口/河边且邻居密集）按此计价。</summary>
-    public const long LandPriceCenter = 25_000;
+    public const long LandPriceCenter = 12_500;
 
     /// <summary>选址分分档：≥ LandPriceCenterScore 按城中心计价；≥ LandPriceStreetScore 按临街计价；否则普通地价。</summary>
     public const double LandPriceCenterScore = 6;

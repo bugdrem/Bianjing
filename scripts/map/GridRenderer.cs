@@ -196,7 +196,8 @@ public partial class GridRenderer : Node3D
 
         BuildGridLines();
 
-        // 图缘裙板：双面受光（低角度内外侧都可能看到），随 MapChanged 重建
+        // 图缘裙板：双面受光（低角度内外侧都可能看到），随 MapChanged 重建。
+        // 裙板是「画的厚度」，属卷轴装裱（地图外）→ 归 RenderLayers.Scroll 层，与地图内分层渲染
         _skirt = new MeshInstance3D
         {
             MaterialOverride = new StandardMaterial3D
@@ -204,6 +205,7 @@ public partial class GridRenderer : Node3D
                 VertexColorUseAsAlbedo = true,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
             },
+            Layers = RenderLayers.Scroll,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
         AddChild(_skirt);

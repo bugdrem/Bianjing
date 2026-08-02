@@ -48,9 +48,9 @@ public static class TerrainConfig
 
     // ---- 峰点（西北半包围结构）----
 
-    /// <summary>峰点数量范围（个）：撒在西北半包围带内，构成群山骨架（山地占比目标约两成半～四成）。</summary>
-    public const int PeakCountMin = 10;
-    public const int PeakCountMax = 14;
+    /// <summary>峰点数量范围（个）：撒在西北半包围带内，构成群山骨架（原值×1.5 取整，山地占比上调）。</summary>
+    public const int PeakCountMin = 15;
+    public const int PeakCountMax = 21;
 
     /// <summary>峰顶高度范围（米）：随机抽取（趋势与细节叠加后统一 clamp MaxTerrainHeight）。</summary>
     public const float PeakHeightMin = 30f;
@@ -72,9 +72,9 @@ public static class TerrainConfig
 
     // ---- 低矮独立山（中部/东南平原上的零星山包，不连脊）----
 
-    /// <summary>独立山数量范围（座）：撒在山区带之外（中部/东南），避中心圆与图缘。</summary>
-    public const int LowHillCountMin = 3;
-    public const int LowHillCountMax = 6;
+    /// <summary>独立山数量范围（座）：撒在山区带之外（中部/东南），避中心圆与图缘（原值×1.5 取整）。</summary>
+    public const int LowHillCountMin = 5;
+    public const int LowHillCountMax = 9;
 
     /// <summary>独立山高度范围（米）：低矮可见但不成屏障（高处仍可能超行走坡限成景观）。</summary>
     public const float LowHillHeightMin = 3f;

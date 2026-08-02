@@ -40,6 +40,10 @@ public static class VillagerConfig
     public const double WoodPerResident = 1.0;
     public const double WaterPerResident = 3.0;
 
+    /// <summary>水井偏好系数：仅当「河岸距×此系数 < 井距」（河岸显著更近）才去河岸打水，否则用井；
+    /// 值越大越倾向水井（2.0 = 河岸需近一半才值得舍井就河）。城中无井时仍用河。</summary>
+    public const double WaterWellBias = 2.0;
+
     /// <summary>就近采集半径（米）：伐木/采摘/拾堆/打猎只在此范围内找目标，
     /// 附近没有就闲逛等林子长回来；打水不受此限（水是刚需且无替代来源）。</summary>
     public const int ForageRadius = 64;

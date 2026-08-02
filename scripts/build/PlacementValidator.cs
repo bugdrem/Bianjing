@@ -100,9 +100,13 @@ public static class PlacementValidator
         return true;
     }
 
-    /// <summary>坊区只能划在空地上（且需先建成王爷府）。</summary>
+    /// <summary>坊区只能划在空地上（且需先建成王爷府）；水系（河/湖）不可划入可建造区。</summary>
     public static bool CanZone(GameState gs, Vector2I c)
     {
-        return gs.PrinceMansionBuilt && MapGrid.InBounds(c) && gs.Map.CellAt(c).IsEmpty;
+        if (!gs.PrinceMansionBuilt || !MapGrid.InBounds(c))
+            return false;
+        ref var cell = ref gs.Map.CellAt(c);
+        // 水系屏蔽：IsEmpty 已含 !HasWater，此处显式守卫以明意图（分区拖拽预览不高亮水格）
+        return !cell.HasWater && cell.IsEmpty;
     }
 }

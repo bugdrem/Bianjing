@@ -13,6 +13,9 @@ public partial class RtsCameraRig : Node3D
 
     public Camera3D Cam { get; private set; }
 
+    /// <summary>当前缩放拉距（米）：供 Main 按拉距开关深度雾化（凑近地图内关雾省 pass）。</summary>
+    public float Distance => _dist;
+
     private Node3D _pitchPivot;
     private float _yaw = 0.7f;
     private float _pitch = -0.95f;
@@ -23,7 +26,8 @@ public partial class RtsCameraRig : Node3D
     {
         _pitchPivot = new Node3D();
         AddChild(_pitchPivot);
-        Cam = new Camera3D { Far = CameraConfig.FarClip, Current = true };
+        // 主相机同摄地图内（Map）与卷轴装裱（Scroll）两层：两层可独立开关/特效，但默认同屏呈现
+        Cam = new Camera3D { Far = CameraConfig.FarClip, Current = true, CullMask = RenderLayers.All };
         _pitchPivot.AddChild(Cam);
         ApplyTransform();
     }

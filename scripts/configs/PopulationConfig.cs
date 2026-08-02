@@ -72,8 +72,8 @@ public static class PopulationConfig
     public const long ScholarAssetsMin = 0;
     public const long ScholarAssetsMax = 50;
 
-    /// <summary>寄居者攒够自建住宅的门槛（文）：对齐普通宅基地地价，预算达此值且有落位才自建迁出。</summary>
-    public const long SelfBuildAssets = 10_000;
+    /// <summary>寄居者攒够自建住宅的门槛（文）：对齐普通宅基地地价（减半后 5,000），预算达此值且有落位才自建迁出。</summary>
+    public const long SelfBuildAssets = 5_000;
 
     /// <summary>迁入成人的年龄区间（起始岁数 + 随机跨度）。</summary>
     public const int ArriveAgeMin = 18;
