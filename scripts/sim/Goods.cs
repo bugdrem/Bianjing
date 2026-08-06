@@ -13,6 +13,8 @@ public static class Goods
     public const string Fruit = "fruit";       // 果品
     public const string Game  = "game";        // 野味
     public const string Water = "water";       // 水（仅家用，不买卖）
+    public const string Flatbread = "flatbread"; // 烧饼（中期食品加工：粮食 → 烧饼）
+    public const string Charcoal  = "charcoal";  // 木炭（中期燃料加工：柴薪 → 木炭）
 
     // ---- 采集/官营原料 ----
     public const string Log       = "log";        // 原木（樵夫/林场）
@@ -52,7 +54,7 @@ public static class Goods
     public static bool IsFood(string id) => id == Grain || id == Fruit || id == Game;
 
     /// <summary>商铺可专营的货品（三级商铺经营成品，一级可兼营原料）。</summary>
-    public static readonly string[] ShopSpecialties = { Grain, Fruit, Game, Wood, Timber, Wine, Ironware, Cured, Furniture, Clothing, Medicine };
+    public static readonly string[] ShopSpecialties = { Grain, Fruit, Game, Wood, Timber, Wine, Ironware, Cured, Furniture, Clothing, Medicine, Flatbread, Charcoal };
 
     /// <summary>加工配方：成品 id → 所需原料 id 列表（每产一份成品消耗每种原料各一份）。
     /// 初级工坊产中间品（木板/皮革/精盐/铁锭），高级工坊产成品（木器/家具/成衣/铁器/腌货/丸药）。
@@ -72,16 +74,19 @@ public static class Goods
         [Cured]     = new[] { Game, RefinedSalt },
         [Medicine]  = new[] { Herb },
         [Wine]      = new[] { Grain },
+        // 中期民生加工（基础品升级：粮→烧饼、柴→木炭）
+        [Flatbread] = new[] { Grain },
+        [Charcoal]  = new[] { Wood },
     };
 
     /// <summary>是否为初级工坊专营品（原料→中间品）。</summary>
     public static readonly HashSet<string> PrimaryWorkshopGoods = new() { Planks, Leather, RefinedSalt, IronIngot };
 
     /// <summary>是否为高级工坊专营品（中间品/原料→成品）。</summary>
-    public static readonly HashSet<string> AdvancedWorkshopGoods = new() { Timber, Furniture, Clothing, Ironware, Cured, Medicine, Wine };
+    public static readonly HashSet<string> AdvancedWorkshopGoods = new() { Timber, Furniture, Clothing, Ironware, Cured, Medicine, Wine, Flatbread, Charcoal };
 
     /// <summary>可加工的成品种类（工坊/商铺各随机专营其一）。</summary>
-    public static readonly string[] CraftSpecialties = { Timber, Wine, Ironware, Cured, Furniture, Clothing, Medicine, Planks, Leather, RefinedSalt, IronIngot };
+    public static readonly string[] CraftSpecialties = { Timber, Wine, Ironware, Cured, Furniture, Clothing, Medicine, Planks, Leather, RefinedSalt, IronIngot, Flatbread, Charcoal };
 
     /// <summary>是否为可加工品（含中间品）。</summary>
     public static bool IsCraftable(string id) => Recipes.ContainsKey(id);
@@ -105,6 +110,8 @@ public static class Goods
         [Wood]  = 3,
         [Fruit] = 6,
         [Game]  = 18,
+        [Flatbread] = 15, // 烧饼（粮加工溢价）
+        [Charcoal]  = 8,  // 木炭（柴加工溢价）
         // 原料
         [Log]     = 5,
         [Hide]    = 22,
@@ -153,6 +160,8 @@ public static class Goods
         [Fruit]  = "果品",
         [Game]   = "野味",
         [Water]  = "水",
+        [Flatbread] = "烧饼",
+        [Charcoal]  = "木炭",
         [Log]    = "原木",
         [Hide]   = "兽皮",
         [Herb]   = "草药",
@@ -178,4 +187,19 @@ public static class Goods
     public static string NameOf(string id) => DisplayName.GetValueOrDefault(id, id);
 
     public static long PriceOf(string id) => BasePrice.GetValueOrDefault(id, EconomyConfig.DefaultPrice);
+
+    /// <summary>货品所属城市等级（资源等级与城市等级挂钩的数据标记）：该货品在此里程碑起进入城市需求/产业视野。
+    /// 本阶段仅作标记，需求由 TierNeeds 表驱动；阶段三 mod 化时外置为 JSON。</summary>
+    public static readonly Dictionary<string, int> CityTier = new()
+    {
+        // 早期（村落 0）基础民生与山野自产
+        [Grain]=0,[Wood]=0,[Water]=0,[Fruit]=0,[Game]=0,[Log]=0,[Hide]=0,[Herb]=0,[Stone]=0,[Weapon]=0,[Book]=0,
+        // 中期（县城/郡城 3-4）加工新品与初级工坊品
+        [Flatbread]=3,[Charcoal]=4,[Planks]=3,[Leather]=3,[RawSalt]=3,[Yeast]=3,[RefinedSalt]=4,[IronOre]=4,[IronIngot]=4,
+        // 后期（州城~京城 5-7）成品
+        [Wine]=5,[Cured]=5,[Timber]=6,[Furniture]=6,[Clothing]=6,[Medicine]=6,[Ironware]=7,
+    };
+
+    /// <summary>货品所属城市等级（未登记者返回 0）。</summary>
+    public static int TierOf(string id) => CityTier.GetValueOrDefault(id, 0);
 }

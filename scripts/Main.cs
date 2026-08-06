@@ -20,6 +20,7 @@ public partial class Main : Node3D
     private WildlifeSystem _wildlife;
     private MilestoneSystem _milestones;
     private TechSystem _techs;
+    private DemandSystem _demand;
     private Hud _hud;
     private GameMenu _menu;
 
@@ -77,6 +78,7 @@ public partial class Main : Node3D
         _wildlife = new WildlifeSystem();
         _milestones = new MilestoneSystem();
         _techs = new TechSystem();
+        _demand = new DemandSystem();
 
         var build = new BuildController(cameraRig, renderer);
         AddChild(build);
@@ -139,6 +141,7 @@ public partial class Main : Node3D
         _wildlife.TickDay(gs);
         _milestones.TickDay(gs); // 人口达标即晋级（解锁建筑/需求/限级）
         _techs.TickDay(gs); // 被动科技自动研成 + 主动项目逐日推进
+        _demand.TickDay(gs); // 中央需求账本：城市级供需统计 + 内部广播（置于日结末，捕获当日终态）
     }
 
     /// <summary>每月结算：大事（老化生死/重税民怨/植物生长/动物繁育）与账本轮转。</summary>

@@ -53,6 +53,15 @@ public static class EconomyConfig
     public const float HungerFunPenalty = 1f;
     public const float ColdFunPenalty = 0.5f;
 
+    // ===== 中央需求账本（第 9 项·阶段一）=====
+
+    /// <summary>需求账本：库存可支撑天数低于此值判为短缺（对齐家用「低于半月存量就补」口径）。</summary>
+    public const double DemandShortDays = 15.0;
+
+    /// <summary>需求账本调试摘要开关（GD.Print，仅开发期排查用，默认关）。
+    /// 用 static readonly 而非 const：const false 会使调用处 if 分支被判为不可达代码（CS0162）；改运行时判定即可开发期改 true 重编开启。</summary>
+    public static readonly bool DemandDebugPrint = false;
+
     // ===== 产能 =====
 
     /// <summary>田面收成最多集中成几堆（防 1m 格下散出上百小堆拖垮拾运与渲染）。</summary>

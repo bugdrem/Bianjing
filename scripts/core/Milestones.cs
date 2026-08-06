@@ -45,10 +45,13 @@ public static class Milestones
     public static readonly MilestoneDef[] Levels =
     {
         new() { Level = 0, Name = "村落", PopulationRequired = 0,   Reward = 0,    MaxHouseLevel = 1, FunBonus = 0f },
-        new() { Level = 1, Name = "集镇", PopulationRequired = 15,  Reward = 300,  MaxHouseLevel = 2, FunBonus = 5f },
-        new() { Level = 2, Name = "县城", PopulationRequired = 40,  Reward = 800,  MaxHouseLevel = 3, FunBonus = 5f },
-        new() { Level = 3, Name = "州城", PopulationRequired = 100, Reward = 1500, MaxHouseLevel = 3, FunBonus = 8f },
-        new() { Level = 4, Name = "京城", PopulationRequired = 250, Reward = 3000, MaxHouseLevel = 3, FunBonus = 10f },
+        new() { Level = 1, Name = "乡里", PopulationRequired = 8,   Reward = 150,  MaxHouseLevel = 1, FunBonus = 3f },
+        new() { Level = 2, Name = "集镇", PopulationRequired = 20,  Reward = 300,  MaxHouseLevel = 2, FunBonus = 4f },
+        new() { Level = 3, Name = "县城", PopulationRequired = 45,  Reward = 600,  MaxHouseLevel = 2, FunBonus = 5f },
+        new() { Level = 4, Name = "郡城", PopulationRequired = 90,  Reward = 1000, MaxHouseLevel = 3, FunBonus = 6f },
+        new() { Level = 5, Name = "州城", PopulationRequired = 160, Reward = 1500, MaxHouseLevel = 3, FunBonus = 8f },
+        new() { Level = 6, Name = "府城", PopulationRequired = 260, Reward = 2200, MaxHouseLevel = 3, FunBonus = 9f },
+        new() { Level = 7, Name = "京城", PopulationRequired = 400, Reward = 3000, MaxHouseLevel = 3, FunBonus = 10f },
     };
 
     /// <summary>当前等级定义（越界钳制到首末级）。</summary>
@@ -81,11 +84,15 @@ public static class Milestones
     /// <summary>分级需求表（数据驱动：后续增改分级直接改表）。</summary>
     public static readonly TierNeed[] TierNeeds =
     {
-        new() { MilestoneRequired = 2, Label = "副食", GoodsIds = new[] { Goods.Fruit },
+        new() { MilestoneRequired = 3, Label = "烧饼", GoodsIds = new[] { Goods.Flatbread },
+                PerDay = 0.02, FunPenalty = 0.4f },
+        new() { MilestoneRequired = 4, Label = "薪炭", GoodsIds = new[] { Goods.Charcoal },
+                PerDay = 0.015, FunPenalty = 0.4f },
+        new() { MilestoneRequired = 5, Label = "副食", GoodsIds = new[] { Goods.Fruit },
                 PerDay = 0.03, FunPenalty = 0.5f },
-        new() { MilestoneRequired = 3, Label = "酒馔", GoodsIds = new[] { Goods.Wine, Goods.Cured },
+        new() { MilestoneRequired = 6, Label = "酒馔", GoodsIds = new[] { Goods.Wine, Goods.Cured },
                 PerDay = 0.015, FunPenalty = 0.5f },
-        new() { MilestoneRequired = 4, Label = "器用", GoodsIds = new[] { Goods.Timber, Goods.Ironware },
+        new() { MilestoneRequired = 7, Label = "器用", GoodsIds = new[] { Goods.Timber, Goods.Ironware },
                 PerDay = 0.008, FunPenalty = 0.3f },
     };
 }

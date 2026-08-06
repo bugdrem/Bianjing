@@ -30,8 +30,8 @@ public class ZoneGrowthSystem
     /// 使沿主/辅路的住宅能如实长出工商户（吸引力驱动的升级另见 LevelUps）。</summary>
     private void Conversions(GameState gs)
     {
-        // 村落阶段不开店：集镇（里程碑 1）起才允许（与 TryConvertHouse 内闸门一致，此处先挡免无谓遍历）
-        if (gs.MilestoneLevel < 1)
+        // 村落阶段不开店：集镇（里程碑 2）起才允许（与 TryConvertHouse 内闸门一致，此处先挡免无谓遍历）
+        if (gs.MilestoneLevel < 2)
             return;
         foreach (var b in gs.Buildings.Values)
         {
@@ -72,11 +72,11 @@ public class ZoneGrowthSystem
     /// 贴近主路→商铺大概率/工坊中概率/更高级住宅小概率；
     /// 贴近辅路（不贴主路）→工坊与住宅都高、商铺小概率；
     /// 只靠自带小路→高概率维持住宅、小概率转工坊。
-    /// 保留闸门：集镇（里程碑 1）起 + 全城工商占比 30% 封顶（占地门槛在调用处）。</summary>
+    /// 保留闸门：集镇（里程碑 2）起 + 全城工商占比 30% 封顶（占地门槛在调用处）。</summary>
     private void TryConvertHouse(GameState gs, BuildingInstance b)
     {
-        // 村落阶段不开店：集镇（里程碑 1）起才允许住宅转工商
-        if (gs.MilestoneLevel < 1)
+        // 村落阶段不开店：集镇（里程碑 2）起才允许住宅转工商
+        if (gs.MilestoneLevel < 2)
             return;
     
         // 全城工商户数封顶 30%：大致对应“10 间住宅中两三个升级成工坊或商铺”

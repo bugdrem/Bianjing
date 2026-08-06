@@ -59,6 +59,9 @@ public class GameState
     /// <summary>城市里程碑等级（见 Milestones.Levels，随存档保存）：控制建筑解锁/居民需求/住宅限级。</summary>
     public int MilestoneLevel;
 
+    /// <summary>中央需求账本（城市级供需快照，每日由 DemandSystem 重算；派生数据，不随存档保存）。</summary>
+    public DemandLedger Demand { get; } = new();
+
     /// <summary>已研成科技 id 集（随存档保存）。</summary>
     public HashSet<string> TechsUnlocked { get; } = new();
 

@@ -24,6 +24,8 @@ public static class GoodsColors
         Goods.Ironware => new Color(0.3f, 0.32f, 0.38f),
         Goods.Cured => new Color(0.55f, 0.33f, 0.18f),
         Goods.Water => new Color(0.3f, 0.5f, 0.75f),
+        Goods.Flatbread => new Color(0.80f, 0.62f, 0.36f),
+        Goods.Charcoal => new Color(0.22f, 0.20f, 0.20f),
         Goods.Weapon => new Color(0.52f, 0.52f, 0.58f),
         Goods.Book => new Color(0.42f, 0.35f, 0.25f),
         _ => Fallback,
