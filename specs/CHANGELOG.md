@@ -2,6 +2,46 @@
 
 按批次记录每次调整的要点（新规则起始于批次二十五；更早批次的详情见计划文档归档）。
 
+## 批次五十九（2026-08-06）工坊面板生产需求分组 + 屋顶点选优化
+
+- 建筑详情面板（InspectPanel.RenderBuilding）新增「—— 生产需求 ——」分组（储存分组之后）：
+  - 可加工建筑（工坊/商铺，Goods.IsCraftable(b.Specialty)）：配方链（`原料一、原料二 → 成品`）、
+    每种配方原料的库存与基价（需料行）、成品库存与基价（产出行）、等级效率倍率（非 1.0 时显示）。
+  - 产业建筑（粮田/林场/采矿场/制盐厂/酒曲司/采石场，HarvestMonths>0）：产出货品（ProduceGoods 空串默认粮食）
+    与每工每收产量、收获周期。
+- 屋顶点选优化（BuildController）：PickCitizen 新增 RayBlockedByBuilding 遮挡检查——
+  从相机到候选居民的视线若先命中建筑（楼体/屋顶，命中判定与 PickWorldObject 同款），该居民不参与拾取，
+  点选由建筑视线拾取接管：点击屋顶显示房屋信息，不再穿透到屋内/屋后的人；屋前空地居民仍可正常选中。
+- 编译 0 警告 0 错误。
+
+## 批次五十八（2026-08-06）资源分级 + 城市等级 8 级 + 早/中期需求（第 9 项阶段二）
+
+- 城市等级 5→8 级（Milestones.Levels）：村落0/乡里8/集镇20/县城45/郡城90/州城160/府城260/京城400（人口门槛），
+  拨款/住宅限级/兴致为新初始取值；Of/NameOf/MaxHouseLevel/TickDay 按表自适应。
+- 分级需求表 TierNeeds 重排（保持里程碑升序）：烧饼@3、薪炭@4、副食@5、酒馔@6、器用@7——早期（村落~集镇）
+  无分级需求，仅基础民生柴火+大米+水；账本经 GoodsIds[0] 口径自动反映，无需改动。
+- 新增货品 烧饼/木炭（Goods.cs + GoodsColors.cs）：常量 flatbread/charcoal、配方（粮→烧饼、柴→木炭，
+  1 原料产 1 成品）、基价 15/8 文、显示名、加入工坊/商铺专营集合；配色金黄/深灰。
+- 资源城市等级标记（Goods.CityTier + TierOf）：每种货品标注所属城市等级，本阶段仅作数据标记不驱动需求
+  （需求仍由 TierNeeds 驱动），铺垫阶段三 mod 化外置 JSON。
+- 旧→新门槛重映射（旧 1→2、2→3、3→5、4→7，按名称对齐）：buildings.json 12 处 milestoneRequired
+  （palace=7、yamen/barracks/taxoffice/lumber_camp/quarry/yeast_bureau=3、repairhouse/market=2、
+  mint/mine/saltworks=5）；techs.json 6 处（quyuanli/niangjiu=2、shuili/huozi=3、guanye/jiaozi=5）。
+- ZoneGrowthSystem 两处开店门槛 `MilestoneLevel < 1`→`< 2`（集镇=里程碑 2，注释同步）。
+- 存档 MilestoneLevel（int）按新表重新解释，旧档可能跳级/降级（早期开发不考虑历史兼容，可接受）。
+- 编译 0 警告 0 错误。
+
+## 批次五十七（2026-08-06）中央需求账本（第 9 项阶段一）
+
+- 新增 scripts/sim/DemandLedger.cs：中央需求账本（DemandEntry/DemandLedger/DemandSystem），每日重算一次。
+- 定位为 pull 被动参考（用户澄清）：账本相对静态，NPC 在各决策点（择业/建田/产业规划）主动查阅 gs.Demand 据此抉择，
+  账本不主动指派/驱赶 NPC 转型（移除 EventBus.DemandUpdated 推送事件）。
+- 三类统计：基础民生（人均口粮/柴薪/饮水）+ 遍历 TierNeeds 分级需求（按里程碑升序 break，记于 GoodsIds[0]）+
+  全库存统计（建筑仓库/居民背包/地面堆/官粮）；短缺天数阈值 DemandShortDays=15。
+- 挂接：GameState.Demand 属性、Main.OnDayPassed 末尾 tick、EconomyConfig.DemandShortDays/DemandDebugPrint。
+- 教训：DemandDebugPrint 用 static readonly 而非 const——const false 作 if 条件致分支不可达（CS0162）。
+- 编译 0 警告 0 错误。
+
 ## 批次五十六（2026-07-28）经济系统全量重构
 
 ### 货币体系

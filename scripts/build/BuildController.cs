@@ -504,11 +504,45 @@ public partial class BuildController : Node
             float d = cam.UnprojectPosition(world).DistanceTo(mouse);
             if (d < bestDist)
             {
+                // 点屋顶显示房屋信息：被建筑（楼体/屋顶）遮挡的居民不让位，视线拾取接管该点
+                // （免点击穿透到屋内/屋后的人身上）
+                if (RayBlockedByBuilding(world))
+                    continue;
                 bestDist = d;
                 best = agent.C;
             }
         }
         return best;
+    }
+
+    /// <summary>从相机到目标点的视线是否先被建筑（楼体/屋顶）遮挡：被遮挡时该点选应归建筑，
+    /// 供 PickCitizen 跳过屋前/屋内/屋后不可见的居民（命中判定与 PickWorldObject 同款）。</summary>
+    private bool RayBlockedByBuilding(Vector3 target)
+    {
+        var cam = _rig.Cam;
+        var from = cam.ProjectRayOrigin(GetViewport().GetMousePosition());
+        var dir = (target - from).Normalized();
+        if (dir.Y >= -0.0001f)
+            return false; // 视线不朝下（贴地平视）：无遮挡可言
+
+        var gs = GameState.I;
+        const float step = MapGrid.CellSize / 2f; // 与 PickWorldObject 同款半格步长
+        float maxT = from.DistanceTo(target);
+        for (float t = 0f; t <= maxT; t += step)
+        {
+            var p = from + dir * t;
+            var c = MapGrid.WorldToCell(p);
+            if (!MapGrid.InBounds(c))
+                continue;
+            ref var cell = ref gs.Map.CellAt(c);
+            if (cell.BuildingId < 0 || !gs.Buildings.TryGetValue(cell.BuildingId, out var b))
+                continue;
+            float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
+            float roof = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
+            if (p.Y <= gs.Map.GroundY(c) + height + roof)
+                return true;
+        }
+        return false;
     }
 
     /// <summary>野物拾取：同居民的屏幕投影就近法，命中圈 14px（野物体小且带位置扰动，圈略宽于体型但不遮建筑）。</summary>

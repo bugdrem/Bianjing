@@ -371,6 +371,26 @@ public partial class InspectPanel : PanelContainer
                     sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日）");
         }
 
+        // 生产需求：加工建筑（工坊/商铺）的配方原料与产出，及产业建筑（粮田/林场/矿场等）的收成信息
+        if (Goods.IsCraftable(b.Specialty))
+        {
+            sb.AppendLine("—— 生产需求 ——");
+            var inputs = Goods.InputsOf(b.Specialty);
+            sb.AppendLine($"配方：{string.Join("、", inputs.Select(Goods.NameOf))} → {Goods.NameOf(b.Specialty)}");
+            sb.AppendLine($"需料：{string.Join("、", inputs.Select(r => $"{Goods.NameOf(r)} {b.Inv.AmountOf(r):F1}份（{Goods.PriceOf(r)}文）"))}");
+            sb.AppendLine($"产出：{Goods.NameOf(b.Specialty)} {b.Inv.AmountOf(b.Specialty):F1}份（{Goods.PriceOf(b.Specialty)}文）");
+            double eff = b.Def.EfficiencyAt(b.Level);
+            if (eff != 1.0)
+                sb.AppendLine($"效率：{eff:0.0}×（{b.Level}级坊铺）");
+        }
+        else if (b.Def.HarvestMonths > 0)
+        {
+            // 产业建筑直采产出（空 ProduceGoods 默认产粮），无配方链
+            string goodsId = string.IsNullOrEmpty(b.Def.ProduceGoods) ? Goods.Grain : b.Def.ProduceGoods;
+            sb.AppendLine("—— 生产需求 ——");
+            sb.AppendLine($"产出：{Goods.NameOf(goodsId)}（每工每收 {b.Def.YieldPerWorker:F0} 份，{b.Def.HarvestMonths} 月一收）");
+        }
+
         _body.Text = sb.ToString().TrimEnd();
     }
 
