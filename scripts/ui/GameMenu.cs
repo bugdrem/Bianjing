@@ -197,10 +197,14 @@ public partial class GameMenu : CanvasLayer
     }
 
     /// <summary>预览高度着色（与成品地形视觉一致的色阶；草图无水面，纯高度插值）：
-    /// h≤0 深青绿 → 0 翠绿 → 12m 黄绿 → 24m 黄褐 → 40m 灰褐 → ≥64m 灰白。</summary>
+    /// h≤0 低地深草绿（批次八十八：原深青绿形似水体误导——成品中海拔≤0 是干地而非水，
+    /// 水只在河流定线/湖盆处生成，见 RiverGenerator；改延 0m 翠绿向下加深，所见即所得）
+    /// → 0 翠绿 → 12m 黄绿 → 24m 黄褐 → 40m 灰褐 → ≥64m 灰白。</summary>
     private static Color HeightColor(float h)
     {
-        if (h <= 0f) return new Color(0.10f, 0.34f, 0.26f);
+        if (h <= 0f)
+            return new Color(0.16f, 0.48f, 0.22f).Lerp(new Color(0.07f, 0.24f, 0.10f),
+                Mathf.Clamp(-h / 3f, 0f, 1f)); // 0m 与上档无缝衔接，-3m（MinTerrainHeight）最暗
         if (h < 12f) return new Color(0.16f, 0.48f, 0.22f).Lerp(new Color(0.42f, 0.55f, 0.20f), h / 12f);
         if (h < 24f) return new Color(0.42f, 0.55f, 0.20f).Lerp(new Color(0.58f, 0.47f, 0.24f), (h - 12f) / 12f);
         if (h < 40f) return new Color(0.58f, 0.47f, 0.24f).Lerp(new Color(0.52f, 0.50f, 0.46f), (h - 24f) / 16f);
