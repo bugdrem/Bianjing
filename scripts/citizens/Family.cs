@@ -12,13 +12,6 @@ public class Family
     /// <summary>家庭公产（文，婚嫁/迁入时注入，日常开销优先扣此）。</summary>
     public long SharedAssets;
 
-    /// <summary>家庭总资产（文） = 公产 + 各成员私产。</summary>
-    public long TotalAssets(GameState gs)
-    {
-        long total = SharedAssets;
-        foreach (var id in MemberIds)
-            if (gs.Citizens.TryGetValue(id, out var c))
-                total += c.Money;
-        return total;
-    }
+    /// <summary>家庭总资产（文）：公产即全部（批次六十八：个人私产停流通、读档并入公产）。</summary>
+    public long TotalAssets(GameState gs) => SharedAssets;
 }

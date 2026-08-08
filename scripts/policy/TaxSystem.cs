@@ -6,7 +6,8 @@ namespace Bianjing;
 /// <summary>
 /// 税收系统（批次五十六重写：三税种模型）。
 /// 土地税：按建筑类型与等级的固定税额，每月逐日 1/DaysPerMonth 收缴入国库。
-/// 商税：交易发生时由买方所在格/建筑的商业行为自动扣除（见 CitizenAgent/GoodsSystem）。
+/// 商税：交易发生时由买方按成交额另付税入官库（批次七十五落地：GoodsSystem.BuyGoods 自动购粮/购柴、
+/// CitizenAgent.Shopping 带单采买两处买点收税；税率见 TaxPolicy.TradeTaxRate）。
 /// 人口税：可选开启，从雇工每日薪资中扣除 20%，每月降幸福。
 /// </summary>
 public class TaxSystem
@@ -24,7 +25,7 @@ public class TaxSystem
         };
     }
 
-    /// <summary>每日征税：土地税逐栋收缴 + 人口税在薪资发放时扣（见 CitizenAgent），此处仅处理土地税。</summary>
+    /// <summary>每日征税：土地税逐栋向住户/店主家庭实扣 + 人口税在薪资发放时扣（见 CitizenAgent），此处仅处理土地税。</summary>
     public void TickDay(GameState gs)
     {
         double rateFactor = gs.Taxes.LandTaxRate / EconomyConfig.LandTaxRateDefault;
@@ -36,8 +37,9 @@ public class TaxSystem
             if (baseAmount <= 0)
                 continue;
             long daily = Math.Max(1, (long)(baseAmount * rateFactor / days));
-            gs.Money += daily;
-            gs.Ledger.Add("土地税", daily);
+            // 批次七十二：税款从住户/店主家庭公产实扣入官库（旧版凭空造钱，家庭财富不回官库）
+            if (gs.TakeLandTax(b, daily))
+                gs.Ledger.Add("土地税", daily);
         }
     }
 
@@ -92,7 +94,7 @@ public class TaxSystem
         foreach (var b in gs.Buildings.Values)
         {
             if (b.Def.Id is "shop" or "workshop" or "saltworks" or "mine")
-                total += (long)(b.Def.Salary * b.Def.JobSlots * 12 * gs.Taxes.TradeTaxRate);
+                total += (long)(b.Def.Salary * b.Def.JobSlotsAt(b.Level) * 12 * gs.Taxes.TradeTaxRate);
         }
         return total;
     }

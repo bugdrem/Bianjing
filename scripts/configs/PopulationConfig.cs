@@ -54,34 +54,74 @@ public static class PopulationConfig
     public const long SplitFamilyAssets = 1_500;
 
     // ---- 迁入（需求 §2.2 四类流民模型：归民/寓商/散勇/客士，权重与资产区间见下；
-    // 流民现金买不起地（§8.2），须先寄居流民营/店坊就业攒钱，再由 BuildUpFromLodging 自建迁出）----
+    // 批次七十二：资产按 1/3 能直接建房 / 1/3 差点 / 1/3 没啥钱分层——
+    // 寓商携资达自建门槛（SelfBuildAssets）落地即可自建，归民居中打工一两月可自建，散勇/客士近乎赤贫）----
 
-    /// <summary>四类流民权重（归一化抽签：归民最多，客士极少）。</summary>
-    public const double ImmigrantWeightSettler = 0.50;
-    public const double ImmigrantWeightMerchant = 0.25;
+    /// <summary>四类流民权重（归一化抽签：归民最多，客士最少）。</summary>
+    public const double ImmigrantWeightSettler = 0.35;
+    public const double ImmigrantWeightMerchant = 0.30;
     public const double ImmigrantWeightSoldier = 0.20;
-    public const double ImmigrantWeightScholar = 0.05;
+    public const double ImmigrantWeightScholar = 0.15;
 
     /// <summary>各类流民随身现金区间（文，寓商最富，客士最穷；携带有价物者另加变卖价值）。</summary>
-    public const long SettlerAssetsMin = 5;
-    public const long SettlerAssetsMax = 15;
-    public const long MerchantAssetsMin = 2_000;
-    public const long MerchantAssetsMax = 5_000;
-    public const long SoldierAssetsMin = 100;
-    public const long SoldierAssetsMax = 300;
+    public const long SettlerAssetsMin = 800;
+    public const long SettlerAssetsMax = 3_000;
+    public const long MerchantAssetsMin = 6_000;
+    public const long MerchantAssetsMax = 12_000;
+    public const long SoldierAssetsMin = 300;
+    public const long SoldierAssetsMax = 1_500;
     public const long ScholarAssetsMin = 0;
-    public const long ScholarAssetsMax = 50;
+    public const long ScholarAssetsMax = 300;
 
     /// <summary>寄居者攒够自建住宅的门槛（文）：对齐普通宅基地地价（减半后 5,000），预算达此值且有落位才自建迁出。</summary>
     public const long SelfBuildAssets = 5_000;
+
+    // ---- 空房继承（批次八十六）：绝户/分家遗留的空置民居由无住所家庭低价过户入住——
+    // 过户费远低于自建门槛（SelfBuildAssets=5000），先继承后自建，Abandoned 空房不再只增不减 ----
+
+    /// <summary>继承空置民居的资产门槛（文）：全家总资产达此值且无自有住所才可继承。</summary>
+    public const long InheritHouseAssets = 1_000;
+
+    /// <summary>空置民居过户费（文，入官库——土地归王爷，低价转让）。</summary>
+    public const long InheritHouseCost = 600;
+
+    /// <summary>空置宅邸（mansion）继承资产门槛（文，大宅高一档）。</summary>
+    public const long InheritMansionAssets = 3_000;
+
+    /// <summary>空置宅邸过户费（文）。</summary>
+    public const long InheritMansionCost = 1_500;
 
     /// <summary>迁入成人的年龄区间（起始岁数 + 随机跨度）。</summary>
     public const int ArriveAgeMin = 18;
     public const int ArriveAgeSpan = 18;
 
-    /// <summary>迁入成人的随身私产区间（起始 + 随机跨度，文）。</summary>
-    public const long ArriveMoneyMin = 5;
-    public const long ArriveMoneySpan = 5000;
+    /// <summary>归民（无类型技能）中带农艺技能的比例：务农流民是耕种区开垦与务农主力（批次六十五）。</summary>
+    public const double SettlerFarmChance = 0.5;
+
+    /// <summary>归民（未得农艺）中带手艺技能的比例：工匠流民是工坊创业主力（批次八十四——此前 Craft 技能
+    /// 无任何迁入来源，创业只出商铺不出工坊）。</summary>
+    public const double SettlerCraftChance = 0.25;
+
+    /// <summary>迁入成人各技能经验下限（批次六十五：迁入技能点随机，按类型区间抽初值；
+    /// 寓商/散勇/客士各有行业积累，归民农艺从零起步）。</summary>
+    public static float SkillExpMinOf(SkillType s) => s switch
+    {
+        SkillType.Commerce => 50,
+        SkillType.Combat => 50,
+        SkillType.Scholarship => 50,
+        _ => 0,
+    };
+
+    /// <summary>迁入成人各技能经验跨度（随机上下浮动；熟练=200、高级=600 见 EconomyConfig）。</summary>
+    public static float SkillExpSpanOf(SkillType s) => s switch
+    {
+        SkillType.Commerce => 250,
+        SkillType.Combat => 200,
+        SkillType.Scholarship => 250,
+        SkillType.Farming => 120,
+        SkillType.Craft => 120, // 批次八十四：工匠流民带经验底子（0~120，与农艺同档），缺货时创业门槛打折可较快达标
+        _ => 0,
+    };
 
     /// <summary>公式：胎次 → 生育系数（1~3 胎最大，之后递减，第六胎起指数衰减永不归零）。</summary>
     public static double BirthCountFactor(int kids) =>
@@ -126,7 +166,7 @@ public static class PopulationConfig
         _ => SettlerAssetsMax,
     };
 
-    /// <summary>类型 → 技能（需求 §2.2：归民无技能，寓商商业，散勇战斗，客士文化）。</summary>
+    /// <summary>类型 → 技能（需求 §2.2：归民无技能（或农艺，见 SettlerFarmChance），寓商商业，散勇战斗，客士文化）。</summary>
     public static SkillType SkillOf(ImmigrantType t) => t switch
     {
         ImmigrantType.Merchant => SkillType.Commerce,

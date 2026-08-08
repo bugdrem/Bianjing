@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 
 namespace Bianjing;
 
@@ -24,7 +23,23 @@ public class JobSystem
         StaffHomeBusinesses(gs); // 工坊/商铺岗位优先由本楼居民承担
         Retirement(gs);
         SeekJobs(gs);
+        SkillGrowth(gs); // 在岗打工积累技能经验（按日结算，表现层只管动作）
         HouseholdSpending(gs);
+    }
+
+    /// <summary>技能经验积累（按日结算，表现层只管动作）：有技能方向者每日涨点，无技能者不涨（先有方向才谈精进）；
+    /// 在岗全速，无职谋生（含伐木采猎）半速——批次八十三：创业者不必先就业，解除“就业涨经验/无职可创业”的互斥；
+    /// 经验驱动等级（SkillExpSkilled/Expert）与求职/创业门槛（见 SeekJobs/ZoneGrowthSystem.Startups）。</summary>
+    private static void SkillGrowth(GameState gs)
+    {
+        foreach (var c in gs.Citizens.Values)
+        {
+            if (c.Skill == SkillType.None)
+                continue;
+            c.SkillExp += c.JobKind == JobKind.Employed
+                ? EconomyConfig.SkillExpPerDay
+                : EconomyConfig.SkillExpPerDay * 0.5f; // 无职谋生半速积累：手艺不丢，只慢于在岗
+        }
     }
 
     /// <summary>居住者优先承担自家产业：工坊/商铺（grown + 有岗位）的岗位先由本楼居民填，
@@ -34,12 +49,12 @@ public class JobSystem
     {
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.Category != "grown" || b.Def.JobSlots <= 0)
+            if (b.Def.Category != "grown" || b.Def.JobSlotsAt(b.Level) <= 0)
                 continue;
             int filled = 0;
             foreach (var c in gs.Citizens.Values)
             {
-                if (filled >= b.Def.JobSlots)
+                if (filled >= b.Def.JobSlotsAt(b.Level))
                     break;
                 // 孩童不入职；家族产业内的人可干到 FamilyBusinessAge（比普通雇工晚退），过龄不再拉回
                 if (c.HomeId != b.Id || c.IsChild || c.AgeYears >= LifeConfig.FamilyBusinessRetireAge)
@@ -62,10 +77,10 @@ public class JobSystem
             foreach (var c in gs.Citizens.Values)
                 if (c.JobKind == JobKind.Employed && c.WorkplaceId == b.Id)
                     total++;
-            if (total > b.Def.JobSlots)
+            if (total > b.Def.JobSlotsAt(b.Level))
                 foreach (var c in gs.Citizens.Values)
                 {
-                    if (total <= b.Def.JobSlots)
+                    if (total <= b.Def.JobSlotsAt(b.Level))
                         break;
                     if (c.JobKind != JobKind.Employed || c.WorkplaceId != b.Id || c.HomeId == b.Id)
                         continue;
@@ -135,7 +150,7 @@ public class JobSystem
                 && gs.Citizens.TryGetValue(c.SpouseId, out var husband) && husband.HasJob)
                 continue;
 
-            var workplace = FindVacancy(gs, workers);
+            var workplace = FindVacancy(gs, workers, c);
             if (workplace != null)
             {
                 c.JobKind = JobKind.Employed;
@@ -143,9 +158,10 @@ public class JobSystem
                 workers[workplace.Id] = workers.GetValueOrDefault(workplace.Id) + 1;
                 gs.LogLifeEvent(c, $"受雇于{workplace.Def.Name}（{workplace.X},{workplace.Y}）");
             }
-            else if (_rng.NextDouble() < EconomyConfig.JoblessForageChance)
+            else if (_rng.NextDouble() < (gs.Demand.IsShort(Goods.Grain) ? 1.0 : EconomyConfig.JoblessForageChance))
             {
-                // 上山谋生：伐木/采摘/打猎（创业开店由坊区生长承接，后续版本个体化）
+                // 上山谋生：伐木/采摘/打猎（创业开店由坊区生长承接，后续版本个体化）；
+                // 批次七十四需求度：缺粮时无业者必上山谋生——伐木/采猎供给木材与食物，优先保口粮
                 c.JobKind = JobKind.Logger;
                 c.WorkplaceId = -1;
                 gs.LogLifeEvent(c, "进山伐木采猎谋生");
@@ -164,24 +180,40 @@ public class JobSystem
 
     /// <summary>寻找空缺岗位：官营建筑面向全城招工（雇工从各自住处通勤，不占居住格）；
     /// 工坊/商铺本楼居民优先（见 StaffHomeBusinesses），住户填不满的余缺对外招——
-    /// 外来打工者在工作地占一个居住格（居住与打工共用同一格池），满员（居民+雇工≥容量）则不再招。</summary>
-    private static BuildingInstance FindVacancy(GameState gs, Dictionary<int, int> workers)
+    /// 外来打工者在工作地占一个居住格（居住与打工共用同一格池），满员（居民+雇工≥容量）则不再招。
+    /// 技能过滤：田块只招农艺者，工商岗位按等级要求最低技能经验（MinSkillExpByLevel），不够则不投。
+    /// 需求度（批次七十四）：全城缺粮时田块岗位优先招（人手先下地），且不再要求农艺技能。</summary>
+    private static BuildingInstance FindVacancy(GameState gs, Dictionary<int, int> workers, Citizen c)
     {
-        foreach (var b in gs.Buildings.Values)
+        bool scarce = gs.Demand.IsShort(Goods.Grain); // 缺粮：田块优先 + 技能门槛放宽
+        for (int pass = 0; pass < (scarce ? 2 : 1); pass++)
         {
-            if (b.Def.JobSlots <= 0)
-                continue;
-            if (workers.GetValueOrDefault(b.Id) >= b.Def.JobSlots)
-                continue;
-            // grown 工坊/商铺：外来雇工占一个居住格，无空格（居民+雇工已满）则不对外招，直至扩建
-            if (b.Def.Category == "grown" && gs.BuildingOccupancy(b) >= b.HousingCapacity)
-                continue;
-            return b;
+            foreach (var b in gs.Buildings.Values)
+            {
+                if (scarce && pass == 0 && b.Def.Category != "field")
+                    continue; // 缺粮先扫田块
+                if (scarce && pass == 1 && b.Def.Category == "field")
+                    continue; // 田块已扫完，其余照常
+                if (b.Def.JobSlotsAt(b.Level) <= 0)
+                    continue;
+                if (workers.GetValueOrDefault(b.Id) >= b.Def.JobSlotsAt(b.Level))
+                    continue;
+                // 技能匹配：田块要农艺（缺粮时放宽：人手优先下地）；其它岗位按等级技能经验门槛（老档/数据缺省时 0=无要求）
+                if (b.Def.Category == "field" && c.Skill != SkillType.Farming && !scarce)
+                    continue;
+                if (b.Def.MinSkillExpAt(b.Level) > c.SkillExp)
+                    continue;
+                // grown 工坊/商铺：外来雇工占一个居住格，无空格（居民+雇工已满）则不对外招，直至扩建
+                if (b.Def.Category == "grown" && gs.BuildingOccupancy(b) >= b.HousingCapacity)
+                    continue;
+                return b;
+            }
         }
         return null;
     }
 
-    /// <summary>家庭生活开销（月值 1/30 逐日扣）：先扣公产，不足再由成员分摊。</summary>
+    /// <summary>家庭生活开销（月值 1/7 逐日扣）：统一扣家庭公产（批次六十八：个人私产停流通），公产不足即告罄；
+    /// 批次七十八：开销入官库（柴米官营——家庭日常用度向官府采买），旧版扣款凭空消失，是总资产黑洞之一。</summary>
     private static void HouseholdSpending(GameState gs)
     {
         foreach (var family in gs.Families.Values)
@@ -189,27 +221,10 @@ public class JobSystem
             long cost = family.MemberIds.Count * LivingCostPerCapita / GameClock.DaysPerMonth;
             if (cost <= 0)
                 continue;
-            if (family.SharedAssets >= cost)
-            {
-                family.SharedAssets -= cost;
-                continue;
-            }
-
-            cost -= family.SharedAssets;
-            family.SharedAssets = 0;
-
-            var members = family.MemberIds
-                .Select(id => gs.Citizens.GetValueOrDefault(id))
-                .Where(c => c != null && c.Money > 0)
-                .ToList();
-            if (members.Count == 0)
-                continue;
-            long sharePer = cost / members.Count;
-            foreach (var member in members)
-            {
-                long share = Math.Min(member.Money, sharePer);
-                member.Money -= share;
-            }
+            long paid = Math.Min(cost, family.SharedAssets);
+            family.SharedAssets -= paid;
+            gs.Money += paid;
+            gs.Ledger.Add("柴米官营", paid);
         }
     }
 }

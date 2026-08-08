@@ -23,7 +23,9 @@ public class MaintenanceSystem
     public void TickDay(GameState gs)
     {
         foreach (var b in gs.Buildings.Values)
-            if (!b.Def.Natural)
+            // 朝廷机构朝廷自理（批次七十七）：不老化不修缮不坍塌，与天然建筑同待遇；
+            // 王爷府为开局地标（批次八十）：不设健康度，同样豁免老化
+            if (!b.Def.Natural && b.Def.Category != "court" && b.Def.Id != PrinceMansionConfig.DefId)
                 b.Condition = Math.Max(0f, b.Condition - AgingPerMonth / Days);
 
         RepairOfficial(gs);
@@ -43,8 +45,9 @@ public class MaintenanceSystem
             return;
 
         long cost = Math.Max(1, repairers * RepairWorkerCost / Days);
-        gs.Money -= cost;
-        gs.Ledger.Add("修缮料钱", -cost);
+        long paid = gs.PayBuildWages(cost); // 批次七十九：先发放、按实扣款（无人领则钱留官库）
+        gs.Money -= paid;
+        gs.Ledger.Add("修缮料钱", -paid);
 
         float budget = repairers * RepairPerWorker / Days;
         while (budget > 0f)
@@ -84,7 +87,19 @@ public class MaintenanceSystem
                 continue;
 
             foreach (var c in list)
-                c.Money = Math.Max(0, c.Money - Math.Max(1, RepairFeePerResident / Days));
+            {
+                // 批次七十二：修缮摊派从家庭公产实扣（旧版扣在已停用的个人 Money 字段上=免费修缮，
+                // 家庭不负担维修费，官库也失去一条回流渠道）；批次七十八：摊派款入官库（修缮服务官营），
+                // 旧版扣款无收款方凭空消失
+                long fee = Math.Max(1, RepairFeePerResident / Days);
+                long paid = Math.Min(fee, gs.FamilyMoney(c));
+                if (paid > 0)
+                {
+                    gs.TakeFromFamily(c, paid);
+                    gs.Money += paid;
+                    gs.Ledger.Add("修缮摊派", paid);
+                }
+            }
             b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount / Days);
         }
     }

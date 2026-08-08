@@ -30,4 +30,16 @@ public static class CameraConfig
     /// <summary>雾化启用的相机拉距阈值（米）：拉距超过此值（视野扩到地图外卷轴/桌面）才渲染深度雾化，
     /// 凑近地图内时关闭雾化省一次雾 pass（性能优先）。</summary>
     public const float FogEnableDistance = 220f;
+
+    // ---- 默认视角与进场动画 ----
+
+    /// <summary>默认拉距/俯仰（进场动画终点，也是滚轮缩放/中键拖转后的常态视角）。</summary>
+    public const float DefaultDist = 90f;
+    public const float DefaultPitch = -0.95f;
+
+    /// <summary>进场动画起点拉距（米）：高空俯瞰整张画卷（垂直视场覆盖全图 + 卷轴余量）。</summary>
+    public const float IntroStartDist = 1050f;
+
+    /// <summary>进场动画时长（秒）：俯瞰画卷 → 落向地图中心，减速缓入如人逐步靠近。</summary>
+    public const float IntroDuration = 2.8f;
 }

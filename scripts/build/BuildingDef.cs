@@ -12,7 +12,8 @@ public class BuildingDef
     public string Id { get; set; }
     public string Name { get; set; }
 
-    /// <summary>official=玩家建造, grown=居民自动生长。</summary>
+    /// <summary>official=玩家建造, grown=居民自动生长, court=朝廷直属机构（批次七十七：
+    /// 朝廷拨款营造/维护不占官库，收购款凭空生成），field=耕种区农田。</summary>
     public string Category { get; set; } = "official";
 
     public int SizeX { get; set; } = 1;
@@ -94,6 +95,15 @@ public class BuildingDef
 
     /// <summary>铸币局：每名在岗工匠每日铸钱入官库（贯）。</summary>
     public double MintPerWorkerDay { get; set; }
+
+    /// <summary>朝廷采购衙门（批次七十六：柴炭司/市易务等朝廷直属机构）：非空时表示该衙门收购的货品清单，
+    /// NPC 富余资源按朝廷牌价（基价×CourtProcurementPriceFactor，批次七十七全场最低价 0.8）直售衙门，
+    /// 货款由朝廷凭空生成（不经过官库）；城内交易优先、朝廷兑底，不设配额，衙门库容每月清空（朝廷漕运拉走）。
+    /// null/空数组 = 非衙门，无此能力。</summary>
+    public string[] CourtGoods { get; set; }
+
+    /// <summary>是否为朝廷直属采购衙门（收购清单非空）。</summary>
+    public bool IsCourtBuyer => CourtGoods is { Length: > 0 };
 
     /// <summary>建造菜单排序权重：&gt;0 才在菜单中显示（组内升序排列）；0 表不上架（grown 建筑由居民自建）。mod 可自定序号插入新建筑。</summary>
     public int MenuOrder { get; set; }
@@ -200,12 +210,18 @@ public class BuildingInstance : Obj
     /// <summary>废弃标志：grown 建筑无人居住时置位，可供新居民重建入住，并为后期邻居合并扩建预留钩子。</summary>
     public bool Abandoned;
 
+    /// <summary>业主居民 Id（-1 无）：田块等自营建筑登记田主，业主亡故/离城后由系统重新指派。</summary>
+    public int OwnerCitizenId = -1;
+
     /// <summary>建造日期（游戏年/月；老存档为 0 表示不详）。</summary>
     public int BuiltYear;
     public int BuiltMonth;
 
     /// <summary>专营货品（商铺/工坊倾向单一货品交易；空串表示不经营）。</summary>
     public string Specialty = "";
+
+    /// <summary>升级增补的副营货品（批次六十七：仅限同大类、数量封顶，见 ZoneGrowthSystem.ExtendSpecialties）。</summary>
+    public List<string> ExtraGoods = new();
 
     /// <summary>距上次收获的月数（仅农田类建筑使用，到期清零）。</summary>
     public int MonthsSinceHarvest;

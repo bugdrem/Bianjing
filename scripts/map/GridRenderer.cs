@@ -20,7 +20,10 @@ public partial class GridRenderer : Node3D
     private static readonly Color FruitTreeColor = new(0.46f, 0.47f, 0.24f); // 果树：暖黄绿树冠，一眼可辨
     private static readonly Color TrunkColor = new(0.38f, 0.30f, 0.22f); // 树干木褐
     private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
-    private static readonly Color BuildableZoneColor = new(0.35f, 0.85f, 0.35f, 0.35f);
+    /// <summary>建筑区色块：浅蓝底色（批次七十：原绿色改浅蓝，与耕种区浅黄绿区分；仅分区模式显示）。</summary>
+    private static readonly Color BuildableZoneColor = new(0.45f, 0.68f, 0.95f, 0.35f);
+    /// <summary>耕种区色块：浅黄绿底色（批次七十：修复耕种区不渲染，与建筑区浅蓝区分）。</summary>
+    private static readonly Color FarmlandZoneColor = new(0.82f, 0.90f, 0.45f, 0.35f);
 
     // 地形顶点色：低处淡麦黄绿（参考宋画平原色），高处/陡坡渐变灰褐岩；水下河床泥沙色
     private static readonly Color TerrainLowColor = new(0.63f, 0.59f, 0.44f); // 同 Main 卷轴画面基色
@@ -192,6 +195,7 @@ public partial class GridRenderer : Node3D
         };
         _zones = MakeMulti(zoneMesh, useColors: true);
         _zones.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        _zones.Visible = false; // 批次七十：规划色块默认隐藏，仅进入分区模式时显示
         AddChild(_zones);
 
         BuildGridLines();
@@ -303,6 +307,9 @@ public partial class GridRenderer : Node3D
     }
 
     public void SetGridVisible(bool visible) => _gridLines.Visible = visible;
+
+    /// <summary>规划色块显隐（批次七十）：仅分区模式下显示，平时不画规划底图。</summary>
+    public void SetZonesVisible(bool visible) => _zones.Visible = visible;
 
     public override void _Process(double delta)
     {
@@ -769,7 +776,8 @@ public partial class GridRenderer : Node3D
         return mesh;
     }
 
-    /// <summary>重建坊区色块层：只遍历坊区候选集（增量索引），非全图扫描。</summary>
+    /// <summary>重建坊区色块层：建筑区（浅蓝）与耕种区（浅黄绿）两个候选集分开上色，
+    /// 只遍历增量索引（非全图扫描）；批次七十：补上耕种区渲染（旧版只画可建设区）。</summary>
     private void RebuildZones()
     {
         var gs = GameState.I;
@@ -786,6 +794,16 @@ public partial class GridRenderer : Node3D
             float gy = gs.Map.GroundY(c); // 贴本格地面
             zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * (gy + 0.05f)));
             zoneColor.Add(BuildableZoneColor);
+        }
+        foreach (var c in gs.FarmlandCells)
+        {
+            ref var cell = ref gs.Map.CellAt(c);
+            if (cell.BuildingId >= 0)
+                continue;
+            var world = MapGrid.CellToWorld(c);
+            float gy = gs.Map.GroundY(c);
+            zoneXf.Add(new Transform3D(Basis.FromScale(new Vector3(cs * 0.96f, 0.08f, cs * 0.96f)), world + Vector3.Up * (gy + 0.05f)));
+            zoneColor.Add(FarmlandZoneColor);
         }
         FillMultiMesh(_zones.Multimesh, zoneXf, zoneColor);
     }

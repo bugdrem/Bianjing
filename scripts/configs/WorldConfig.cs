@@ -10,6 +10,9 @@ public static class WorldConfig
     public const int MainRoadCost = 18;
     public const int SideRoadCost = 10;
 
+    /// <summary>小路每格造价（文）：村民自建小路环的计价基准，后续贴路建房时按半价补偿原屋主（见 ZoneGrowthSystem）。</summary>
+    public const long LaneCost = 10;
+
     /// <summary>主路 / 辅路占地宽度（米/格，方形画笔盖戳宽）。</summary>
     public const int MainRoadWidth = 4;
     public const int SideRoadWidth = 2;
@@ -50,6 +53,19 @@ public static class WorldConfig
     /// <summary>开局官库钱（文）/ 官粮（份）。安家银值匹配 EconomyConfig.SettlementGrant。</summary>
     public const long StartMoney = 100_000;
     public const double StartFood = 500;
+
+    // ---- 昼夜光照（批次七十四）：白天/夜晚两档能量与过渡速率，夜间调暗但保持可操作 ----
+
+    /// <summary>白天/夜晚主光能量（DirectionalLight.LightEnergy）。</summary>
+    public const float DaySunEnergy = 0.95f;
+    public const float NightSunEnergy = 0.4f;
+
+    /// <summary>白天/夜晚环境光能量（Environment.AmbientLightEnergy）。</summary>
+    public const float DayAmbientEnergy = 0.55f;
+    public const float NightAmbientEnergy = 0.3f;
+
+    /// <summary>昼夜过渡速率（1/秒，指数逼近系数；约 2 秒完成大半过渡）。</summary>
+    public const float DayNightSmoothPerSec = 1.5f;
 
     /// <summary>居民履历条数上限 / 全城公告条数上限（超出移除最旧）。</summary>
     public const int LifeEventCap = 40;

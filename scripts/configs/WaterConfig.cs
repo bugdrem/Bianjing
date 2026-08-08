@@ -1,8 +1,11 @@
+using Godot;
+
 namespace Bianjing;
 
 /// <summary>
-/// 水系生成配置（业务归属：RiverGenerator 在侵蚀完成的成品地形上循坡走线，随存档保存）：
-/// 河流不再由草图压谷决定——源自西北山区峰间鞍部，在最终高度场上沿最陡下降走线，
+/// 水系生成配置（业务归属：批次六十一起河流在 128 草图定线（WorldSketch.WalkRivers，预览所见），
+/// RiverGenerator 把定线 ×8 放大为引导线，在侵蚀完成的成品地形上走廊循坡细化，随存档保存）：
+/// 河源自西北山区峰间鞍部，走线沿最陡下降推进且必达图缘/汇流（不在中途断流）；
 /// 水面高度沿程取「平滑地形的运行最小值」且不低于 MinWaterLevel（0）——
 /// 水随地势逐级下降形成流向观感，河岸高差由地形自然涌现（平原浅滩、山区峡谷）。
 /// 河湖只读地势不改地势，唯一例外是河床下压（把水格顶点压到本格水面之下）。
@@ -22,13 +25,20 @@ public static class WaterConfig
 
     // ---- 河源与走线 ----
 
-    /// <summary>河流条数范围（条）：源点取峰间鞍部，首条为干流，后续撞既有水体即汇流（原值×1.5 取整）。</summary>
+    /// <summary>河流条数范围（条）：源点取峰间鞍部，首条为干流，后续撞既有河线即汇流（原值×1.5 取整）。
+    /// 在 128 草图阶段掷定（同一 rng 序列，预览与成品一致）。</summary>
     public const int RiverCountMin = 6;
     public const int RiverCountMax = 9;
 
-    /// <summary>走线卡死（洼地无未访问低邻）时向东南强制滑行的最大连续步数：
-    /// 超过即弃线（防在大盆地里无限爬行）。</summary>
-    public const int MaxForcedSteps = 260;
+    /// <summary>走线最短长度（世界格）：不足即弃线（源点贴水/贴缘的残线）；草图阶段按 /SketchScale 折算。</summary>
+    public const int MinRiverPathCells = 40;
+
+    /// <summary>细化走线引导线拉力（米/格）：候选格评分 = 高度 + 拉力×到锚点曼哈顿距——
+    /// 河流贴地形弯曲（高度主导），又不偏离预览定线太远（拉力拉回）。</summary>
+    public const float GuidePull = 0.25f;
+
+    /// <summary>预览图河流定线颜色（新游戏 128×128 俯视预览上叠加 1px 河线）。</summary>
+    public static readonly Color PreviewRiverColor = new(0.45f, 0.72f, 0.90f);
 
     // ---- 河宽沿程（源头细、下游宽）----
 

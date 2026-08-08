@@ -6,7 +6,7 @@ namespace Bianjing;
 
 /// <summary>
 /// 居民 3D 代理：按身份/家庭角色驱动日常作息——
-/// 受雇者到工作地驻留直至下班；山民伐木/采摘/打猎后去市集交易；
+/// 受雇者到工作地驻留直至下班；山民伐木/采摘/打猎后上市交易；
 /// 修缮匠巡修公共设施；主妇采购、孩童玩耍、老人闲逛。
 /// 出行优先走道路（路网 AStar，带随机车道偏移避免排成一线），可脱离道路直线行走但有大幅减速惩罚；
 /// 每帧受邻居分离推力，避免人群叠在一起。
@@ -343,8 +343,8 @@ public partial class CitizenAgent : Node3D
                     StartActivity(ActivityType.PickingUp, new Vector2I(fieldPile.X, fieldPile.Y), 2f);
                     return;
                 }
-                // 工坊/商铺：先处理补料/成品外销物流，无事可做才站堂加工
-                if (Goods.IsCraftable(wp.Specialty) && StartCraftLogistics(gs, wp))
+                // 工坊：先处理补料/成品外销物流，无事可做才站堂加工（商铺不加工，只购销）
+                if (wp.Def.Id == "workshop" && Goods.IsCraftable(wp.Specialty) && StartCraftLogistics(gs, wp))
                     return;
                 // 受雇者/店主：进工作地驻留，到点（下午）自然下班
                 StartWorkAt(wp);
@@ -565,7 +565,7 @@ public partial class CitizenAgent : Node3D
         if (gs.Families.TryGetValue(C.FamilyId, out var fam) && fam.MemberIds.Count > 0)
             perCapita = fam.TotalAssets(gs) / fam.MemberIds.Count;
         else
-            perCapita = C.Money;
+            perCapita = 0; // 无家庭即无家产（个人私产已停流通）
         return perCapita >= LifeConfig.WealthyPerCapitaAssets;
     }
 
@@ -639,10 +639,11 @@ public partial class CitizenAgent : Node3D
         StartActivity(ActivityType.Shopping, BuildingAnchor(src) ?? src.Origin, 2f);
     }
 
-    /// <summary>家庭采买货源：自己有钱且 BuySearchRadius 内有存货的市集/商铺/官营产业（市集加权优先）。</summary>
+    /// <summary>家庭采买货源：家庭公产有余钱且 BuySearchRadius 内有存货的商铺/官营产业
+    /// （批次七十六：市集已撤除；朝廷衙门只进不出不售，排除在货源外）。</summary>
     private BuildingInstance FindGoodsSource(GameState gs, string goodsId)
     {
-        if (C.Money <= 0)
+        if (gs.FamilyMoney(C) <= 0)
             return null;
         var pos = MapGrid.WorldToCell(Position);
         BuildingInstance best = null;
@@ -651,14 +652,12 @@ public partial class CitizenAgent : Node3D
         {
             if (b.Inv.AmountOf(goodsId) < 1)
                 continue;
-            bool sells = b.Def.Id == "market" || b.Def.Id == "shop" || b.Def.Category == "official";
+            bool sells = b.Def.Id == "shop" || (b.Def.Category == "official" && !b.Def.IsCourtBuyer);
             if (!sells)
                 continue;
             float dist = new Vector2(b.X - pos.X, b.Y - pos.Y).Length();
             if (dist > BuySearchRadius)
                 continue;
-            if (b.Def.Id == "market")
-                dist *= 0.5f; // 同距下先选市集
             if (dist < bestDist)
             {
                 bestDist = dist;
@@ -718,7 +717,7 @@ public partial class CitizenAgent : Node3D
         StartActivity(ActivityType.FetchingWater, target, 3f);
     }
 
-    /// <summary>需求驱动的采集谋生（家中储备已达标时）：市集缺备货/工坊商铺缺料才上山采集，
+    /// <summary>需求驱动的采集谋生（家中储备已达标时）：朝廷衙门缺货收购/工坊商铺缺料才上山采集，
     /// 出发前认领需求方（在途量计入判定，后来者不再扎堆响应同一缺口）；
     /// 采回因家中达标自动走售卖路径换钱；全无需求或城中尚无铺面则闲逛歇息，不再无休止砍树。</summary>
     private void StartDemandForaging(GameState gs)
@@ -747,12 +746,10 @@ public partial class CitizenAgent : Node3D
             StartRestHome(gs, 4f);
     }
 
-    /// <summary>市集每货备货线（份）：市集存量低于此线即构成收购需求。</summary>
-    private const double MarketStockLine = EconomyConfig.MarketStockLine;
-
-    /// <summary>找对某原始货品有收购需求的建筑（null=全城无需求）：市集备货线以下 /
-    /// 专营该货铺面半仓以下 / 工坊商铺配方原料不足两担；各条款均叠加在途认领量再比较，
-    /// 已被足额认领的缺口不再重复派人；城中没有任何铺面时自然无需求（早期山民不为卖而采）。</summary>
+    /// <summary>找对某原始货品有收购需求的建筑（null=全城无需求）：专营该货铺面半仓以下 /
+    /// 工坊商铺配方原料不足两担（城内需求优先，批次七十七）；均无且朝廷衙门收该货时
+    /// 衙门构成兑底需求（朝廷最低价收购，不设配额，只受衙门库容限制）；
+    /// 各条款均叠加在途认领量再比较，已被足额认领的缺口不再重复派人。</summary>
     private static BuildingInstance FindDemandTarget(GameState gs, string goodsId)
     {
         var inbound = BuildInboundIndex(gs);
@@ -761,15 +758,21 @@ public partial class CitizenAgent : Node3D
             if (b.StorageAtCap)
                 continue; // 已达/超仓储上限的铺面不再构成需求（超限存入机制的闸门）
             double inb = inbound.GetValueOrDefault((b.Id, goodsId));
-            if (b.Def.Id == "market" && b.Inv.AmountOf(goodsId) + inb < MarketStockLine)
-                return b;
-            if (b.Specialty == goodsId && b.Inv.AmountOf(goodsId) + inb < b.StorageCap / 2.0)
-                return b; // 专营该货的铺面半仓以下要进货
-            if (Goods.IsCraftable(b.Specialty))
-                foreach (var raw in Goods.InputsOf(b.Specialty))
-                    if (raw == goodsId && b.Inv.AmountOf(raw) + inb < Goods.LoadUnits * 2)
-                        return b; // 工坊/商铺加工原料告急
+            if ((b.Specialty == goodsId || b.ExtraGoods.Contains(goodsId))
+                && b.Inv.AmountOf(goodsId) + inb < b.StorageCap / 2.0)
+                return b; // 专营/副营该货的铺面半仓以下要进货
+            if (b.Def.Id == "workshop")
+                foreach (var g in ProducingGoods(b))
+                    foreach (var raw in RecipeRawIds(b, g))
+                        if (raw == goodsId && b.Inv.AmountOf(raw) + inb < Goods.LoadUnits * 2)
+                            return b; // 工坊加工原料/燃料告急
         }
+        // 城内无需求时朝廷衙门兑底（柴炭司收柴木炭、市易务收粮肉果；朝廷出价全场最低，
+        // 城内优先交易自然达成——村民先供城内，富余才卖朝廷）
+        foreach (var b in gs.Buildings.Values)
+            if (b.Def.IsCourtBuyer && !b.StorageAtCap
+                && Array.IndexOf(b.Def.CourtGoods, goodsId) >= 0)
+                return b;
         return null;
     }
 
@@ -812,32 +815,52 @@ public partial class CitizenAgent : Node3D
         return map;
     }
 
-    /// <summary>本楼铺面优先：无正职的居住者先为自己住的工坊/商铺跑腿补料——
+    /// <summary>本楼铺面优先：无正职的居住者先为自己住的工坊跑腿补料（批次六十七：商铺不加工不补料）——
     /// 铺面的活优先派给没有工作的居住者，认领后外部散户的需求判定自动让位。</summary>
     private bool TryServeHomeBusiness(GameState gs)
     {
-        if (!gs.Buildings.TryGetValue(C.HomeId, out var home) || !Goods.IsCraftable(home.Specialty))
+        if (!gs.Buildings.TryGetValue(C.HomeId, out var home)
+            || home.Def.Id != "workshop" || !Goods.IsCraftable(home.Specialty))
             return false;
         if (home.StorageAtCap)
             return false; // 总仓已达上限：先把存货消化掉再进货
-        foreach (var raw in Goods.InputsOf(home.Specialty))
-        {
-            if (home.Inv.AmountOf(raw) + InboundOf(gs, home.Id, raw) >= Goods.LoadUnits * 2)
-                continue; // 存量加在途量够两担：不缺
-            if (DispatchAcquire(gs, home, raw))
-                return true; // DispatchAcquire 内已登记认领
-        }
+        foreach (var g in ProducingGoods(home))
+            foreach (var raw in RecipeRawIds(home, g))
+            {
+                if (home.Inv.AmountOf(raw) + InboundOf(gs, home.Id, raw) >= Goods.LoadUnits * 2)
+                    continue; // 存量加在途量够两担：不缺
+                if (DispatchAcquire(gs, home, raw))
+                    return true; // DispatchAcquire 内已登记认领
+            }
         return false;
+    }
+
+    /// <summary>工坊/商铺当前在产货品列表（专营 + 升级副营，去重）：加工与补料判定共用。</summary>
+    private static IEnumerable<string> ProducingGoods(BuildingInstance b)
+    {
+        yield return b.Specialty;
+        foreach (var g in b.ExtraGoods)
+            if (g != b.Specialty)
+                yield return g;
+    }
+
+    /// <summary>按等级配方取所需原料/燃料 id 列表（多对多配方取原料键，需燃料时附加柴薪）：补料判定遍历用。</summary>
+    private static List<string> RecipeRawIds(BuildingInstance b, string spec)
+    {
+        var list = new List<string>(Goods.InputsAt(spec, b.Level).Keys);
+        if (Goods.FuelAt(spec, b.Level) > 0 && !list.Contains(Goods.Wood))
+            list.Add(Goods.Wood); // 配方要烧柴：柴薪一并纳入补料
+        return list;
     }
 
     // ---- 工坊/商铺物流：补料与成品外销 ----
 
-    /// <summary>采买判定半径（米）：此范围内有备货的市集/铺面就去买，否则自主采集。</summary>
+    /// <summary>采买判定半径（米）：此范围内有备货的铺面/官营产业就去买，否则自主采集。</summary>
     private const int BuySearchRadius = EconomyConfig.BuySearchRadius;
 
     /// <summary>工坊/商铺雇工的物流决策：
     /// 1) 工坊成品攒够一担 → 挑去商铺寄卖（商铺自产自销不外运）；
-    /// 2) 任一配方原料不足一担 → 外出取料（市集近且有货则买，否则上山自采）；
+    /// 2) 任一配方原料不足一担 → 外出取料（附近有货则买，否则上山自采）；
     /// 都不需要则返回 false，站堂加工。</summary>
     private bool StartCraftLogistics(GameState gs, BuildingInstance wp)
     {
@@ -862,21 +885,22 @@ public partial class CitizenAgent : Node3D
             }
         }
 
-        // 补料：任一原料存量加在途量低于一担就去取（同坊另一雇工/住户已在路上则不重复出门）；
+        // 补料：任一在产货品的原料/燃料存量加在途量低于一担就去取（同坊另一雇工/住户已在路上则不重复出门）；
         // 总仓已达上限则不再进货（先把存货加工/外销消化掉）
         if (wp.StorageAtCap)
             return false;
-        foreach (var raw in Goods.InputsOf(spec))
-        {
-            if (wp.Inv.AmountOf(raw) + InboundOf(gs, wp.Id, raw) >= Goods.LoadUnits)
-                continue;
-            if (DispatchAcquire(gs, wp, raw))
-                return true;
-        }
+        foreach (var g in ProducingGoods(wp))
+            foreach (var raw in RecipeRawIds(wp, g))
+            {
+                if (wp.Inv.AmountOf(raw) + InboundOf(gs, wp.Id, raw) >= Goods.LoadUnits)
+                    continue;
+                if (DispatchAcquire(gs, wp, raw))
+                    return true;
+            }
         return false;
     }
 
-    /// <summary>取料：附近（BuySearchRadius 内）有备货充足的市集/铺面则前往采买，
+    /// <summary>取料：附近（BuySearchRadius 内）有备货充足的铺面/官营产业则前往采买，
     /// 否则可野外采集的原料（柴/果/野味）上山自采；粮/矿/盐无货源时只能等。
     /// 出发即登记供货认领，外部散户与同坊他人的需求判定自动扣除在途量。</summary>
     private bool DispatchAcquire(GameState gs, BuildingInstance wp, string raw)
@@ -917,7 +941,7 @@ public partial class CitizenAgent : Node3D
         return false;
     }
 
-    /// <summary>附近有该原料备货（≥一担）的合法货源：市集/商铺/官营产业（农田矿盐等），市集加权优先；
+    /// <summary>附近有该原料备货（≥一担）的合法货源：商铺/官营产业（批次七十六：市集已撤除，朝廷衙门只进不出不售）；
     /// 住宅家底与同行工坊的备料不是商品，不得买走。</summary>
     private static BuildingInstance FindStockedSource(GameState gs, string raw, BuildingInstance wp)
     {
@@ -927,16 +951,13 @@ public partial class CitizenAgent : Node3D
         {
             if (b.Id == wp.Id || b.Inv.AmountOf(raw) < Goods.LoadUnits)
                 continue;
-            // 只从在卖的地方买：市集、商铺、官营产业；住宅、其他工坊的存货排除
-            bool sells = b.Def.Id == "market" || b.Def.Id == "shop" || b.Def.Category == "official";
+            // 只从在卖的地方买：商铺、官营产业（批次七十六：市集已撤除，朝廷衙门只进不出不售）；住宅、其他工坊的存货排除
+            bool sells = b.Def.Id == "shop" || (b.Def.Category == "official" && !b.Def.IsCourtBuyer);
             if (!sells)
                 continue;
             float dist = (b.Origin - wp.Origin).Length();
             if (dist > BuySearchRadius)
                 continue;
-            // 市集加权优先（同距离下先选市集）
-            if (b.Def.Id == "market")
-                dist *= 0.5f;
             if (dist < bestDist)
             {
                 bestDist = dist;
@@ -946,19 +967,19 @@ public partial class CitizenAgent : Node3D
         return best;
     }
 
-    /// <summary>找成品外销目的地：专营同货的商铺优先，其次市集（通吃各货），都要有库容；
-    /// 不往专营别的货的商铺送（居民只从专营铺/市集买，错配入库会成永久死库存）。</summary>
+    /// <summary>找成品外销目的地：专营同货的商铺优先（批次七十六：市集撤除，朝廷衙门不收成品，
+    /// 无专营铺则成品积压待售）；不往专营别的货的商铺送（居民只从专营铺买，错配入库会成永久死库存）。</summary>
     private static BuildingInstance FindCraftShop(GameState gs, string goodsId)
     {
         BuildingInstance best = null;
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.Id != "shop" || b.Specialty != goodsId || b.StorageAtCap)
+            if (b.Def.Id != "shop" || (b.Specialty != goodsId && !b.ExtraGoods.Contains(goodsId)) || b.StorageAtCap)
                 continue;
             if (best == null || b.SpareCap > best.SpareCap)
                 best = b;
         }
-        return best ?? FindMarket(gs, needFree: true);
+        return best;
     }
 
     /// <summary>伐木：找最近的树走过去砍（线性扫植物实体，免大半径环扫）；无树可砍则闲逛等待。</summary>
@@ -1077,13 +1098,21 @@ public partial class CitizenAgent : Node3D
                 if (_buyGoodsId != "" && gs.Buildings.TryGetValue(_buySourceId, out var src))
                 {
                     long price = Goods.PriceOf(_buyGoodsId);
-                    long afford = price > 0 ? Math.Max(0, C.Money) / price : (long)C.Pack.Free;
+                    // 商税（批次七十五）：买家按成交额另付税入官库（可买量按含税价估算防超支）
+                    double taxRate = gs.Taxes.TradeTaxRate;
+                    long afford = price > 0 ? gs.FamilyMoney(C) / (long)(price * (1 + taxRate)) : (long)C.Pack.Free;
                     double got = src.TakeGoods(_buyGoodsId, Math.Min(C.Pack.Free, afford));
                     if (got > 0)
                     {
                         C.Pack.Store(_buyGoodsId, got);
                         long pay = (long)(price * got);
-                        C.Money -= pay;
+                        long tax = (long)(pay * taxRate);
+                        gs.TakeFromFamily(C, pay + tax); // 货款 + 商税由家庭公产支付
+                        if (tax > 0)
+                        {
+                            gs.Money += tax;
+                            gs.Ledger.Add("商税", tax);
+                        }
                         gs.PayToBuilding(src, pay); // 钱货两让：卖方真收到钱
                     }
                 }
@@ -1129,17 +1158,25 @@ public partial class CitizenAgent : Node3D
                 _haulBuildingId = -1;
                 break;
             case ActivityType.Working:
-                // 下工即结：官营岗位当班工钱（月俸/30）由官库实付记账；
+                // 下工记账（批次七十四工钱月结）：官营岗位当班工钱（月俸/月天数）记入应发，月底统一发放；
                 // 工商自营岗位不发固定工钱（收入来自售货分账与寄卖货款，钱不凭空生）；
                 // 农夫田仓有存粮就挑一担带走（回家或上市，视作官仓实物俸的一部分）
                 if (gs.Buildings.TryGetValue(C.WorkplaceId, out var work))
                 {
-                    if (work.Def.Category == "official")
+                    // 批次八十五：农田（field）也发固定工钱（salary 800/月）——旧版农夫仅靠卖粮 ≈40 文/月，
+                    // 不足开销 1/5，农民家庭结构性赤贫；工商自营（grown 店坊）仍不发固定工钱（收入来自售货分账与寄卖货款）
+                    if (work.Def.Category == "official" || work.Def.Category == "field")
                     {
                         long pay = Math.Max(1, work.Def.Salary / GameClock.DaysPerMonth);
-                        C.Money += pay;
-                        gs.Money -= pay;
-                        gs.Ledger.Add("雇工俸禄", -pay);
+                        // 人口税：开启时从当班工钱扣 20% 入官库（批次六十八补齐——TaxSystem 注释所指的扣款点）
+                        if (gs.Taxes.PollTaxEnabled)
+                        {
+                            long poll = (long)(pay * EconomyConfig.PollTaxRate);
+                            pay -= poll;
+                            gs.Money += poll;
+                            gs.Ledger.Add("人口税", poll);
+                        }
+                        C.WagesOwed += pay; // 工钱记应发（月结发放见 EconomySystem.PayWages）
                     }
                     if (work.Def.HarvestMonths > 0 && C.Pack.IsEmpty)
                     {
@@ -1150,13 +1187,19 @@ public partial class CitizenAgent : Node3D
                 }
                 break;
             case ActivityType.Repairing:
-                // 修缮匠下工即结：官库发当班俸禄并记账（俸禄随修缮房定义 Salary）
+                // 修缮匠下工记账（批次七十四）：官库俸禄记应发，月结发放（俸禄随修缮房定义 Salary）
                 if (gs.Buildings.TryGetValue(C.WorkplaceId, out var rh))
                 {
                     long pay = Math.Max(1, rh.Def.Salary / GameClock.DaysPerMonth);
-                    C.Money += pay;
-                    gs.Money -= pay;
-                    gs.Ledger.Add("修缮匠俸禄", -pay);
+                    // 人口税：与雇工同口径，开启时扣 20% 入官库
+                    if (gs.Taxes.PollTaxEnabled)
+                    {
+                        long poll = (long)(pay * EconomyConfig.PollTaxRate);
+                        pay -= poll;
+                        gs.Money += poll;
+                        gs.Ledger.Add("人口税", poll);
+                    }
+                    C.WagesOwed += pay; // 俸禄记应发（月结发放见 EconomySystem.PayWages）
                 }
                 break;
         }
@@ -1184,7 +1227,9 @@ public partial class CitizenAgent : Node3D
     }
 
     /// <summary>把背包里的货逐堆卖掉：优先专营铺、其次缺此原料的工坊/商铺（与 FindDemandTarget 同口径，
-    /// 山民采的原料才卖得进需求方）、再次市集；只按铺面实收份额由买方付款（钱不凭空生）。
+    /// 山民采的原料才卖得进需求方）、再次朝廷采购衙门（批次七十七：衙门兑底收购，朝廷牌价全场最低
+    /// 基价×0.8——城内交易优先，富余才卖朝廷；不设配额只受衙门库容限制）；
+    /// 只按铺面实收份额由买方付款（钱不凭空生，朝廷衙门除外）。
     /// 卖不掉的不再就地丢弃：置 _sellFailed 标记，下轮决策改背回家囤（家满才卸堆）；水不入交易链直接泼掉。</summary>
     private void SellPack(GameState gs)
     {
@@ -1197,7 +1242,7 @@ public partial class CitizenAgent : Node3D
             }
             var shop = FindTradeShop(gs, s.GoodsId, needFree: true)
                        ?? FindRawBuyer(gs, s.GoodsId)
-                       ?? FindMarket(gs, needFree: true);
+                       ?? FindCourtBuyer(gs, s.GoodsId, needFree: true);
             double amount = s.Amount;
             if (shop != null)
             {
@@ -1205,7 +1250,15 @@ public partial class CitizenAgent : Node3D
                 double accepted = shop.StoreGoodsForce(s.GoodsId, amount);
                 if (accepted > 0)
                 {
-                    gs.PayFromBuilding(shop, C, (long)(Goods.PriceOf(s.GoodsId) * accepted)); // 铺面能付多少付多少
+                    if (shop.Def.IsCourtBuyer)
+                    {
+                        // 朝廷采购（批次七十七）：货款由朝廷凭空生成直接付给家庭（不经官库），
+                        // 朝廷牌价全场最低（基价×0.8），城内交易优先、朝廷兑底；不设配额
+                        gs.PayToFamily(C, (long)(Goods.PriceOf(s.GoodsId)
+                            * EconomyConfig.CourtProcurementPriceFactor * accepted));
+                    }
+                    else
+                        gs.PayFromBuilding(shop, C, (long)(Goods.PriceOf(s.GoodsId) * accepted)); // 铺面能付多少付多少
                     C.Pack.Take(s.GoodsId, accepted);
                     amount -= accepted;
                 }
@@ -1222,11 +1275,12 @@ public partial class CitizenAgent : Node3D
         BuildingInstance best = null;
         foreach (var b in gs.Buildings.Values)
         {
-            if (!Goods.IsCraftable(b.Specialty) || b.StorageAtCap)
-                continue;
+            if (b.Def.Id != "workshop" || b.StorageAtCap)
+                continue; // 商铺不加工，不构成原料收购方
             bool needs = false;
-            foreach (var raw in Goods.InputsOf(b.Specialty))
-                needs |= raw == goodsId && b.Inv.AmountOf(raw) < Goods.LoadUnits * 2;
+            foreach (var g in ProducingGoods(b))
+                foreach (var raw in RecipeRawIds(b, g))
+                    needs |= raw == goodsId && b.Inv.AmountOf(raw) < Goods.LoadUnits * 2;
             if (!needs)
                 continue;
             if (best == null || b.SpareCap > best.SpareCap)
@@ -1235,13 +1289,15 @@ public partial class CitizenAgent : Node3D
         return best;
     }
 
-    /// <summary>找一座市集（通收各货）：needFree 时要求还有库容，取余仓最大者。</summary>
-    private static BuildingInstance FindMarket(GameState gs, bool needFree)
+    /// <summary>朝廷采购衙门（批次七十六：柴炭司/市易务等）：收购该货、有库容的衙门，取余仓最大者；
+    /// 货款由朝廷凭空生成直接付给家庭（不经官库）；批次七十七：不设收购配额，仅受衙门库容限制
+    /// （库容每月清空，朝廷漕运拉走）。</summary>
+    private static BuildingInstance FindCourtBuyer(GameState gs, string goodsId, bool needFree)
     {
         BuildingInstance best = null;
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Def.Id != "market")
+            if (!b.Def.IsCourtBuyer || Array.IndexOf(b.Def.CourtGoods, goodsId) < 0)
                 continue;
             if (needFree && b.StorageAtCap)
                 continue;
@@ -1257,7 +1313,7 @@ public partial class CitizenAgent : Node3D
         BuildingInstance best = null;
         foreach (var b in gs.Buildings.Values)
         {
-            if (b.Specialty != goodsId)
+            if (b.Specialty != goodsId && !b.ExtraGoods.Contains(goodsId))
                 continue;
             if (needFree && b.StorageAtCap)
                 continue;
@@ -1267,13 +1323,13 @@ public partial class CitizenAgent : Node3D
         return best;
     }
 
-    /// <summary>交易目的地：优先有库容的专营铺，其次缺此原料的工坊/商铺，再次市集（与 SellPack 同序）。</summary>
+    /// <summary>交易目的地：优先有库容的专营铺，其次缺此原料的工坊/商铺，再次朝廷采购衙门
+    /// （批次七十六：市集撤除，衙门兜底收购；无衙门则回家囤货，见 _sellFailed 分支）。</summary>
     private Vector2I? TradeAnchor(GameState gs)
     {
         var shop = FindTradeShop(gs, C.PackGoodsId, needFree: true)
                    ?? FindRawBuyer(gs, C.PackGoodsId)
-                   ?? FindMarket(gs, needFree: true)
-                   ?? FindMarket(gs, needFree: false);
+                   ?? FindCourtBuyer(gs, C.PackGoodsId, needFree: true);
         return shop != null ? BuildingAnchor(shop) ?? shop.Origin : ShoppingAnchor(gs);
     }
 

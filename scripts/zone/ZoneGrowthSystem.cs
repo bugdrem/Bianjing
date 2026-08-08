@@ -23,14 +23,17 @@ public class ZoneGrowthSystem
 
         // 住宅不再缺房自动生成：人口靠迁入 + 分家建房驱动（见 LifecycleSystem）；仅保留升级/转业
         LevelUps(gs);
-        Conversions(gs); // 路边住宅转商铺/工坊：独立于升级链（升级依赖吸引力，而村民多沿零吸引力小路建房）
+        Startups(gs); // 自主创业：技能+家庭资金+市场缺口三条件齐备才把住宅转商铺/工坊（见下）
     }
 
-    /// <summary>路边转业（每日）：够格占地的路边民居按概率转商铺/工坊——独立于升级/吸引力，
-    /// 使沿主/辅路的住宅能如实长出工商户（吸引力驱动的升级另见 LevelUps）。</summary>
-    private void Conversions(GameState gs)
+    /// <summary>自主创业（每日）：符合条件的路边住宅由住户自主转业为商铺/工坊——
+    /// 取代旧版纯随机转业：创业者须有对应技能（商业→商铺、手艺→工坊）且技能经验/家庭公产达标，
+    /// 在业者亦可创业（转业时辞去现职，次日回自家新店上工）；门槛随市场缺口浮动（越缺货门槛越低）；
+    /// 选品认领最缺货品（商铺限可售品、工坊限可加工品），全城同货铺面封顶防垄断。
+    /// 保留闸门：集镇（里程碑 2）起 + 全城工商占比 30% 封顶（占地门槛在调用处）。</summary>
+    private void Startups(GameState gs)
     {
-        // 村落阶段不开店：集镇（里程碑 2）起才允许（与 TryConvertHouse 内闸门一致，此处先挡免无谓遍历）
+        // 村落阶段不开店：集镇（里程碑 2）起才允许住宅转工商（与 TryStartup 内闸门一致，此处先挡免无谓遍历）
         if (gs.MilestoneLevel < 2)
             return;
         foreach (var b in gs.Buildings.Values)
@@ -39,9 +42,144 @@ public class ZoneGrowthSystem
                 continue; // 只转民居，失修的不转
             if (b.FootX * b.FootY < GrowthConfig.ConvertMinArea)
                 continue; // 占地不够（须扩建过）
-            if (_rng.NextDouble() < GrowthConfig.ConvertChancePerDay)
-                TryConvertHouse(gs, b);
+            TryStartup(gs, b);
         }
+    }
+
+    /// <summary>单宅创业判定：找本宅合格创业者 → 按技能定去向并认领缺货 → 门槛/概率掷签 → 就地转业。</summary>
+    private void TryStartup(GameState gs, BuildingInstance b)
+    {
+        // 全城工商户数封顶 30%：大致对应“10 间住宅中两三个升级成工坊或商铺”
+        int grown = 0, biz = 0;
+        foreach (var g in gs.Buildings.Values)
+        {
+            if (g.Def.Category != "grown")
+                continue;
+            grown++;
+            if (g.Def.Id != "house")
+                biz++;
+        }
+        if (grown > 0 && biz >= grown * GrowthConfig.BizRatioCap)
+            return;
+
+        // 临路档位：创业铺面须贴路（占地外 1 格内有任意道路：主/辅/小路皆可），巷中深宅不转
+        if (!TouchesRoad(gs, b))
+            return;
+
+        // 本宅创业者：成年住户中找有技能方向者（商业/手艺），在业者亦可创业（转业时辞工）；主妇守家不创业
+        Citizen founder = null;
+        foreach (var c in gs.Citizens.Values)
+        {
+            if (c.HomeId != b.Id || c.IsChild)
+                continue;
+            if (c.IsMarried && c.Gender == Gender.Female
+                && gs.Citizens.TryGetValue(c.SpouseId, out var husband) && husband.HasJob)
+                continue; // 丈夫在业的主妇持家采购，不创业
+            if (c.Skill == SkillType.Commerce || c.Skill == SkillType.Craft)
+            {
+                founder = c;
+                break;
+            }
+        }
+        if (founder == null)
+            return;
+
+        // 去向与选品：商业→商铺、手艺→工坊；认领最缺的可经营货品（无缺货时随机不饱和者）
+        string target = founder.Skill == SkillType.Commerce ? "shop" : "workshop";
+        string goods = PickScarceGoods(gs, target);
+        if (goods == "")
+            return; // 无货可营（全饱和）：本日不创业
+
+        // 缺口折扣：越缺货门槛越低（可支撑天数 0 时折扣最大，无缺口无折扣）
+        double days = gs.Demand.DaysOfStockOf(goods);
+        double scarcity = EconomyConfig.StartupMaxDiscount
+            * Math.Clamp(1.0 - days / EconomyConfig.DemandShortDays, 0.0, 1.0);
+        double factor = 1.0 - scarcity;
+
+        // 门槛：技能经验与家庭公产，随缺口折扣
+        if (founder.SkillExp < EconomyConfig.StartupSkillExpReq * factor)
+            return;
+        if (!gs.Families.TryGetValue(founder.FamilyId, out var fam)
+            || fam.SharedAssets < EconomyConfig.StartupAssetsReq * factor)
+            return;
+
+        // 日概率：基础 + 缺口加成（缺得越狠越想开店）
+        double chance = EconomyConfig.StartupChancePerDay
+            + (1.0 - factor) * EconomyConfig.StartupScarcityBonus;
+        if (_rng.NextDouble() >= chance)
+            return;
+
+        // 在业者创业：转业前辞去现职（岗位空缺次日由 SeekJobs 补招；辞工后本楼居民次日即回自家新店上工）
+        if (founder.HasJob)
+        {
+            gs.LogLifeEvent(founder, $"辞去差事，自营{target}");
+            founder.JobKind = JobKind.None;
+            founder.WorkplaceId = -1;
+        }
+        gs.ConvertGrown(b, target, goods); // 批次八十四：按认领缺货品专营（旧版 ConvertGrown 内随机重置，选品结果丢失）
+        gs.LogLifeEvent(founder, $"见市面缺{Goods.NameOf(goods)}，把住宅改成{target}");
+        gs.PostNews("biz", $"{founder.Name}创业：住宅改营{target}，专营{Goods.NameOf(goods)}");
+    }
+
+    /// <summary>占地外扩 1 圈内是否有任意道路格（主/辅/小路皆可）：创业铺面贴路才有人流。</summary>
+    private static bool TouchesRoad(GameState gs, BuildingInstance b)
+    {
+        var o = b.Origin;
+        for (int x = o.X - 1; x < o.X + b.FootX + 1; x++)
+        {
+            for (int y = o.Y - 1; y < o.Y + b.FootY + 1; y++)
+            {
+                if (x >= o.X && x < o.X + b.FootX && y >= o.Y && y < o.Y + b.FootY)
+                    continue; // 占地内部不算
+                var c = new Vector2I(x, y);
+                if (MapGrid.InBounds(c) && gs.Map.CellAt(c).HasRoad)
+                    return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>认领缺货：target 为 "shop"/"workshop" 时分别从可售品/可加工品中挑最缺且未饱和者；
+    /// 无缺货则退选随机一个未饱和者；全饱和返回空串。
+    /// 防垄断：全城专营同货的铺面数 &lt; ShopSameGoodsCap 才可选。</summary>
+    private static string PickScarceGoods(GameState gs, string target)
+    {
+        var cands = target == "shop" ? Goods.ShopSpecialties : Goods.CraftSpecialties;
+        string best = "";
+        double bestDays = double.MaxValue;
+        int fallback = _siteRng.Next(cands.Length);
+        for (int i = 0; i < cands.Length; i++)
+        {
+            string id = cands[(fallback + i) % cands.Length];
+            if (CountShops(gs, id) >= EconomyConfig.ShopSameGoodsCap)
+                continue; // 同货铺面已饱和：不撞车
+            if (gs.Demand.IsShort(id) && gs.Demand.DaysOfStockOf(id) < bestDays)
+            {
+                bestDays = gs.Demand.DaysOfStockOf(id);
+                best = id; // 缺货品：取最缺
+            }
+        }
+        if (best != "")
+            return best;
+        // 无缺货：退选随机未饱和者（保持专营多样性）
+        for (int i = 0; i < cands.Length; i++)
+        {
+            string id = cands[(fallback + i) % cands.Length];
+            if (CountShops(gs, id) < EconomyConfig.ShopSameGoodsCap)
+                return id;
+        }
+        return "";
+    }
+
+    /// <summary>全城专营该货的商铺/工坊数（含升级副营品；防同货撞车垄断）。</summary>
+    public static int CountShops(GameState gs, string goodsId)
+    {
+        int n = 0;
+        foreach (var b in gs.Buildings.Values)
+            if (b.Def.Category == "grown" && b.Def.Id != "house"
+                && (b.Specialty == goodsId || b.ExtraGoods.Contains(goodsId)))
+                n++;
+        return n;
     }
 
     /// <summary>坊区建筑升级：吸引力越高级要求越高，年久失修的不升，里程碑限制最高等级（只影响楼高观感）。</summary>
@@ -60,106 +198,40 @@ public class ZoneGrowthSystem
             {
                 b.Level++;
                 changed = true;
+                ExtendSpecialties(gs, b); // 升级增补同大类副营品（批次六十七：基本专营，升级才多品）
                 // 扩建不再随升级触发（改由住满拥挤事件驱动，见 LifecycleSystem.ResolveHousing）；
-                // 转业已从升级链解耦（见 Conversions）：升级依赖吸引力，而村民多沿零吸引力小路建房，两者矛盾
+                // 创业已从升级链解耦（见 Startups）：升级依赖吸引力，而村民多沿零吸引力小路建房，两者矛盾
             }
         }
         if (changed)
             EventBus.RaiseBuildingsChanged(); // 升级只变楼高：仅重建建筑层，不重建地表分块
     }
 
-    /// <summary>住宅升级时的去向掷签（按临路档位取分布，余量 = 维持住宅照常升级）：
-    /// 贴近主路→商铺大概率/工坊中概率/更高级住宅小概率；
-    /// 贴近辅路（不贴主路）→工坊与住宅都高、商铺小概率；
-    /// 只靠自带小路→高概率维持住宅、小概率转工坊。
-    /// 保留闸门：集镇（里程碑 2）起 + 全城工商占比 30% 封顶（占地门槛在调用处）。</summary>
-    private void TryConvertHouse(GameState gs, BuildingInstance b)
+    /// <summary>升级增补经营种类（批次六十七）：商铺/工坊每升一级向同大类货品随机补种副营品，
+    /// 目标种类数 = 等级（封顶 MaxSpecialtiesPerShop）——基本专营、等级高了才多品；
+    /// 同货全城铺面受 ShopSameGoodsCap 饱和限制，防跨类/过量垄断。</summary>
+    private static void ExtendSpecialties(GameState gs, BuildingInstance b)
     {
-        // 村落阶段不开店：集镇（里程碑 2）起才允许住宅转工商
-        if (gs.MilestoneLevel < 2)
+        if (b.Def.Id != "shop" && b.Def.Id != "workshop")
             return;
-    
-        // 全城工商户数封顶 30%：大致对应“10 间住宅中两三个升级成工坊或商铺”
-        int grown = 0, biz = 0;
-        foreach (var g in gs.Buildings.Values)
+        string[] pool = b.Def.Id == "shop" ? Goods.ShopSpecialties : Goods.CraftSpecialties;
+        int want = Math.Min(b.Level, EconomyConfig.MaxSpecialtiesPerShop);
+        int guard = 0; // 防死循环：候选池扫尽即止
+        while (b.ExtraGoods.Count < want && guard++ < pool.Length * 4)
         {
-            if (g.Def.Category != "grown")
-                continue;
-            grown++;
-            if (g.Def.Id != "house")
-                biz++;
+            string cand = pool[_siteRng.Next(pool.Length)];
+            if (cand == b.Specialty || b.ExtraGoods.Contains(cand))
+                continue; // 已营
+            if (Goods.CategoryOf(cand) != Goods.CategoryOf(b.Specialty))
+                continue; // 仅限同大类
+            if (CountShops(gs, cand) >= EconomyConfig.ShopSameGoodsCap)
+                continue; // 全城同货铺面已饱和：不撞车
+            b.ExtraGoods.Add(cand);
         }
-        if (grown > 0 && biz >= grown * GrowthConfig.BizRatioCap)
-            return;
-    
-        // 临路档位：优先认主路，其次辅路，都不贴则落入“只靠自带小路”档（小路/桥面不计入前两档）
-        var (dMain, dSide) = NearestRoadDistance(gs, b, GrowthConfig.ConvertRoadDist);
-        double pShop, pWorkshop;
-        if (dMain > 0)
-        {
-            pShop = GrowthConfig.MainShopChance;
-            pWorkshop = GrowthConfig.MainWorkshopChance;
-        }
-        else if (dSide > 0)
-        {
-            pShop = GrowthConfig.SideShopChance;
-            pWorkshop = GrowthConfig.SideWorkshopChance;
-        }
-        else
-        {
-            pShop = GrowthConfig.LaneShopChance;
-            pWorkshop = GrowthConfig.LaneWorkshopChance;
-        }
-    
-        double r = _rng.NextDouble();
-        if (r < pShop)
-            gs.ConvertGrown(b, "shop");
-        else if (r < pShop + pWorkshop)
-            gs.ConvertGrown(b, "workshop");
-        // 其余：维持住宅，本次即“升级成更高级的住宅”（Level 已在调用处 +1）
-    }
-    
-    /// <summary>占地边缘到最近主路格与辅路格的切比雪夫距离（米）：范围内找不到返回 -1；
-    /// 小路与桥面不计（转业只认玩家画的主/辅路）。扫描面积 (占地+2r)² 量级，仅升级掷中时偶发调用。</summary>
-    private static (int Main, int Side) NearestRoadDistance(GameState gs, BuildingInstance b, int maxDist)
-    {
-        int dMain = -1, dSide = -1;
-        var o = b.Origin;
-        int fx = b.FootX, fy = b.FootY;
-        for (int x = o.X - maxDist; x < o.X + fx + maxDist; x++)
-        {
-            for (int y = o.Y - maxDist; y < o.Y + fy + maxDist; y++)
-            {
-                if (x >= o.X && x < o.X + fx && y >= o.Y && y < o.Y + fy)
-                    continue; // 占地内部不算
-                var c = new Vector2I(x, y);
-                if (!MapGrid.InBounds(c))
-                    continue;
-                ref var cell = ref gs.Map.CellAt(c);
-                if (!cell.HasRoad)
-                    continue;
-                // 该格到占地边缘的切比雪夫距离（贴边为 1）
-                int dx = x < o.X ? o.X - x : x >= o.X + fx ? x - (o.X + fx - 1) : 0;
-                int dy = y < o.Y ? o.Y - y : y >= o.Y + fy ? y - (o.Y + fy - 1) : 0;
-                int d = Math.Max(dx, dy);
-                if (d > maxDist)
-                    continue; // 矩形四角可能超出判定半径
-                if (cell.RoadKind == RoadKind.Main)
-                {
-                    if (dMain < 0 || d < dMain)
-                        dMain = d;
-                }
-                else if (cell.RoadKind == RoadKind.Side)
-                {
-                    if (dSide < 0 || d < dSide)
-                        dSide = d;
-                }
-            }
-        }
-        return (dMain, dSide);
     }
 
-    /// <summary>住宅向紧邻空地（或自家小路环格）扩大占地（最大 8×8 米）：依次试右列/左列/下行/上行，
+
+    /// <summary>住宅向紧邻空地（或自家小路环格）扩大占地（最大 6×6 米）：依次试右列/左列/下行/上行，
     /// 整条带均为可建设区空地或本建筑小路环才并入；扩成后对新 footprint 重新环一圈小路。
     /// 由住满拥挤事件调用（公开供 LifecycleSystem）；兼并邻居留 TODO。</summary>
     public static bool TryExpandHouse(GameState gs, BuildingInstance b)
@@ -233,8 +305,10 @@ public class ZoneGrowthSystem
     /// 地价按需求 §4.1 四级（近资源点 8,000 / 普通 10,000 / 临街 15,000 / 城中心 25,000 文，见 GrowthConfig）；
     /// 达到 SiteThreshold 的可负担候选按分数加权抽签
     /// （高分地段大概率中签、达标冷清处保留小概率，既聚居又不死板），无达标者退选最高分；
-    /// 全买不起或无合法落位返回 false，成功输出新宅与实际地价（调用方扣款）。</summary>
-    public static bool TryBuildHouse(GameState gs, long budget, out BuildingInstance built, out long cost)
+    /// 全买不起或无合法落位返回 false，成功输出新宅与实际地价（调用方扣款）。
+    /// 初始尺寸（批次六十六）：默认 2×2，按预算资产阶梯与家庭人口放大（上限 6×6），
+    /// 目标边长无合法落位时逐档退小；贴/占有主小路建房的半价补偿并入总价。</summary>
+    public static bool TryBuildHouse(GameState gs, long budget, out BuildingInstance built, out long cost, int familyMembers = 0)
     {
         built = null;
         cost = 0;
@@ -242,55 +316,120 @@ public class ZoneGrowthSystem
 
         // 近王爷府加成（用户需求：村民建房候选地叠加王爷府数值）：预取府邸中心，供逐候选格按距加分
         Vector2I? mansion = PrinceMansionCenter(gs);
-    
-        // 可负担候选分两组：达标集（按分加权抽签）与全集最高分（兜底）
-        var qualified = new List<(Vector2I Cell, long Price, double Weight)>();
-        Vector2I bestFallback = default;
-        double bestScore = double.MinValue;
-        long bestPrice = 0;
-        bool afford = false;
-    
-        foreach (var c in gs.BuildableCells)
+
+        // 初始边长：预算资产阶梯 + 人口加成（2..6）；逐档退小尝试，先大后小，找到即定稿
+        int targetSide = InitialHouseSide(budget, familyMembers);
+        for (int side = targetSide; side >= 2; side--)
         {
-            // 整块占地均为坊区内无树空地，且四周小路环可铺并接入既有路网（小路也算接入）
-            if (!FootprintBuildable(gs, c, def.SizeX, def.SizeY) || !RingLayable(gs, c, def.SizeX, def.SizeY))
-                continue;
-            if (NearBridge(gs, c, def.SizeX, def.SizeY))
-                continue; // 不沿桥/引桥建房
-            double score = SiteScore(gs, c, def.SizeX, def.SizeY) + PrinceMansionBonus(mansion, c, def.SizeX, def.SizeY);
-            long price = GrowthConfig.LandPriceOf(score, NearResource(gs, c, def.SizeX, def.SizeY)); // 地价公式见 GrowthConfig
-            if (price > budget)
-                continue; // 该地段负担不起
-            afford = true;
-            if (score >= GrowthConfig.SiteThreshold)
-                qualified.Add((c, price, GrowthConfig.SiteWeightOf(score)));
-            if (score > bestScore)
+            // 可负担候选分两组：达标集（按分加权抽签）与全集最高分（兜底）
+            var qualified = new List<(Vector2I Cell, long Price, double Weight)>();
+            Vector2I bestFallback = default;
+            double bestScore = double.MinValue;
+            long bestPrice = 0;
+            bool afford = false;
+    
+            foreach (var c in gs.BuildableCells)
             {
-                bestScore = score;
-                bestFallback = c;
-                bestPrice = price;
+                // 整块占地均为坊区内空地或可占用的小路（批次六十六），且四周小路环可铺并接入既有路网
+                if (!FootprintBuildable(gs, c, side, side) || !RingLayable(gs, c, side, side))
+                    continue;
+                if (NearBridge(gs, c, side, side))
+                    continue; // 不沿桥/引桥建房
+                double score = SiteScore(gs, c, side, side) + PrinceMansionBonus(mansion, c, side, side);
+                long price = GrowthConfig.LandPriceOf(score, NearResource(gs, c, side, side)); // 地价公式见 GrowthConfig
+                if (price > budget)
+                    continue; // 该地段负担不起
+                afford = true;
+                if (score >= GrowthConfig.SiteThreshold)
+                    qualified.Add((c, price, GrowthConfig.SiteWeightOf(score)));
+                if (score > bestScore)
+                {
+                    bestScore = score;
+                    bestFallback = c;
+                    bestPrice = price;
+                }
+            }
+            if (!afford)
+                continue; // 本档全买不起/无合法落位：退小一档
+    
+            // 达标候选按分数加权抽签：邻居多/地段好处大概率中签，达标冷清处仍有小概率；无达标者退取全集最高分
+            Vector2I chosen;
+            if (qualified.Count > 0)
+            {
+                var pick = qualified[WeightedPick(qualified)];
+                chosen = pick.Cell;
+                cost = pick.Price;
+            }
+            else
+            {
+                chosen = bestFallback;
+                cost = bestPrice;
+            }
+    
+            // 贴/占有主小路的半价补偿（付给原屋主、格转无主）：并入总价由调用方扣款
+            cost += CollectLaneShareCost(gs, chosen, side);
+            built = gs.PlaceBuilding(def, chosen, side, side);
+            return true;
+        }
+        return false;
+    }
+
+    /// <summary>初始建房边长（2..6）：预算达资产阶梯升一档（HouseSideByAssets），家庭人口 ≥ HouseSidePeopleBonus 再 +1。</summary>
+    private static int InitialHouseSide(long budget, int familyMembers)
+    {
+        int side = 2;
+        for (int i = 0; i < GrowthConfig.HouseSideByAssets.Length && budget >= GrowthConfig.HouseSideByAssets[i]; i++)
+            side = 2 + i;
+        if (familyMembers >= GrowthConfig.HouseSidePeopleBonus)
+            side++;
+        return Math.Min(side, GrowthConfig.ExpandMaxSide);
+    }
+
+    /// <summary>贴/占有主小路的半价补偿（批次六十六）：footprint 内占用格 + 外圈贴边保留格中，
+    /// 归属他人（LaneOwnerId ≥ 0）的小路每格按半价付给原屋主家庭公产（屋主已拆/空置则折入官库），
+    /// 补偿后该格转无主；返回补偿总额（并入建房总价）。</summary>
+    private static long CollectLaneShareCost(GameState gs, Vector2I origin, int side)
+    {
+        long half = WorldConfig.LaneCost / 2;
+        if (half <= 0)
+            return 0;
+        long total = 0;
+        int w = GrowthConfig.LaneRing;
+        for (int x = origin.X - w; x < origin.X + side + w; x++)
+        {
+            for (int y = origin.Y - w; y < origin.Y + side + w; y++)
+            {
+                var c = new Vector2I(x, y);
+                if (!MapGrid.InBounds(c))
+                    continue;
+                ref var cell = ref gs.Map.CellAt(c);
+                if (cell.RoadKind != RoadKind.Lane || cell.LaneOwnerId < 0)
+                    continue;
+                int ownerId = cell.LaneOwnerId;
+                cell.LaneOwnerId = -1; // 已补偿：本格小路转无主
+                PayLaneShare(gs, ownerId, half);
+                total += half;
             }
         }
-    
-        if (!afford)
-            return false; // 全买不起 / 无合法落位
-    
-        // 达标候选按分数加权抽签：邻居多/地段好处大概率中签，达标冷清处仍有小概率；无达标者退取全集最高分
-        Vector2I chosen;
-        if (qualified.Count > 0)
+        return total;
+    }
+
+    /// <summary>把半价小路补偿付给原屋主家庭公产；屋主建筑已拆/无住户则折入官库。</summary>
+    private static void PayLaneShare(GameState gs, int ownerBuildingId, long amount)
+    {
+        if (gs.Buildings.TryGetValue(ownerBuildingId, out var owner))
         {
-            var pick = qualified[WeightedPick(qualified)];
-            chosen = pick.Cell;
-            cost = pick.Price;
+            foreach (var c in gs.Citizens.Values)
+            {
+                if (c.HomeId == ownerBuildingId && !c.IsChild && c.FamilyId >= 0
+                    && gs.Families.TryGetValue(c.FamilyId, out var fam))
+                {
+                    fam.SharedAssets += amount;
+                    return;
+                }
+            }
         }
-        else
-        {
-            chosen = bestFallback;
-            cost = bestPrice;
-        }
-    
-        built = gs.PlaceBuilding(def, chosen);
-        return true;
+        gs.Money += amount; // 屋主已拆迁/空置：折抵公共建设
     }
 
     /// <summary>占地外扩 2 格内是否有资源点（树/水）：近资源的宅基地按最贱地价（需求 §4.1），鼓励定居者近资源谋生。</summary>
@@ -403,7 +542,8 @@ public class ZoneGrowthSystem
         return score;
     }
 
-    /// <summary>以 origin 为原点的 sx×sy 占地是否全部为可建设区内的无树空地，且高差在垫基限内（落位时自动整平）。</summary>
+    /// <summary>以 origin 为原点的 sx×sy 占地是否可落宅：坊区内空地（无树）或可占用的小路（批次六十六），
+    /// 且高差在垫基限内（落位时自动整平）。</summary>
     private static bool FootprintBuildable(GameState gs, Vector2I origin, int sx, int sy)
     {
         float minH = float.MaxValue, maxH = float.MinValue; // 住宅也走垫基规则（与 PlacementValidator 同限）
@@ -415,7 +555,10 @@ public class ZoneGrowthSystem
                 if (!MapGrid.InBounds(c))
                     return false;
                 ref var cell = ref gs.Map.CellAt(c);
-                if (cell.Zone != ZoneType.Buildable || !cell.IsEmpty || cell.HasTree)
+                // 空地须在可建设区内且无树；小路格（占路建房）不受 Zone/空地限制，但不可占已有建筑
+                bool lane = cell.HasRoad && cell.RoadKind == RoadKind.Lane && cell.BuildingId < 0;
+                if (cell.HasTree || cell.BuildingId >= 0
+                    || (!lane && (cell.Zone != ZoneType.Buildable || !cell.IsEmpty)))
                     return false;
                 minH = Math.Min(minH, gs.Map.Height.CellMinH(c));
                 maxH = Math.Max(maxH, gs.Map.Height.CellMaxH(c));

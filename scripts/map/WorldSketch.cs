@@ -11,9 +11,11 @@ namespace Bianjing;
 /// ② 峰点——西北半包围带撒随机高度峰点（峰心距任一图缘 ≥ 峰半径，山体不贴图缘；避中心圆），高斯锥取高叠加；
 /// ③ 山脊——近邻峰对之间连线抬脊（鞍部下凹 + 沿脊起伏），群山连绵不成孤包；
 /// ④ 低矮独立山——山区带之外（中部/东南）撒零星山包，不连脊；
-/// ⑤ 草图级水力侵蚀收尾。
-/// 批次五十起草图不再规划河湖（不压谷/不压湖盆）——地形生成保持纯粹，
-/// 水系由 RiverGenerator 在侵蚀完成的成品地形上循坡走线（只读地势）。
+/// ⑤ 草图级水力侵蚀收尾；
+/// ⑥ 河流定线（批次六十一起）：侵蚀后沿最陡下降走线，只存路径不压地形——
+///    预览画线所见即所得，RiverGenerator 把定线放大为引导线在成品地形上循坡细化。
+/// 批次五十~六十草图不规划河湖（不压谷/不压湖盆）——地形生成保持纯粹，
+/// 水系走线只记录路径，不写高度场。
 /// 坐标单位=草图格（1 格 = SketchScale 米），高度单位=米。
 /// </summary>
 public class WorldSketch
@@ -24,10 +26,16 @@ public class WorldSketch
     /// <summary>草图高度（米，行主序 y*S+x）。</summary>
     public float[] H;
 
-    /// <summary>峰点（草图坐标 + 峰高）：供 RiverGenerator 在成品地形上取河源（峰间鞍部）。</summary>
+    /// <summary>峰点（草图坐标 + 峰高）：山脊连接与河源定位（峰间鞍部）共用。</summary>
     public List<(Vector2 pos, float h)> Peaks = new();
 
-    /// <summary>构建草图：按 ①→⑤ 顺序执行（纯内存数据，可在后台线程运行）。</summary>
+    /// <summary>河流定线（草图坐标点列，8 邻连续）：供预览画线与全图循坡细化（×8 放大为引导线）。</summary>
+    public List<List<Vector2I>> Rivers = new();
+
+    /// <summary>已定河流路径格（全部河的并集）：后定之河踩线即汇流终止，防路径交叉。</summary>
+    private readonly HashSet<int> _riverCells = new();
+
+    /// <summary>构建草图：按 ①→⑥ 顺序执行（纯内存数据，可在后台线程运行）。</summary>
     public static WorldSketch Build(Random rng)
     {
         var sk = new WorldSketch { H = new float[S * S] };
@@ -37,7 +45,127 @@ public class WorldSketch
         sk.ScatterLowHills(rng);
         // 草图级侵蚀：小规模水滴冲刷宏观形态（笔刷半径 1，分辨率低无需摊开）
         HydraulicEroder.Erode(sk.H, S, TerrainConfig.ErodeDropletsSketch, 1, rng);
+        sk.WalkRivers(rng); // ⑥ 河流定线：侵蚀完成后循坡走线（只存路径，不压地形）
         return sk;
+    }
+
+    // ---- ⑥ 河流定线（批次六十一：预览所见即所得，全图循坡细化）----
+
+    /// <summary>河流定线：峰间鞍部取源（海拔降序，RiverCount 条），逐条循坡走线至图缘；
+    /// 路径格互相视为水体（后河撞前河即汇流）。只存路径不压地形。</summary>
+    private void WalkRivers(Random rng)
+    {
+        var sources = PickSources(rng);
+        foreach (var src in sources)
+        {
+            var path = TracePath(src);
+            if (path.Count < WaterConfig.MinRiverPathCells / (int)Scale)
+                continue; // 过短弃线（同全图语义：不足 MinRiverPathCells 世界格）
+            Rivers.Add(path);
+            foreach (var p in path)
+                _riverCells.Add(p.Y * S + p.X);
+        }
+    }
+
+    /// <summary>河源候选：每峰与最近邻峰的中点（鞍部），按草图海拔降序取 RiverCount 条。</summary>
+    private List<Vector2I> PickSources(Random rng)
+    {
+        var candidates = new List<Vector2>();
+        for (int i = 0; i < Peaks.Count; i++)
+        {
+            float bestD = float.MaxValue;
+            Vector2 mid = default;
+            for (int j = 0; j < Peaks.Count; j++)
+            {
+                if (j == i) continue;
+                float d = Peaks[j].pos.DistanceTo(Peaks[i].pos);
+                if (d < bestD)
+                {
+                    bestD = d;
+                    mid = (Peaks[i].pos + Peaks[j].pos) / 2f;
+                }
+            }
+            // 候选间距 ≥ 40 世界格（同全图语义），防源点扎堆
+            if (bestD < float.MaxValue && candidates.TrueForAll(s => s.DistanceTo(mid) > 40f / Scale))
+                candidates.Add(mid);
+        }
+        candidates.Sort((a, b) =>
+            H[(int)b.Y * S + (int)b.X].CompareTo(H[(int)a.Y * S + (int)a.X])); // 海拔高者先走（成干流）
+
+        int count = Math.Min(candidates.Count,
+            WaterConfig.RiverCountMin + rng.Next(WaterConfig.RiverCountMax - WaterConfig.RiverCountMin + 1));
+        var sources = new List<Vector2I>();
+        for (int i = 0; i < count; i++)
+            sources.Add(new Vector2I(
+                Math.Clamp((int)candidates[i].X, 1, S - 2),
+                Math.Clamp((int)candidates[i].Y, 1, S - 2)));
+        return sources;
+    }
+
+    /// <summary>单条走线（草图格中心高上循坡）：8 邻取未访问的最低格；洼地/平地向东南强制滑行
+    /// （维持西北→东南大势，不设上限——必达图缘，河流不在中途断流）；踩到既有河线即汇流终止；出图缘终止。</summary>
+    private List<Vector2I> TracePath(Vector2I source)
+    {
+        var path = new List<Vector2I>();
+        var visited = new HashSet<int>();
+        int x = source.X, y = source.Y;
+
+        for (int step = 0; step < S * 4; step++)
+        {
+            if (x < 1 || y < 1 || x >= S - 1 || y >= S - 1)
+            {
+                path.Add(new Vector2I(x, y));
+                break; // 出图缘：河口
+            }
+            var cur = new Vector2I(x, y);
+            path.Add(cur);
+            visited.Add(y * S + x);
+
+            // 汇流检测（离源 4 步后才检——4 草图格≈32m，同全图 32 格语义，防源头自撞）
+            if (step > 4 && _riverCells.Contains(y * S + x))
+                break;
+
+            // 8 邻中选未走过的最低格（前河路径格视为水体，不入候选）
+            int bx = 0, by = 0;
+            float bestH = float.MaxValue;
+            for (int oy = -1; oy <= 1; oy++)
+            {
+                for (int ox = -1; ox <= 1; ox++)
+                {
+                    if (ox == 0 && oy == 0) continue;
+                    int nx = x + ox, ny = y + oy;
+                    if (nx < 0 || ny < 0 || nx >= S || ny >= S
+                        || visited.Contains(ny * S + nx) || _riverCells.Contains(ny * S + nx))
+                        continue;
+                    float h = H[ny * S + nx];
+                    if (h < bestH)
+                    {
+                        bestH = h;
+                        bx = ox; by = oy;
+                    }
+                }
+            }
+            float curH = H[y * S + x];
+            if (bestH >= curH - 0.0001f)
+            {
+                // 洼地/平地：向东南强制滑行（东/东南/南三邻取最低），维持大势；不设上限——必达图缘
+                bx = 1; by = 1;
+                float hE = H[y * S + x + 1];
+                float hS = H[(y + 1) * S + x];
+                float hSE = H[(y + 1) * S + x + 1];
+                if (hE <= hS && hE <= hSE && !visited.Contains(y * S + x + 1)) { bx = 1; by = 0; }
+                else if (hS <= hSE && !visited.Contains((y + 1) * S + x)) { bx = 0; by = 1; }
+            }
+            if (bx == 0 && by == 0)
+            {
+                // 前向三邻全堵（visited/河线围困）：强行向东南，必达图缘
+                bx = 1; by = 1;
+                if (visited.Contains(y * S + x + 1) || _riverCells.Contains(y * S + x + 1)) { bx = 0; by = 1; }
+                else if (visited.Contains((y + 1) * S + x) || _riverCells.Contains((y + 1) * S + x)) { bx = 1; by = 0; }
+            }
+            x += bx; y += by;
+        }
+        return path;
     }
 
     // ---- ① 趋势场 + 平原缓起伏 ----

@@ -44,6 +44,9 @@ public static class Goods
     public const string Weapon = "weapon";   // 兵刃（散勇随身）
     public const string Book   = "book";     // 书籍（客士随身）
 
+    /// <summary>废料（批次六十七：工坊加工副产品，价低可当柴烧，商铺可收售，经济闭环）。</summary>
+    public const string Scrap = "scrap";
+
     /// <summary>一担几份（居民单次搬运量）：转发自 EconomyConfig。</summary>
     public static double LoadUnits => EconomyConfig.LoadUnits;
 
@@ -53,30 +56,99 @@ public static class Goods
     /// <summary>是否食物类货品。</summary>
     public static bool IsFood(string id) => id == Grain || id == Fruit || id == Game;
 
-    /// <summary>商铺可专营的货品（三级商铺经营成品，一级可兼营原料）。</summary>
-    public static readonly string[] ShopSpecialties = { Grain, Fruit, Game, Wood, Timber, Wine, Ironware, Cured, Furniture, Clothing, Medicine, Flatbread, Charcoal };
+    /// <summary>商铺可专营的货品（批次八十四：仅工坊产出——成品/中间品/废料，商铺只从工坊收货卖给村民，
+    /// 不收售原料；粮/柴/果/野味等原料改走工坊缺料收购与朝廷衙门兑底，家庭自产自囤为主）。</summary>
+    public static readonly string[] ShopSpecialties = { Timber, Wine, Ironware, Cured, Furniture, Clothing, Medicine, Flatbread, Charcoal, Planks, Leather, RefinedSalt, IronIngot, Scrap };
 
-    /// <summary>加工配方：成品 id → 所需原料 id 列表（每产一份成品消耗每种原料各一份）。
-    /// 初级工坊产中间品（木板/皮革/精盐/铁锭），高级工坊产成品（木器/家具/成衣/铁器/腌货/丸药）。
-    /// 酒直接从粮食加工，不经过中间品。</summary>
-    public static readonly Dictionary<string, string[]> Recipes = new()
+    /// <summary>加工配方（批次六十七重写）：成品 id → 按工坊等级的多级配方
+    /// （多对多耗料 + 燃料 + 副产品，见 RecipeDef）——早期木头→木材一对一，
+    /// 等级越高耗料越多、还要烧柴，产出带废料副产。</summary>
+    public static readonly Dictionary<string, RecipeDef> Recipes = new()
     {
         // 初级工坊配方（原料 → 中间品）
-        [Planks]      = new[] { Log },
-        [Leather]     = new[] { Hide },
-        [RefinedSalt] = new[] { RawSalt },
-        [IronIngot]   = new[] { IronOre },
+        [Planks] = new RecipeDef { Output = Planks, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Log] = 1 },
+            new Dictionary<string, int> { [Log] = 2 },
+            new Dictionary<string, int> { [Log] = 3 } },
+            FuelByLevel = new[] { 0, 1, 2 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+        [Leather] = new RecipeDef { Output = Leather, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Hide] = 1 },
+            new Dictionary<string, int> { [Hide] = 2 },
+            new Dictionary<string, int> { [Hide] = 2, [RawSalt] = 1 } },
+            FuelByLevel = new[] { 0, 1, 1 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+        [RefinedSalt] = new RecipeDef { Output = RefinedSalt, InputsByLevel = new[] {
+            new Dictionary<string, int> { [RawSalt] = 1 },
+            new Dictionary<string, int> { [RawSalt] = 2 },
+            new Dictionary<string, int> { [RawSalt] = 3 } },
+            FuelByLevel = new[] { 0, 1, 2 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+        [IronIngot] = new RecipeDef { Output = IronIngot, InputsByLevel = new[] {
+            new Dictionary<string, int> { [IronOre] = 1 },
+            new Dictionary<string, int> { [IronOre] = 2 },
+            new Dictionary<string, int> { [IronOre] = 3 } },
+            FuelByLevel = new[] { 1, 2, 3 }, ByproductRateByLevel = new[] { 0, 0.15, 0.3 } },
         // 高级工坊配方（中间品/原料 → 成品）
-        [Timber]    = new[] { Planks },
-        [Furniture] = new[] { Planks },
-        [Clothing]  = new[] { Leather },
-        [Ironware]  = new[] { IronIngot },
-        [Cured]     = new[] { Game, RefinedSalt },
-        [Medicine]  = new[] { Herb },
-        [Wine]      = new[] { Grain },
+        [Timber] = new RecipeDef { Output = Timber, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Planks] = 1 },
+            new Dictionary<string, int> { [Planks] = 2 },
+            new Dictionary<string, int> { [Planks] = 3 } },
+            FuelByLevel = new[] { 0, 1, 2 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+        [Furniture] = new RecipeDef { Output = Furniture, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Planks] = 1 },
+            new Dictionary<string, int> { [Planks] = 1, [IronIngot] = 1 },
+            new Dictionary<string, int> { [Planks] = 2, [IronIngot] = 1 } },
+            FuelByLevel = new[] { 0, 1, 2 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+        [Clothing] = new RecipeDef { Output = Clothing, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Leather] = 1 },
+            new Dictionary<string, int> { [Leather] = 2 },
+            new Dictionary<string, int> { [Leather] = 3 } },
+            FuelByLevel = new[] { 0, 0, 1 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+        [Ironware] = new RecipeDef { Output = Ironware, InputsByLevel = new[] {
+            new Dictionary<string, int> { [IronIngot] = 1 },
+            new Dictionary<string, int> { [IronIngot] = 2 },
+            new Dictionary<string, int> { [IronIngot] = 3 } },
+            FuelByLevel = new[] { 1, 2, 3 }, ByproductRateByLevel = new[] { 0, 0.15, 0.3 } },
+        [Cured] = new RecipeDef { Output = Cured, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Game] = 1, [RefinedSalt] = 1 },
+            new Dictionary<string, int> { [Game] = 2, [RefinedSalt] = 1 },
+            new Dictionary<string, int> { [Game] = 2, [RefinedSalt] = 2 } },
+            FuelByLevel = new[] { 0, 1, 1 }, ByproductRateByLevel = new[] { 0, 0.05, 0.1 } },
+        [Medicine] = new RecipeDef { Output = Medicine, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Herb] = 1 },
+            new Dictionary<string, int> { [Herb] = 2 },
+            new Dictionary<string, int> { [Herb] = 3 } },
+            FuelByLevel = new[] { 0, 1, 2 }, ByproductRateByLevel = new[] { 0, 0.05, 0.1 } },
+        [Wine] = new RecipeDef { Output = Wine, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Grain] = 1 },
+            new Dictionary<string, int> { [Grain] = 2, [Yeast] = 1 },
+            new Dictionary<string, int> { [Grain] = 3, [Yeast] = 2 } },
+            FuelByLevel = new[] { 0, 0, 1 }, ByproductRateByLevel = new[] { 0, 0.05, 0.1 } },
         // 中期民生加工（基础品升级：粮→烧饼、柴→木炭）
-        [Flatbread] = new[] { Grain },
-        [Charcoal]  = new[] { Wood },
+        [Flatbread] = new RecipeDef { Output = Flatbread, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Grain] = 1 },
+            new Dictionary<string, int> { [Grain] = 2 },
+            new Dictionary<string, int> { [Grain] = 3 } },
+            FuelByLevel = new[] { 1, 2, 3 }, ByproductRateByLevel = new double[] { 0, 0, 0 } },
+        [Charcoal] = new RecipeDef { Output = Charcoal, InputsByLevel = new[] {
+            new Dictionary<string, int> { [Wood] = 2 },
+            new Dictionary<string, int> { [Wood] = 3 },
+            new Dictionary<string, int> { [Wood] = 4 } },
+            FuelByLevel = new[] { 0, 0, 0 }, ByproductRateByLevel = new[] { 0, 0.1, 0.2 } },
+    };
+
+    // ---- 商品大类（批次六十七：商铺/工坊升级增补种类仅限同大类，防跨类垄断）----
+
+    /// <summary>货品大类：0=食物 1=燃料 2=木作 3=金工 4=皮纺 5=医药 6=盐业 7=杂项 8=其他。</summary>
+    public static int CategoryOf(string id) => id switch
+    {
+        Grain or Fruit or Game or Flatbread or Cured or Wine => 0,
+        Wood or Charcoal or Scrap => 1,
+        Log or Planks or Timber or Furniture => 2,
+        IronOre or IronIngot or Ironware => 3,
+        Hide or Leather or Clothing => 4,
+        Herb or Medicine => 5,
+        RawSalt or RefinedSalt => 6,
+        Yeast or Book or Weapon => 7,
+        _ => 8,
     };
 
     /// <summary>是否为初级工坊专营品（原料→中间品）。</summary>
@@ -97,8 +169,21 @@ public static class Goods
     /// <summary>为高级工坊品。</summary>
     public static bool IsAdvanced(string id) => AdvancedWorkshopGoods.Contains(id);
 
-    /// <summary>成品所需原料（非成品返回空数组）。</summary>
-    public static string[] InputsOf(string id) => Recipes.GetValueOrDefault(id, System.Array.Empty<string>());
+    /// <summary>成品所需原料（按一级配方；取指定等级用 InputsAt）。</summary>
+    public static string[] InputsOf(string id) =>
+        Recipes.TryGetValue(id, out var r) ? new List<string>(r.InputsAt(1).Keys).ToArray() : System.Array.Empty<string>();
+
+    /// <summary>成品在指定工坊等级下的原料需求（多对多：原料 id → 每份耗量；非成品返回空表）。</summary>
+    public static System.Collections.Generic.Dictionary<string, int> InputsAt(string id, int level) =>
+        Recipes.TryGetValue(id, out var r) ? r.InputsAt(level) : new();
+
+    /// <summary>成品在指定等级下的每份燃料耗量（柴薪；非成品返回 0）。</summary>
+    public static int FuelAt(string id, int level) =>
+        Recipes.TryGetValue(id, out var r) ? r.FuelAt(level) : 0;
+
+    /// <summary>成品在指定等级下的每份副产品（废料）产量（非成品返回 0）。</summary>
+    public static double ByproductAt(string id, int level) =>
+        Recipes.TryGetValue(id, out var r) ? r.ByproductAt(level) : 0;
 
     /// <summary>每份基价（文，居民卖出价；买入价为基价 × BuyMarkup）。
     /// 物价锚点（需求 §9）：烧饼≈1文、柴薪 3文/捆、猪肉 10文/斤、工匠月薪 800~1200文。
@@ -136,6 +221,7 @@ public static class Goods
         // 流民随身物（非买卖品，仅价值折入资产）
         [Weapon] = 80,
         [Book]   = 30,
+        [Scrap]  = 2,  // 废料（加工副产，价低可当柴烧）
     };
 
     /// <summary>买入价倍率（去商铺购买比自产贵）：转发自 EconomyConfig。</summary>
@@ -182,6 +268,7 @@ public static class Goods
         [Medicine]  = "丸药",
         [Weapon] = "兵刃",
         [Book]   = "书籍",
+        [Scrap]  = "废料",
     };
 
     public static string NameOf(string id) => DisplayName.GetValueOrDefault(id, id);

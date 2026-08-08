@@ -2,13 +2,333 @@
 
 按批次记录每次调整的要点（新规则起始于批次二十五；更早批次的详情见计划文档归档）。
 
+## 批次七十九（2026-08-08）漏网黑洞全清：维护费闭环 + 营造工钱按实发放
+
+全面复查（饿死/玩家资金/城市总资产三现象）后确认：饿死根因（官粮断链）已在批次七十八修复——
+朝廷粮饷 3 份/人/月 vs 实际月耗仅 0.05 份/人（日耗/7 天制），官粮 60 倍盈余不可能再耗尽；
+总资产仍流失源于两处漏网黑洞，本轮全部闭环。
+
+- 黑洞① 建筑维护费（只扣不付）：EconomySystem.TickDay 每日 `Money -= dailyUpkeep` 无收款方，
+  每月数百至数千文凭空消失 → 维护费发当日无业者（官府营造杂役用工，PayBuildWages 一体化），
+  钱回到玩家↔村民循环，官库不再月月失血。
+- 黑洞② 营造工钱发不出边界（扣了但发不出去）：PayBuildWages 旧实现「先扣全额、后发放」，
+  无业者为 0 或金额小于无业者数（share=0）时全额不发 → 营造费/铺路架桥费/修缮料钱凭空消失。
+  改造：方法返回实际发出额，调用方按实扣款记账；金额小于无业者数时按序每人 1 文发完（小额也全发）；
+  全城无无业者时钱留在官库（不扣不消失）。
+- 按实扣款调用点（5 处）：营造建筑/铺路/架桥×2/修缮料钱（GameState.PlaceBuilding、
+  PlaceRoadStamp、PlaceBridgeStamp、MaintenanceSystem.RepairOfficial）。
+- 朝廷（court）营造工钱记账「朝廷营造」流水（凭空生成，财政面板可查）。
+- 修复后总资产口径：玩家↔村民闭环内 0 消失 + 朝廷注入（月俸/铸币/朝廷收购/粮饷/迁入）只增不减；
+  玩家资金不再被黑洞吞噬（早期若官营俸禄偏高出现小幅波动属正常经营范畴，有月俸保底）。
+
+## 批次七十八（2026-08-08）资金黑洞全清 + 官粮补给链重建
+
+原则重申：除朝廷直属机构外，所有钱在玩家（官库）↔村民（家庭公产）间闭环——任何扣款必须有收款方。
+
+- 资金黑洞修复（扣款凭空消失 → 全部闭环）：
+  ① 农田升级扣款 → 入官库「田产升级」（土地相关交王爷，FarmlandSystem.TryUpgradeField）；
+  ② 家庭生活开销 → 入官库「柴米官营」（日常用度向官府采买，JobSystem.HouseholdSpending）；
+  ③ 住宅修缮摊派 → 入官库「修缮摊派」（修缮服务官营，MaintenanceSystem.RepairPrivate）；
+  ④ 官修料钱 → 发当日无业者营造工钱（MaintenanceSystem.RepairOfficial，PayBuildWages 一体化）；
+  ⑤ 铺路/架桥费 → 发当日无业者营造工钱（GameState 道路/桥梁画笔，同建造费口径）；
+  ⑥ 绝户/单人迁出的家庭公产 → 折入官库「绝户充公」（GameState.RemoveCitizen，旧版随家庭删除凭空消失）；
+  ⑦ 朝廷衙门（court）员工俸禄 → 朝廷拨款凭空生成，不再从官库扣（EconomySystem.PayWages，
+	与朝廷营造/维护豁免同口径；修正全朝廷员工时提前 return 漏发的边界）。
+- 官粮补给链重建（「不少人饿死」根因）：官粮此前只靠开局 400 份 + 农田 20% 田赋，而消耗 0.2 份/人/日
+  （100 人年耗 7300 份 vs 田赋约 12-48 份/年）——必耗尽即永久饥荒（全员月死亡率+3%，公告「饥馑饿毙”）。
+  ① 日耗 0.2 → 0.05（官粮定位改为赈济储备/公务用度，不再人人口粮）；
+  ② 新增朝廷粮饷：朝廷按人口每月拨粮 3 份/人 入官仓（凭空生成，月结随月俸发放）——
+	官粮从此随人口稳定补给，农田田赋为额外增收，饥荒不再必然发生。
+
+## 批次七十七（2026-08-08）死因公告/农田死锁修复/朝廷类与收购最低价
+
+- 死亡公告加去世原因：寿终正寝（达最大寿数 120 或 60 岁后自然亡）/ 饥馑饿毙（官粮见底，饥荒优先判定）/
+  不幸夭折（孩童）/ 病故（其余），公告形如「张三病故，享年 38 岁」「李四不幸夭折，年仅 1 岁」。
+- 农田死锁修复（八九年无农田的根因链）：
+  ① SeekJobs 把无业者 60%（缺粮 100%）派成山民 Logger，而开垦只认 JobKind.None → 农艺者常年有职、开垦永远无人；
+	FindIdleFarmer 放宽为「非在职即可」（山民/退休者皆可转业务农），TryUpgradeField 闲置数统计同口径；
+  ② 开垦还硬性要求自有民居（OwnsHome），而民居靠迁入者攒钱在建筑区自建——玩家若只划耕种区不划建筑区，
+	全城无人安居、农田整体死锁 → 新增寄居兑底：无安居农艺者时，寄居流民营/王爷府等官方建筑的农艺者也可
+	开垦（官田佃农，产出同安居者），优先序仍是安居者在前；
+  ③ 农田不开 → 官粮只出不进（人口日耗、开基 400 份终耗尽）→ 饥荒全员月死亡率 +3%（年约 30%）→
+	30 岁死亡潮与 0-1 岁婴儿夭折率飙升（Gompertz 曲线本身正常：30 岁年死亡率仅 0.6%）——农田链路修复后
+	官粮恢复补给，饥荒自然消退。
+- 新增朝廷类（category=court）：柴炭司/市易务由 official 改为 court，独立「朝廷」建造分组；
+  朝廷机构朝廷拨款营造（官库不扣钱）、朝廷自理维护（EconomySystem/MaintenanceSystem 豁免）、不缴土地税
+  （BuildingTaxBase 本就不含 court）；营造工钱仍由朝廷凭空生成发给无业者。
+- 朝廷收购改最低价 + 不设上限：收购价 基价×1.2 → 基价×0.8（全场最低，城内交易优先、富余才卖朝廷，
+  SellPack 卖货优先级：专营铺 → 缺料工坊 → 朝廷兑底）；配额机制移除（CourtProcurementUsed 随档字段删除），
+  衙门库容 200→500 且每月清空（朝廷漕运拉走，GoodsSystem.TickMonth），收购只受月内库容自然限制；
+  FindDemandTarget 采集需求判定同样以城内需求优先、衙门兑底（村民采集的食物/木材先供城内）。
+
+## 批次七十六（2026-08-08）经济体系重构：货币进阶/朝廷采购衙门/钱流闭环 + 删市场/速率下拉
+
+总原则：除朝廷直属机构外，其余金钱流转均在玩家（官库）与村民（家庭公产）之间循环；税收与土地买卖一律交给玩家。
+
+- 货币体系：铜钱为基础，1 两白银=1000 文、1 两黄金=100 两白银=100000 文（CurrencyConfig.SilverPerGold 10→100）；
+  CurrencyHelper.FormatWen 升级三级显示——≥1 金显示「X金Y两Z文」（零值段省略），国库总览 FormatTreasury 自动适配新进制。
+- 朝廷采购衙门（凭空生成例外渠道，不经过官库）：新增两座 official 建筑——柴炭司（收 wood/log/charcoal）与
+  市易务（收 grain/fruit/game），里程碑 3 解锁（BuildingDef.CourtGoods 数据驱动，mod 可自订）；
+  NPC 卖富余资源给衙门：优先专营铺→缺料工坊→朝廷衙门兑底（SellPack/TradeAnchor），收购价=基价×1.2，
+  货款由朝廷凭空生成直接付给家庭（不走官库），全城共享月配额 CourtProcurementQuota=200 份（CourtProcurementUsed
+  随档保存、月结清零），配额尽衙门停止收购防货币无限注入；山民采集需求判定（FindDemandTarget）同样接衙门。
+- 钱流闭环修复（原本凭空消失的两处）：
+  ① 玩家建造建筑扣款后，建造费全额作为营造工钱发给当日无业成年人（均分，GameState.PayBuildWages）——
+	 建造费从“凭空消失”变为“玩家→村民”循环，再经税收/买地/消费回流；
+  ② NPC 自建房房款改为“土地交割”：地价全额入官库（售地收入，交给王爷），另提 3 成作为建房工钱发给当日无业者
+	 （LifecycleSystem.LandSaleToPlayer）——村民→玩家循环。
+- 删除市场建筑（buildings.json market 移除；旧档 market 实例由 SaveService 未知建筑跳过逻辑兼容）：
+  官营产业直售补位——制盐厂/冶铁所/林场/采石场/酒曲司等有产出的官营建筑直接向 NPC 零售（BuyGoods/FindGoodsSource/
+  FindStockedSource 卖家判定含“生产型官营非衙门”），货款入官库（官营利润）；朝廷衙门只进不出不售；
+  FindMarket/MarketStockLine 移除，工坊成品外销仅走专营铺（无铺则积压待售）。
+- 游戏速率改下拉选择（TopBar OptionButton：暂停/0.5x/1x/2x/4x，默认 1x）；键盘 1/2/3 与空格暂停仍有效，
+  下拉选中项每帧与 GameClock.Speed 同步。
+- 编译 0 警告 0 错误。
+
+## 批次七十五（2026-08-08）日历改 7 天/月 + 官库失血修复（官营售货入官库 + 商税落地）
+
+- 日历压缩：后台 10 天/月改 7 天/月（TimeConfig.DaysPerMonth=7），面板仍 30 天制——
+  后台第 1~7 天显示 1/5/10/15/20/25/30 日（GameClock.DisplayDay）；
+  仅放大每日真实时长（30→42.86 现实秒/游戏日），1 月 ≈ 5 分钟、1 年 = 1 小时不变；
+  SecondsPerGameHour 公式随 DaysPerMonth 自动重算，各系统“月值/天数”逐日分摊点全部自动适配。
+- 官库持续失血修复（批次七十二修后仍漏的两个口）：
+  ① 自动购粮/购柴（GoodsSystem.BuyGoods）此前按“有员工分给员工”处理，官营市集收购花官库钱、
+  售货款却进员工口袋——改为与 PayToBuilding 同口径：官营售货一律入官库（市易收入），吃差价保平衡；
+  官营员工为俸禄制（月结工钱）不再分账；民营维持雇工分账/无雇工折入官库。
+  ② 商税落地（此前仅政策面板有档位，交易从未扣税）：两个买点——GoodsSystem.BuyGoods 与
+  CitizenAgent.Shopping——买家按成交额另付 TradeTaxRate 税入官库（可买量按含税价估算防超支）。
+- 编译 0 警告 0 错误。
+
+## 批次七十四（2026-08-08）时间体系重构：新日历/昼夜/工钱月结/农田两熟/种植需求度
+
+- 新日历：游戏后台 10 天/月、12 月/年；1 游戏日=30 现实秒、1 月=5 分钟、1 年=1 现实小时
+  （TimeConfig.SecondsPerGameHour 按新日历重算，修正批次七十三发现的 48 分钟/年流速偏差）；
+  面板按 ×3 显示 30 天制（第 1~10 天显示 3、6、9……30 日，GameClock.DisplayDay），为正月十五等节日预留。
+- 去除十二时辰（GameClock.Shichen 删除），改白天/夜晚两态（IsNight = 6 时前或 18 时后）；
+  TopBar 日期栏显示「白天/夜晚」；Main.UpdateDayNight 主光/环境光在两档能量间指数平滑过渡
+  （WorldConfig 昼夜光照常量，夜间调暗但不影响操作）。
+- 工钱改月结（出勤记账制）：雇工/修缮匠下工只把当班工钱记入 Citizen.WagesOwed（人口税仍即时扣），
+  月底 EconomySystem.PayWages 统一发放（官库一笔流出 + 逐人入家庭公产并清零）；
+  亡故/迁出者未领部分自然作废；旧档缺省 0 自动兼容。
+- 农田一年两熟：farmland 收获周期 1→3 月、每工产量 12→30 份；收获窗口 [4,9] 月，窗口外（含冬季
+  10-12 月）归零重新播种——每年固定 6 月、9 月两熟，冬歇不产出（GoodsSystem.TickMonth 季节判定）；
+  矿/盐场等非农田产业不受季节限制。产量平衡：一工两熟年产 60 份 ≈ 供 5 人年食（4-6 人区间）。
+- 产量加成：田主亲自下地多收两成（OwnerYieldBonus=0.2）；在岗农夫平均经验越高收成越多，
+  达 600 封顶 +50%（SkillYieldMaxBonus）；InspectPanel 农时显示适配两熟与冬歇。
+- 种植需求度：全城缺粮（Demand.IsShort(Grain)）时开垦/升级日概率 ×3、升级资产门槛 ×0.5（FarmlandConfig）；
+  求职优先田块岗位且不再要求农艺技能；无业者缺粮时必上山伐木采猎谋生（正常 60%）。
+  保证人口缓慢增长时全局存粮也缓慢增长，游戏不提示（需求度静默生效）。
+- 即时交易保持现状（买卖仍当日即时结算，不随工钱改月结）。
+- 编译 0 警告 0 错误。
+
+## 批次七十三（2026-08-08）官粮田赋入账（修复饥荒永久开启致全民早亡）
+
+- 排查：大部分人 30 岁前后去世——根因非死亡率曲线（Gompertz 55-65 主死亡区本就符合期望 60），
+  而是官粮只有开局存量、无任何产出（buildings.json 无 foodOutput 字段），耗尽后 gs.Food<=0
+  使 famine 永久开启，月结每月附加 3% 死亡率（≈年 36%），人口主体（18-36 迁入者）几年内死光。
+- 修复：农田 grain 收成按田赋比例入官粮（EconomyConfig.GrainTaxShare=0.2，余下散落田面归村民），
+  GoodsSystem.TickMonth 收获时扣减对应散落量；官粮自此有稳定产出，famine 只在真正粮荒时触发。
+- 附带发现（未改）：TimeConfig.SecondsPerGameHour 分母仍按旧版 30 天/月，与 DaysPerMonth=12 不一致，
+  实际 1 游戏年=48 现实分钟（注释意图 2 小时），快 2.5 倍；影响全局节奏，待用户确认后统一。
+- 编译 0 警告 0 错误。
+
+## 批次七十二（2026-08-08）迁入资金分层 + 官库失血修复 + 面板返回 + 分区/菜单交互 + 城市总金额
+
+- 迁入资金分层（PopulationConfig）：归民 800~3,000（权重 0.35）/ 寓商 6,000~12,000（0.30，
+  落地即达自建门槛 5,000 可直接建房）/ 散勇 300~1,500（0.20）/ 客士 0~300（0.15）——
+  约 1/3 能直接建房、1/3 差一点（打工一两月可自建）、1/3 近乎赤贫（原归民 5~15 文占 50% 是“基本都是 0 文”根因）。
+- 官库持续失血根因排查与修复（三处资金流向修正）：
+  ① 官营售货收款（GameState.PayToBuilding）原实现有员工时全分给员工家庭、官库只收无员工官营——
+  市集等官方设施俸禄/收购流出、售货款不回官库，是主因；改为官营一律入官库。
+  ② 土地税原为凭空造钱入官库（不扣家庭），家庭财富永不回流；改为从住户/店主家庭公产实扣
+  （GameState.TakeLandTax，店主 OwnerCitizenId 优先、民居按 HouseholdHead，无钱免收）。
+  ③ 民居修缮摊派原扣在已停用的个人 Money 字段（v24 资金家庭化后等于免费修缮）；改扣家庭公产。
+- 流民营住户不得开垦农田（FarmlandSystem.OwnsHome）：住所须为私有民居（grown 类建筑），
+  寄居流民营/王爷府等官署不算自有住所；开垦与农田升级备用劳力统计同标准。
+- 面板返回按钮（InspectPanel）：从面板内链接跳转（个人↔家庭页等）时左上角显示「← 返回」，
+  点按回到来源面板（来源目标已失效则关闭）；外部点选进入无返回。
+- 分区/菜单交互（BuildMenu）：点「分区」一级菜单即展开并进入分区模式——规划色块立显，
+  无需再点建筑区子项；一级分类按钮改 toggle——再点已展开的分类回到选择状态（退出建造模式收起上排）。
+- 顶栏新增城市总金额（TopBar）：「城 X」= 官库 + 全城家庭公产之和，悬停说明，后期作为政策/事件依据。
+- 编译 0 警告 0 错误。
+
+## 批次七十一（2026-08-08）农田贴路开垦 + 分区三工具与删除 + 家庭面板与家产模块
+
+- 农田贴路开垦：开垦选址按「占地外扩 4 格内道路」评分落位（主路每格 2 分、辅路 1 分、
+  小路不计），同尺寸档内选最高分，全无路退回原遍历序（FarmlandSystem.FindFieldSpot/RoadScore）。
+- 开垦门槛：只有自有住所（HomeId>=0）的闲置农艺居民才能开垦；一人只开一块田
+  （FindIdleFarmer 排除已任田主者，EnsureOwner/升级备用劳力统计同标准，OwnsField 全城查证）。
+- 分区三工具按钮（BuildMenu 分区页，暂不绑快捷键）：类型（建筑区/耕种区）、
+  工具（油漆桶/笔刷/拖拽，拖拽为默认矩形拖框）、操作（规划/删除）三组互斥切换；
+  笔刷沿拖动轨迹逐格涂抹（插值防跳格），油漆桶单击洪水填充，均取消 Shift+左键旧快捷键。
+- 分区删除：复用三工具清除点击处一切规划（建筑区/耕种区都清，与类型无关）；
+  油漆桶删除不检查闭合——扩散出图即止、不提示不撤销（规划版出图会判未封闭）；
+  笔刷/拖框的分区变更累积脏标记，每帧至多广播一次重建（防拖动期间逐格刷爆）。
+- 家庭面板（InspectPanel）：个人页家庭行改可点击链接（户主名一家（n口）/独居，
+  MetaClicked 新增 family:ID 前缀）；家庭页展示成员清单（按年龄降序，户主标记+
+  与户主关系，人名可点回个人页）+ 家产模块 + 住所行 + 「定位住所」按钮。
+- 家产单独模块：个人页、家庭页、住宅页（屋主）、农田页（田主）均以「—— 家产 ——」
+  独立小节展示，不再缀在户主/田主名后（删除 AssetsSuffix 后缀方案）。
+- 编译 0 警告 0 错误。
+
+## 批次七十（2026-08-08）分区菜单/双色渲染 + 油漆桶 + 定位与面板整合 + 成本再降
+
+- 分区菜单整合：建造栏下排「可建造区」「耕种区」两按钮合并为「分区」，点开在上排展示
+  「建筑区」（原可建造区改名）与「耕种区」两个子项（BuildMenu.ShowGroup 新增 zone 分支）。
+- 分区双色渲染：修复耕种区画不出来（RebuildZones 此前只遍历 BuildableCells，漏了 FarmlandCells）；
+  建筑区浅蓝底色、耕种区浅黄绿底色（GridRenderer 两个色常量）；规划色块仅分区模式显示
+  （SetZonesVisible 随 SwitchMode 联动，平时不画规划底图）。
+- 油漆桶填充：分区模式下 Shift+左键单击，以道路（主/辅/桥面，不含小路）与河流为界
+  洪水填充整片封闭区域为当前分区类型；扩散出图（未封闭）提示「油漆桶未生效」且不落区；
+  单次上限 40 万格防全图开放区刷爆；树/已有建筑不阻断填充，但只有可规划空地才落区。
+- 近王府选址强化：PrinceMansionConfig.SiteScore 6→8、SiteRadius 24→32——民居更明显优先聚于王府周边。
+- 成本再降：GrowthConfig 地价四级再减半（资源点旁 2,000 / 普通 2,500 / 临街 3,750 / 城中心 6,250 文），
+  建房边长资产门槛再减半（6,000/15,000/35,000/75,000）——平民起步更容易买地盖大宅。
+- 面板整合（InspectPanel）：居民页家庭信息与家产合并为一行（家产为家庭公产）；
+  建筑页屋主行显示家产；人名改为可点击链接（MetaClicked citizen:ID），建筑面板点居民/雇工/
+  田主名即在面板展开该居民个人页；个人页新增定位按钮行——定位本人（代理实时坐标→数据坐标
+  →住所中心回退）/定位住所/定位工作（RtsCameraRig.FocusOn 0.4s 平滑平移，手动平移即打断；
+  AgentManager.AgentPosition 供取代理坐标，代理不在场回落数据层）。
+- 农田面板分列田主与雇工：田主行（OwnerCitizenId，名可点击带家产，无主显示「待指派」）；
+  雇工名单不再含田主本人；农场雇工名同样可点击展开个人页。
+- 编译 0 警告 0 错误。
+
+## 批次六十八（2026-08-08）选址河流降权 + 资金家庭化 + 人口税补缺
+
+- 选址河流降权：GrowthConfig.SiteRiverScore 1.5→0.5——河道只是基础加分项，
+  村民建房优先贴主路/辅路（主路 3 分 > 辅路 2 分 > 河道 0.5 分），不再优先沿河而居。
+- 资金家庭化（个人私产停流通）：新增 GameState.PayToFamily/TakeFromFamily/FamilyMoney 三方法，
+  工资、货款、寄卖款、市集买卖、修缮俸禄全部改挂家庭公产（Family.SharedAssets）；
+  读档时把个人 Money 一次性并入家庭公产并清零（字段保留兼容）；
+  MarriageBudget/分家分产/寄居迁出自建/婚后另立门户均改按家庭公产份额收支；
+  HouseholdSpending 只扣公产；InspectPanel 个人「积蓄」改为「家产（家庭公产）」；
+  删除废弃常量 ArriveMoneyMin/ArriveMoneySpan/AdultMoney。
+- 人口税补缺：TaxSystem 注释声称「薪资发放时扣」但此前未实现——现在在雇工/修缮匠
+  下工结算时若 PollTaxEnabled 开启，扣当班工钱 20% 入官库并记账「人口税」。
+- 编译 0 警告 0 错误。
+
+## 批次六十七（2026-08-08）商店工坊调整：商店无升级效果 / 工坊多级多配方+副产品 / 多品种防垄断
+
+- 商店不再提供升级效果：buildings.json 的 shop 移除 jobSlotsByLevel/serviceRangeByLevel/minSkillExpByLevel，
+  岗位恒为 1（JobSlotsAt 回退固定值）；资源升级全部由工坊实现。
+- 工坊配方多对多（新增 scripts/sim/RecipeDef.cs）：RecipeDef 含 InputsByLevel/FuelByLevel/ByproductRateByLevel，
+  Goods.Recipes 13 个配方全部三级化（索引 0=一级，长度 1 向前兼容）——早期木头→木材 1:1，
+  等级越高耗料越多（如木板 L1 原木×1 → L3 原木×3）、要烧柴（FuelAt）、产出带废料副产（ByproductAt）；
+  新增 Goods.InputsAt/FuelAt/ByproductAt 按等级取配方，InputsOf 保留一级兼容。
+- 新增废料 Scrap（基价 2 文）：工坊副产品，商铺可收售；燃料链 wood→scrap——家中柴薪不足可烧废料，
+  上市也可买废料补柴（ConsumeFuel 改造），形成经济闭环。
+- CraftingSystem 重构：只工坊加工（商铺只购销）、按等级配方扣料+燃料限产+副产入库、
+  工坊效率倍率 EfficiencyAt 首次生效、遍历 ExtraGoods 副营品并行加工。
+- 商铺/工坊升级增补经营种类（ZoneGrowthSystem.ExtendSpecialties）：每升一级向同大类随机补种副营品
+  （Goods.CategoryOf 大类判定），目标种类数=等级、封顶 EconomyConfig.MaxSpecialtiesPerShop=3，
+  且受全城同货铺面数 ShopSameGoodsCap 饱和限制——基本专营、等级高了才多品、不过量防垄断。
+- BuildingInstance 新增 ExtraGoods（升级副营品）随档（BuildingSave v24）；
+  交易链全线认副营品：铺面半仓进货、买货上柜、工坊成品外销、FindTradeShop/FindRawBuyer 均覆盖。
+- JobSlotsAt 全链路生效（此前 JobSystem 用固定 JobSlots）：StaffHomeBusinesses/FindVacancy/TaxSystem 预估/
+  InspectPanel 雇工显示均按等级取岗位数；CitizenAgent 补料物流改按等级配方（含燃料柴薪），
+  商铺住户不再补料（TryServeHomeBusiness 限定 workshop）。
+- InspectPanel 配方显示按等级：原料×耗量 + 燃料 + 副产品；兼营列表展示。
+- 编译 0 警告 0 错误。
+
+## 批次六十六（2026-08-08）建房重构：尺寸阶梯 / 小路独立个体 / 占路建房 / 半价分担
+
+- 初始建房尺寸：默认 2×2，按预算资产阶梯放大（GrowthConfig.HouseSideByAssets 五档 → 边长 2..6）、
+  家庭人口 ≥5 再 +1，上限 ExpandMaxSide=6（8→6）；目标边长无合法落位时逐档退小（TryBuildHouse）。
+- 小路独立个体（不再与房屋一体）：Cell 新增 LaneOwnerId 登记小路归属建筑 id（-1=无主），
+  建房后自动围一圈小路（LayLaneRing 带 ownerId 登记）；DemolishBuilding 拆迁/舍弃只把名下小路转无主、
+  不删路——贴小路两侧房屋拆除后小路依旧存在；新村民可直接在小路上盖房（FootprintBuildable 放行
+  无主小路格，PlaceBuilding 占路清路并入）。
+- 贴/占有主小路建房的半价分担：CollectLaneShareCost 对 footprint 内占用格 + 外圈贴边格中有主小路
+  每格按 WorldConfig.LaneCost/2（5 文）付给原屋主家庭公产（无住户折入官库），格转无主，
+  补偿并入建房总价；小路费用记档（存档 v24：MapSave.LaneOwnerIds 与 RoadCells 一一对应）。
+- 扩建（TryExpandHouse）同步维护小路环归属；Cell 加显式构造函数（修复 CS8983）。
+- 编译 0 警告 0 错误。
+
+## 批次六十五（2026-08-08）技能遗传：迁入随机初值 / 出生遗传变异
+
+- 迁入村民技能点随机：SpawnImmigrant 按流民类型区间抽技能经验初值
+  （PopulationConfig.SkillExpMinOf/SkillExpSpanOf：寓商/散勇/客士 50 起步，归民农艺 120 跨度）。
+- 归民（无类型技能者）以 SettlerFarmChance=0.5 概率带农艺技能——耕种区开垦主力，
+  避免耕种区无人可用（FindIdleFarmer 依赖 Skill==Farming）。
+- 城内出生遗传算法（新增 GeneticsConfig.cs）：新生儿 50/50 继承父/母技能，经验按 0.3~0.7 比例衰减；
+  5% 概率变异重随机技能与经验（MutationExpMin+跨度）；父母均无技能时 10% 概率开蒙随机一技。
+- Citizen.GetIdentity 职业名 "farm"→"farmland"（农夫）。
+- 编译 0 警告 0 错误。
+
+## 批次六十四（2026-08-08）技能成长 + 自主创业（取代随机转业）
+
+- 打工涨技能点：JobSystem.SkillGrowth 在岗雇工每日 +SkillExpPerDay（2 点），有技能方向才涨；
+  经验驱动等级（200 熟练/600 高级）与求职门槛。
+- 求职门槛：FindVacancy 按岗位等级最低技能经验过滤（MinSkillExpAt，田块另要求农艺技能）。
+- 自主创业替换随机转业：住宅转商铺/工坊须创业者技能与家庭资金达标、且世界面板缺货
+  （缺口越紧缺门槛越低：门槛 = 基础 ×（1 - 缺口折扣），日概率 = 基础 + 缺口加成）；
+  选品认领最缺货品（PickScarceGoods），全城同货铺面 ShopSameGoodsCap=3 防垄断；
+  保留集镇（里程碑 2）起与全城工商占比 30% 封顶闸门；删除旧转业 8 个废弃常量。
+- 编译 0 警告 0 错误。
+
+## 批次六十三（2026-08-08）耕种区基础：田块替代农田建筑
+
+- 删除农田建筑（buildings.json 移除 farm，新增 farmland：field 类、6×6、noRoof、1 月一收）；
+  改为玩家用「耕种区」批量规划（ZoneType 追加 Farming 区类），区划后符合职业的村民自动开荒耕种
+  （FindIdleFarmer 按 Skill==Farming 认领田块，田主登记 OwnerCitizenId）。
+- 农田有等级：初始仅田主自己耕作、产量低（1 岗），升级后提供岗位（JobSlotsByLevel [1,2,3,4]）、
+  产量随工人数提高（YieldPerWorker × 在岗数）；FarmlandSystem/FarmlandConfig 驱动，
+  架构预留后期新增作物/渔业等田块类型（ProduceGoods 数据驱动）。
+- 存档 v23：BuildingSave.OwnerCitizenId 随档；建造菜单/详情面板/职业名适配。
+- 编译 0 警告 0 错误。
+
+## 批次六十二（2026-08-08）进场视角：面向正北 + 俯瞰画卷落向地图中心
+
+- 默认视角改面向正北（RtsCameraRig._yaw 0.7→0，相机看向地图 -Z 即北），Q/E 或中键拖转仍可调。
+- 进场动画（新游戏/读档完成进入世界时）：镜头从地图中心高空近乎垂直俯瞰整张画卷
+  （IntroStartDist=1050m、俯仰取 MinPitch）逐步落向默认视角（DefaultDist=90m、DefaultPitch=-0.95），
+  easeOutCubic 减速缓入（起步快、临近放缓，如人逐步靠近）；动画期间忽略玩家输入。
+- 常量入 CameraConfig：DefaultDist/DefaultPitch/IntroStartDist/IntroDuration；
+  入场起点拉距超常态上限（MaxDist=450），仅为动画起点、动画结束即回落常态。
+- 深度雾化衔接：入场拉距 1050>220 自动开雾（俯瞰画卷远端融雾），落定 90 后自动关雾，无需新逻辑。
+- 编译 0 警告 0 错误。
+
+## 批次六十一（2026-08-08）河流定线提前到草图 + 河流必达图缘/汇流
+
+- 河流定线提前到 128 草图（WorldSketch.WalkRivers）：侵蚀完成后峰间鞍部取源（海拔降序取
+  RiverCount 条），沿最陡下降走线，路径格互相视为水体（后河撞前河即汇流，防路径交叉）；
+  只存路径不压地形——预览画线所见即所得，成品河与预览位置一致。
+- 新游戏预览图叠加河流定线（GameMenu.DrawRivers，浅蓝 1px，色入 WaterConfig.PreviewRiverColor）。
+- RiverGenerator 改走线来源：草图路径 ×8 放大为引导线 → FollowGuide 走廊循坡细化
+  （前向扇区取「高度 + 拉力×到锚点距离」最低格，GuidePull=0.25 米/格）——大方向由预览定线，
+  局部贴合全图地形；刻水/水位/湖泊/河床下压全部复用，PickSources/TracePath 移入草图侧。
+- 河流不再中途断流（需求：终点必为图缘或汇流）：洼地强制东南滑行不设上限（删除
+  WaterConfig.MaxForcedSteps），前向三邻全堵时强行向东南——半路消失的河不复存在。
+- 走线最短长度常量化为 WaterConfig.MinRiverPathCells=40（世界格，草图侧按 /SketchScale 折算），
+  替换原硬编码 40。
+- 编译 0 警告 0 错误。
+
+## 批次六十（2026-08-06）启动流程重构：延迟生成世界 + 随机地图预览 + 读档异步化
+
+- 启动直进标题菜单：Main._Ready 不再建 GameState/不生成世界（1024² 地图延迟到新建/读档时才分配），
+  仅载入建筑定义后挂菜单即完成；原 FinishSetup 改名 EnterWorld（_inWorld 守卫防 F9 游戏中读档二次装配），
+  由新游戏/读档的加载完成回调调用。
+- 新游戏页合并命名+128×128 俯视图预览（GameMenu）：进入即掷首幅（Random.Shared.Next），「随机」重掷重绘，
+  「确认建城」携种子回调 Main 生成真实地图；预览按高度着色（h≤0 深青绿→0 翠绿→12m 黄绿→24m 黄褐→
+  40m 灰褐→≥64m 灰白，Color.Lerp 分段插值），TextureRect 384×384 Nearest 像素放大 3 倍防糊。
+- 预览即最终地形：WorldGenerator.GenerateAsync(gs, seed) 新增种子参数，确认后以同种子从头重跑
+  WorldSketch.Build → 与预览 rng 序列完全一致（无需保存草图对象）。
+- 读档异步化：SaveService.LoadCore 拆为后台纯数据段 LoadData（读 LMDB+反序列化+重建 GameState，
+  不赋值 GameState.I/不广播）+ 主线程 ApplyLoaded（同步 Load 保留复用）；新增 LoadAsync 后台 Task.Run，
+  Main 用 Callable.From marshal 回主线程应用（顺序：GameState.I → EnterWorld 建时钟 → SetDate → 广播）。
+- LoadingScreen 支持自定义源（构造注入 isDone/stage/progress 委托，null 时沿用 WorldGenerator 静态字段），
+  读档挂面板显示「复原山河…」；失败按来源提示（菜单发起留在读档页保持暂停，F9 仅 HUD 提示并恢复游戏）。
+- 守卫：_Process 自动保存与 F5/F9 快捷键加 `_hud == null` 短路（标题页无副作用）；载入按钮改异步触发
+  （GameMenu._onLoadSlot 改 Action<string>），成功由 Main 回调 MarkInGame/Resume，失败 NotifyLoadFailed。
+- 编译 0 警告 0 错误。
+
 ## 批次五十九（2026-08-06）工坊面板生产需求分组 + 屋顶点选优化
 
 - 建筑详情面板（InspectPanel.RenderBuilding）新增「—— 生产需求 ——」分组（储存分组之后）：
   - 可加工建筑（工坊/商铺，Goods.IsCraftable(b.Specialty)）：配方链（`原料一、原料二 → 成品`）、
-    每种配方原料的库存与基价（需料行）、成品库存与基价（产出行）、等级效率倍率（非 1.0 时显示）。
+	每种配方原料的库存与基价（需料行）、成品库存与基价（产出行）、等级效率倍率（非 1.0 时显示）。
   - 产业建筑（粮田/林场/采矿场/制盐厂/酒曲司/采石场，HarvestMonths>0）：产出货品（ProduceGoods 空串默认粮食）
-    与每工每收产量、收获周期。
+	与每工每收产量、收获周期。
 - 屋顶点选优化（BuildController）：PickCitizen 新增 RayBlockedByBuilding 遮挡检查——
   从相机到候选居民的视线若先命中建筑（楼体/屋顶，命中判定与 PickWorldObject 同款），该居民不参与拾取，
   点选由建筑视线拾取接管：点击屋顶显示房屋信息，不再穿透到屋内/屋后的人；屋前空地居民仍可正常选中。

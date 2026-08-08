@@ -18,6 +18,14 @@ public class GameState
     /// <summary>道路占地宽度（米/格，调参见 configs/WorldConfig）。</summary>
     public static int RoadWidthOf(RoadKind kind) => kind == RoadKind.Main ? WorldConfig.MainRoadWidth : WorldConfig.SideRoadWidth;
 
+    /// <summary>道路等级（批次八十：高级可覆盖低级）：主路 2 &gt; 辅路 1 &gt; 小路 0；None/桥面视作 0。</summary>
+    public static int RoadRank(RoadKind kind) => kind switch
+    {
+        RoadKind.Main => 2,
+        RoadKind.Side => 1,
+        _ => 0,
+    };
+
     /// <summary>桥梁宽度（米/格，调参见 configs/WorldConfig）。</summary>
     public const int BridgeWidth = WorldConfig.BridgeWidth;
 
@@ -127,7 +135,10 @@ public class GameState
     /// <summary>全部「可建设区」格：坊区生长只在此集内挑建房点，免每日全图扫描。</summary>
     public HashSet<Vector2I> BuildableCells { get; } = new();
 
-    /// <summary>统一的坊区写入口：同步维护 BuildableCells 索引（绕过此方法直写 cell.Zone 会使索引失真）。</summary>
+    /// <summary>全部「耕种区」格：农场系统在此集内开垦农田（连通块分组），免每日全图扫描。</summary>
+    public HashSet<Vector2I> FarmlandCells { get; } = new();
+
+    /// <summary>统一的坊区写入口：同步维护 BuildableCells/FarmlandCells 索引（绕过此方法直写 cell.Zone 会使索引失真）。</summary>
     public void SetZone(Vector2I c, ZoneType zone)
     {
         ref var cell = ref Map.CellAt(c);
@@ -135,9 +146,13 @@ public class GameState
             return;
         if (cell.Zone == ZoneType.Buildable)
             BuildableCells.Remove(c);
+        else if (cell.Zone == ZoneType.Farmland)
+            FarmlandCells.Remove(c);
         cell.Zone = zone;
         if (zone == ZoneType.Buildable)
             BuildableCells.Add(c);
+        else if (zone == ZoneType.Farmland)
+            FarmlandCells.Add(c);
     }
 
     public GameState(Dictionary<string, BuildingDef> defs)
@@ -179,20 +194,28 @@ public class GameState
                     LayRoadCell(c, kind);
                     newRoadCells++;
                 }
-                // 其它（已有路/建筑）跳过
+                else if (cell.HasRoad && !cell.HasBridge && RoadRank(kind) > RoadRank(cell.RoadKind))
+                {
+                    // 高级覆盖低级（批次八十）：主路压辅路/小路、辅路压小路；同级/低级不覆盖，桥面不升级
+                    UpgradeRoadCell(c, kind);
+                    newRoadCells++;
+                }
+                // 其它（已有同级/高级路、建筑）跳过
             }
         }
         if (newRoadCells > 0)
         {
             long charge = (long)roadCost * newRoadCells / w; // 新格数/宽 = 等效延米，斜拖/重叠不多扣
-            Money -= charge;
-            Ledger.Add("营造道路", -charge);
+            long paid = PayBuildWages(charge); // 批次七十九：先发放、按实扣款（无人领则钱留官库）
+            Money -= paid;
+            Ledger.Add("营造道路", -paid);
         }
         if (newBridgeCells > 0)
         {
             long charge = (long)BridgeCost * newBridgeCells / w; // 跨水段按桥梁单价
-            Money -= charge;
-            Ledger.Add("营造桥梁", -charge);
+            long paid = PayBuildWages(charge);
+            Money -= paid;
+            Ledger.Add("营造桥梁", -paid);
         }
         if (newRoadCells > 0 || newBridgeCells > 0)
             EventBus.RaiseStatsChanged();
@@ -224,8 +247,9 @@ public class GameState
         if (newCells > 0)
         {
             long charge = (long)BridgeCost * newCells / BridgeWidth;
-            Money -= charge;
-            Ledger.Add("营造桥梁", -charge);
+            long paid = PayBuildWages(charge); // 批次七十九：同道路营造，按实扣款
+            Money -= paid;
+            Ledger.Add("营造桥梁", -paid);
             EventBus.RaiseStatsChanged();
         }
         return newCells > 0;
@@ -242,6 +266,16 @@ public class GameState
         EventBus.RaiseCellChanged(c);
     }
 
+    /// <summary>升级已有路面（高级覆盖低级，批次八十）：只换道路种类与寻路权重，
+    /// 不重登记索引、不砍树（有路格无树）、不清坊区（铺路时已清）。</summary>
+    private void UpgradeRoadCell(Vector2I c, RoadKind kind)
+    {
+        ref var cell = ref Map.CellAt(c);
+        cell.RoadKind = kind;
+        Roads.SetRoad(c, true, kind); // 同步寻路权重：主路代价低，居民偏好走主路
+        EventBus.RaiseCellChanged(c);
+    }
+
     /// <summary>铺单格道路（条带内部用，不扣费不广播统计）。</summary>
     private void LayRoadCell(Vector2I c, RoadKind kind)
     {
@@ -255,14 +289,19 @@ public class GameState
         EventBus.RaiseCellChanged(c); // 单格变更：只重建所在分块
     }
 
-    /// <summary>放置建筑（已通过合法性校验）。official 扣钱，grown 免费。</summary>
-    public BuildingInstance PlaceBuilding(BuildingDef def, Vector2I origin)
+    /// <summary>放置建筑（已通过合法性校验）。official 扣钱，grown 免费；
+    /// sizeX/sizeY 可覆写定义占地（村民初始大宅用，默认取定义值）。</summary>
+    public BuildingInstance PlaceBuilding(BuildingDef def, Vector2I origin, int sizeX = -1, int sizeY = -1)
     {
+        int sx = sizeX > 0 ? sizeX : def.SizeX;
+        int sy = sizeY > 0 ? sizeY : def.SizeY;
         var b = new BuildingInstance
         {
             Id = NextBuildingId++,
             Def = def,
             Origin = origin,
+            SizeX = sx,
+            SizeY = sy,
             BuiltYear = CurYear,
             BuiltMonth = CurMonth,
             Specialty = DefaultSpecialty(def),
@@ -271,40 +310,56 @@ public class GameState
 
         // 自动整平垫基：占地顶点压平成台面（取占地顶点平均高），建筑立面天然水平；
         // 读档重建不经此方法（高度场随档恢复），不会二次整平
-        Map.Height.FlattenRect(origin, def.SizeX, def.SizeY, Map.Height.FootprintAvgH(origin, def.SizeX, def.SizeY));
+        Map.Height.FlattenRect(origin, sx, sy, Map.Height.FootprintAvgH(origin, sx, sy));
 
-        for (int x = origin.X; x < origin.X + def.SizeX; x++)
+        for (int x = origin.X; x < origin.X + sx; x++)
         {
-            for (int y = origin.Y; y < origin.Y + def.SizeY; y++)
+            for (int y = origin.Y; y < origin.Y + sy; y++)
             {
                 RemovePlantAt(new Vector2I(x, y)); // 施工砍伐
                 ref var cell = ref Map.CellAt(x, y);
+                if (cell.HasRoad) // 占小路建房（批次六十六：村民可直接在小路上盖房）：清路并入占地
+                {
+                    cell.HasRoad = false;
+                    cell.RoadKind = RoadKind.None;
+                    Roads.SetRoad(new Vector2I(x, y), false);
+                    UnregisterRoadCell(new Vector2I(x, y));
+                }
+                cell.LaneOwnerId = -1; // 占用的有主小路已在选址时补偿转无主，此处兜底解除
                 cell.BuildingId = b.Id;
-                if (def.Category == "official")
-                    SetZone(new Vector2I(x, y), ZoneType.None); // 官方建筑覆盖坊区；grown 保留坊区便于拆后重生
+                if (def.Category is "official" or "court")
+                    SetZone(new Vector2I(x, y), ZoneType.None); // 官方/朝廷建筑覆盖坊区；grown 保留坊区便于拆后重生
             }
         }
 
         if (def.Category == "official")
         {
-            Money -= def.Cost;
-            Ledger.Add("营造建筑", -def.Cost);
+            long paid = PayBuildWages(def.Cost); // 批次七十九：先发放、按实扣款（无人领则钱留官库）
+            Money -= paid;
+            Ledger.Add("营造建筑", -paid);
+        }
+        else if (def.Category == "court")
+        {
+            // 朝廷机构朝廷拨款营造（批次七十七）：官库不扣钱，营造工钱由朝廷凭空生成发给无业者
+            long courtPaid = PayBuildWages(def.Cost);
+            if (courtPaid > 0)
+                Ledger.Add("朝廷营造", courtPaid); // 朝廷拨款流水，账本可查
         }
 
         // 所有建筑（含玩家放置的官营）建成后四周环一圈小路（附属小路）：该侧已临任意路则不重铺
-        LayLaneRing(origin, def.SizeX, def.SizeY);
+        LayLaneRing(origin, sx, sy, b.Id);
 
         // 局部重建：垫基整平只动占地矩形内顶点，只标脏覆盖分块（小路环已逐格 CellChanged）；
         // 旧版这里全图 MapChanged，村民 4x 下频繁建房时百万格重建是间歇卡顿主源
-        EventBus.RaiseRectChanged(origin, new Vector2I(def.SizeX, def.SizeY));
+        EventBus.RaiseRectChanged(origin, new Vector2I(sx, sy));
         EventBus.RaiseStatsChanged();
         EventBus.RaiseBuildingPlaced(b); // 实时放置钩子（如王爷府建成：拨款+安置夫妻）；读档重建不经此方法故不误触
         return b;
     }
 
-    /// <summary>沿建筑 footprint 外一圈铺设小路环（附属小路）：空地→小路，
-    /// 已有任意路（主/辅/桥/小路）保留不动（不重铺也不降级）。</summary>
-    private void LayLaneRing(Vector2I origin, int sx, int sy)
+    /// <summary>沿建筑 footprint 外一圈铺设小路环（附属小路）：空地→小路并登记归属，
+    /// 已有任意路（主/辅/桥/小路）保留不动（不重铺也不降级、不夺归属）。</summary>
+    private void LayLaneRing(Vector2I origin, int sx, int sy, int ownerId)
     {
         int w = GrowthConfig.LaneRing;
         for (int x = origin.X - w; x < origin.X + sx + w; x++)
@@ -318,14 +373,17 @@ public class GameState
                 if (!MapGrid.InBounds(c))
                     continue;
                 ref var cell = ref Map.CellAt(c);
-                if (!cell.HasRoad && cell.IsEmpty) // 仅空地铺小路；已有主/辅/桥/小路保留
+                if (!cell.HasRoad && cell.IsEmpty) // 仅空地铺小路；已有主/辅/桥/小路保留（含其归属）
+                {
                     LayRoadCell(c, RoadKind.Lane);
+                    cell.LaneOwnerId = ownerId; // 小路独立个体：登记归属本宅
+                }
             }
         }
     }
 
     /// <summary>扩建后对新 footprint 重新环一圈小路（被吞掉的环在新边界外补齐）：供 ZoneGrowthSystem 调用。</summary>
-    public void LayBuildingLaneRing(BuildingInstance b) => LayLaneRing(b.Origin, b.FootX, b.FootY);
+    public void LayBuildingLaneRing(BuildingInstance b) => LayLaneRing(b.Origin, b.FootX, b.FootY, b.Id);
 
     /// <summary>村民自建住宅（兼容别名）：现与 PlaceBuilding 等价（小路环已并入 PlaceBuilding）。</summary>
     public BuildingInstance PlaceGrownWithLanes(BuildingDef def, Vector2I origin) => PlaceBuilding(def, origin);
@@ -339,8 +397,9 @@ public class GameState
     };
 
     /// <summary>就地转业：把一座 grown 建筑（如住宅升级后）换成另一种 grown 定义，占地不变、居民保留、重置专营；
+    /// specialty 非空按指定货品专营（创业选品），空串随机（DefaultSpecialty）；
     /// 供 ZoneGrowthSystem 实现「住宅升级概率变商铺/工坊」。</summary>
-    public void ConvertGrown(BuildingInstance b, string defId)
+    public void ConvertGrown(BuildingInstance b, string defId, string specialty = "")
     {
         if (!Defs.TryGetValue(defId, out var def) || def.Category != "grown")
             return;
@@ -348,7 +407,7 @@ public class GameState
         b.SizeX = b.FootX;
         b.SizeY = b.FootY;
         b.Def = def;
-        b.Specialty = DefaultSpecialty(def);
+        b.Specialty = specialty != "" ? specialty : DefaultSpecialty(def);
         b.Abandoned = false;
         b.Doors = null; // 转业后临路/用途可变，门失效待重算
         EventBus.RaiseBuildingsChanged(); // 只换定义/颜色不动地表：仅重建建筑层
@@ -379,6 +438,9 @@ public class GameState
         }
         else if (cell.BuildingId >= 0 && Buildings.TryGetValue(cell.BuildingId, out var b))
         {
+            // 王爷府为开局地标（批次八十）：不设健康度、不进建造栏，拆了无法重建，禁止拆除
+            if (b.Def.Id == PrinceMansionConfig.DefId)
+                return;
             DemolishBuilding(b);
         }
         else if (cell.Zone != ZoneType.None)
@@ -392,7 +454,7 @@ public class GameState
         }
     }
 
-    /// <summary>把一格并入指定建筑占地（住宅扩建用）：砍除植物、收拾散落物资、清除自家小路环并登记占用。</summary>
+    /// <summary>把一格并入指定建筑占地（住宅扩建用）：砍除植物、收拾散落物资、清除占用格上的道路并登记占用。</summary>
     public void ClaimCellForBuilding(Vector2I c, int buildingId)
     {
         RemovePlantAt(c);
@@ -409,14 +471,16 @@ public class GameState
             Roads.SetRoad(c, false);
             UnregisterRoadCell(c);
         }
+        lane.LaneOwnerId = -1; // 并入的小路不再归属任何建筑
         Map.CellAt(c).BuildingId = buildingId;
         if (Buildings.TryGetValue(buildingId, out var host))
             host.Doors = null; // 扩地改变占地边界，门失效待重算
         EventBus.RaiseCellChanged(c);
     }
 
-    /// <summary>拆除建筑实例（手动拆除 / 老化坍塌共用）：清空占地；顺带清理其附属小路环——
-    /// 仅移除「不再紧贴任何其它建筑」的独占小路，共享小路保留以免切断邻居通路。</summary>
+    /// <summary>拆除建筑实例（手动拆除 / 老化坍塌共用）：清空占地；
+    /// 附属小路独立存续（批次六十六）：不再随房清除，只把本宅名下的小路格转无主——
+    /// 新村民可免费贴路建房或直接占路重建，无需再付半价。</summary>
     public void DemolishBuilding(BuildingInstance b)
     {
         var origin = b.Origin;
@@ -427,7 +491,7 @@ public class GameState
                 Map.CellAt(x, y).BuildingId = -1;
         Buildings.Remove(b.Id);
     
-        // footprint 已清空，此时判断小路格是否仍贴着「其它」建筑
+        // footprint 已清空，把本宅名下的小路格转为无主（小路本体保留）
         int w = GrowthConfig.LaneRing;
         for (int x = origin.X - w; x < origin.X + fx + w; x++)
         {
@@ -436,42 +500,16 @@ public class GameState
                 if (x >= origin.X && x < origin.X + fx && y >= origin.Y && y < origin.Y + fy)
                     continue;
                 var c = new Vector2I(x, y);
-                if (!MapGrid.InBounds(c) || Map.CellAt(c).RoadKind != RoadKind.Lane)
+                if (!MapGrid.InBounds(c))
                     continue;
-                if (!TouchesAnyBuilding(c))
-                    RemoveLaneCell(c);
+                ref var cell = ref Map.CellAt(c);
+                if (cell.RoadKind == RoadKind.Lane && cell.LaneOwnerId == b.Id)
+                    cell.LaneOwnerId = -1; // 屋主已去，小路留作无主道路
             }
         }
     
         // 局部重建：占地矩形（含外圈小路已逐格 CellChanged）覆盖分块重建即可，免全图重建
         EventBus.RaiseRectChanged(origin, new Vector2I(fx, fy));
-    }
-
-    /// <summary>某格的 8 邻域内是否存在建筑占地（判断小路是否仍被邻居依赖）。</summary>
-    private bool TouchesAnyBuilding(Vector2I c)
-    {
-        for (int dx = -1; dx <= 1; dx++)
-            for (int dy = -1; dy <= 1; dy++)
-            {
-                if (dx == 0 && dy == 0)
-                    continue;
-                var n = new Vector2I(c.X + dx, c.Y + dy);
-                if (MapGrid.InBounds(n) && Map.CellAt(n).BuildingId >= 0)
-                    return true;
-            }
-        return false;
-    }
-
-    /// <summary>移除一格小路（拆房清理专用）：还原为可建设区空地，便于日后重建。</summary>
-    private void RemoveLaneCell(Vector2I c)
-    {
-        ref var cell = ref Map.CellAt(c);
-        cell.HasRoad = false;
-        cell.RoadKind = RoadKind.None;
-        Roads.SetRoad(c, false);
-        UnregisterRoadCell(c);
-        SetZone(c, ZoneType.Buildable); // 小路原铺在可建设区空地上，拆后复原
-        EventBus.RaiseCellChanged(c);
     }
 
     // ---- 建筑的门（懒算缓存，不入存档） ----
@@ -885,8 +923,90 @@ public class GameState
         return list;
     }
 
+    // ---- 家庭资金（批次六十八：资金挂家庭公产，个人 Money 停止流通）----
+
+    /// <summary>给居民所属家庭入账（文）：家庭不存在（理论不会）则折入官库。</summary>
+    public void PayToFamily(Citizen to, long amount)
+    {
+        if (amount <= 0)
+            return;
+        if (Families.TryGetValue(to.FamilyId, out var fam))
+            fam.SharedAssets += amount;
+        else
+            Money += amount;
+    }
+
+    /// <summary>营造工钱（批次七十六）：建造费/建房提成发给当日无业成年人（均分）——
+    /// 除朝廷直属机构外所有钱都在玩家↔村民间循环，建造费不是凭空消失而是发成工资；
+    /// 批次七十九：返回实际发出额——先发放后按实扣款，无人可领时钱留在官库，
+    /// 金额小于无业者数时按序每人 1 文发完（小额营造/料钱也全数发出），杜绝「扣了款却发不出」的凭空消失。
+    /// 朝廷采买不走此路（凭空生成，见 CitizenAgent）。</summary>
+    public long PayBuildWages(long amount)
+    {
+        if (amount <= 0)
+            return 0;
+        int count = 0;
+        foreach (var c in Citizens.Values)
+            if (!c.IsChild && c.JobKind == JobKind.None)
+                count++;
+        if (count <= 0)
+            return 0; // 全城无无业者：无人领工钱，钱留在官库（调用方按实扣款）
+        long share = amount / count;
+        if (share <= 0)
+        {
+            // 金额小于无业者数：按序每人发 1 文，发完即止
+            long left = amount;
+            foreach (var c in Citizens.Values)
+                if (!c.IsChild && c.JobKind == JobKind.None && left > 0)
+                {
+                    PayToFamily(c, 1);
+                    left--;
+                }
+            return amount - left;
+        }
+        long paid = 0;
+        foreach (var c in Citizens.Values)
+            if (!c.IsChild && c.JobKind == JobKind.None)
+            {
+                PayToFamily(c, share);
+                paid += share;
+            }
+        return paid; // 除不尽余数留在官库（按实扣款，不凭空消失）
+    }
+
+    /// <summary>从居民所属家庭公产扣款（文，不为负）：家庭不存在则不扣（理论不会）。</summary>
+    public void TakeFromFamily(Citizen c, long amount)
+    {
+        if (amount <= 0)
+            return;
+        if (Families.TryGetValue(c.FamilyId, out var fam))
+            fam.SharedAssets = Math.Max(0, fam.SharedAssets - amount);
+    }
+
+    /// <summary>土地税征收（批次七十二）：从建筑住户/店主家庭公产实扣入官库，家庭无钱则免收；
+    /// 返回是否实收（账本记账用）。民营店坊按店主家庭（OwnerCitizenId）征收，民居按户主家庭（HouseholdHead）。
+    /// 旧版凭空造钱入官库（不扣家庭），家庭财富永不回流官库，是官库持续失血的原因之一。</summary>
+    public bool TakeLandTax(BuildingInstance b, long amount)
+    {
+        Citizen payer = null;
+        if (b.OwnerCitizenId >= 0 && Citizens.TryGetValue(b.OwnerCitizenId, out var owner))
+            payer = owner;
+        else
+            payer = HouseholdHead(b.Id);
+        if (payer == null || !Families.TryGetValue(payer.FamilyId, out var fam) || fam.SharedAssets <= 0)
+            return false;
+        long paid = Math.Min(amount, fam.SharedAssets);
+        fam.SharedAssets -= paid;
+        Money += paid;
+        return true;
+    }
+
+    /// <summary>居民所属家庭公产余额（文，家庭不存在返回 0）。</summary>
+    public long FamilyMoney(Citizen c) =>
+        Families.TryGetValue(c.FamilyId, out var fam) ? Math.Max(0, fam.SharedAssets) : 0;
+
     /// <summary>买方建筑向居民付款（收购居民背来的货）：官营走官库记账；
-    /// 民营由在店雇工凑钱（钱不够只付到见底），返回实付金额（文）。</summary>
+    /// 民营由在店雇工家庭凑钱（钱不够只付到见底），返回实付金额（文）。</summary>
     public long PayFromBuilding(BuildingInstance b, Citizen to, long amount)
     {
         if (amount <= 0)
@@ -895,7 +1015,7 @@ public class GameState
         {
             Money -= amount;
             Ledger.Add("市易采买", -amount);
-            to.Money += amount;
+            PayToFamily(to, amount);
             return amount;
         }
         var staff = StaffOf(b);
@@ -905,24 +1025,32 @@ public class GameState
         long share = amount / staff.Count;
         foreach (var w in staff)
         {
-            long p = Math.Min(Math.Max(0, w.Money), share);
-            w.Money -= p;
+            long p = Math.Min(FamilyMoney(w), share);
+            TakeFromFamily(w, p);
             paid += p;
         }
-        to.Money += paid;
+        PayToFamily(to, paid);
         return paid;
     }
 
-    /// <summary>卖方建筑收款（居民向建筑买货）：有雇工平分、无雇工的官营入官库记账。</summary>
+    /// <summary>卖方建筑收款（居民向建筑买货）：官营一律入官库记账（批次七十二：此前有员工时钱全分给员工家庭，
+    /// 官库只收无员工官营，官营设施只出不进——俸禄/收购流出，售货款不回官库，是官库持续失血主因）；
+    /// 民营按有雇工平分、无雇工折入官库。朝廷衙门不售货（只进不出），不参与本方法。</summary>
     public void PayToBuilding(BuildingInstance b, long amount)
     {
         if (amount <= 0)
             return;
+        if (b.Def.Category == "official")
+        {
+            Money += amount;
+            Ledger.Add("市易收入", amount);
+            return;
+        }
         var staff = StaffOf(b);
         if (staff.Count > 0)
         {
             foreach (var w in staff)
-                w.Money += amount / staff.Count;
+                PayToFamily(w, amount / staff.Count);
         }
         else
         {
@@ -1007,7 +1135,16 @@ public class GameState
         {
             family.MemberIds.Remove(id);
             if (family.MemberIds.Count == 0)
+            {
+                // 批次七十八：绝户（全家亡故）或最后一人迁出时，公产折入官库——
+                // 旧版随家庭删除凭空消失，是总资产持续流失的黑洞之一
+                if (family.SharedAssets > 0)
+                {
+                    Money += family.SharedAssets;
+                    Ledger.Add("绝户充公", family.SharedAssets);
+                }
                 Families.Remove(family.Id);
+            }
         }
 
         EventBus.RaiseCitizenRemoved(c);

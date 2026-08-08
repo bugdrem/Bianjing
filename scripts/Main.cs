@@ -1,14 +1,17 @@
 using System;
+using System.Collections.Generic;
 using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏入口：装配全部系统与场景节点，按序驱动每日/每月结算。</summary>
+/// <summary>游戏入口：装配全部系统与场景节点，按序驱动每日/每月结算。
+/// 启动直进标题菜单（不建 GameState/不生成世界），地图只在新建/读档时生成并挂加载面板。</summary>
 public partial class Main : Node3D
 {
     private GameClock _clock;
     private DesirabilitySystem _desirability;
     private ZoneGrowthSystem _growth;
+    private FarmlandSystem _farmland;
     private LifecycleSystem _lifecycle;
     private JobSystem _jobs;
     private TaxSystem _taxes;
@@ -22,9 +25,21 @@ public partial class Main : Node3D
     private TechSystem _techs;
     private DemandSystem _demand;
     private Hud _hud;
+    private BuildController _build; // 建造交互控制器：开局王爷府选位放置用
     private GameMenu _menu;
+    private Dictionary<string, BuildingDef> _defs; // 建筑定义：启动即载入（纯数据，不涉地图）
+
+    /// <summary>世界是否已装配（EnterWorld 守卫：F9 游戏中读档不二次装配）。</summary>
+    private bool _inWorld;
+
+    /// <summary>异步读档完成标志（LoadingScreen 轮询源：后台线程写、主线程读）。</summary>
+    private bool _loadDone;
+
+    /// <summary>异步读档结果（主线程应用；null 表示失败）。</summary>
+    private (GameState gs, SaveMeta meta)? _loadResult;
 
     private Godot.Environment _env;   // 世界环境：按相机拉距动态开关深度雾化
+    private DirectionalLight3D _sun;  // 主光源（批次七十四）：夜间联动变暗
     private RtsCameraRig _cameraRig;  // 相机云台：取拉距判定视角是否在地图内
 
     private float _autoSaveTimer;
@@ -35,20 +50,21 @@ public partial class Main : Node3D
         GameSettings.Load();
         GameSettings.Apply();
 
-        GameState.I = new GameState(BuildingDef.LoadAll());
-
-        // 世界生成走后台线程（此时渲染节点未建，生成只动纯数据 Map/Plants/Animals，线程安全）；
-        // 加载画面主线程轮询进度，完成回调 FinishSetup 装配全部节点与系统。
-        // 启动阶段确实在生成世界（主菜单背后的城市），标题如实描述——阶段文案由 WorldGenerator 实时上报
-        var loading = new LoadingScreen("初入汴京 · 正在生成世界") { OnFinished = FinishSetup };
-        AddChild(loading);
-        WorldGenerator.GenerateAsync(GameState.I);
+        // 启动直进标题菜单：不建 GameState、不生成世界（地图只在新建/读档时生成并挂加载面板）
+        _defs = BuildingDef.LoadAll();
+        _menu = new GameMenu(NewGame, SaveNamed, LoadSlotAsync, ReturnToTitle);
+        AddChild(_menu); // 标题菜单自行暂停全树
     }
 
-    /// <summary>世界生成完毕后的装配收尾（主线程）：环境/渲染器/相机/时钟/系统/HUD/菜单。
-    /// GameMenu 最后加入并自行暂停全树展示主菜单。</summary>
-    private void FinishSetup()
+    /// <summary>进入世界（主线程）：装配环境/渲染器/相机/时钟/系统/HUD。
+    /// 由新游戏/读档的加载完成回调调用；_inWorld 守卫防 F9 游戏中读档二次装配。
+    /// 启动时不再创建 GameMenu——标题菜单已在 _Ready 创建，进入世界后由流程 MarkInGame。</summary>
+    private void EnterWorld()
     {
+        if (_inWorld)
+            return;
+        _inWorld = true;
+
         SetupEnvironment();
 
         var renderer = new GridRenderer();
@@ -67,6 +83,7 @@ public partial class Main : Node3D
         _clock.MonthPassed += OnMonthPassed;
         _desirability = new DesirabilitySystem();
         _growth = new ZoneGrowthSystem();
+        _farmland = new FarmlandSystem();
         _lifecycle = new LifecycleSystem();
         _jobs = new JobSystem();
         _taxes = new TaxSystem();
@@ -80,20 +97,16 @@ public partial class Main : Node3D
         _techs = new TechSystem();
         _demand = new DemandSystem();
 
-        var build = new BuildController(cameraRig, renderer);
-        AddChild(build);
+        _build = new BuildController(cameraRig, renderer);
+        AddChild(_build);
 
         var agents = new AgentManager(_clock);
         AddChild(agents);
-        build.Agents = agents;
+        _build.Agents = agents;
 
-        _hud = new Hud(build, _clock, SaveGame, LoadGame);
+        _hud = new Hud(_build, _clock, SaveGame, LoadGame);
         AddChild(_hud);
-        build.Hud = _hud;
-
-        // 游戏菜单最后加入：_Ready 时暂停全树展示主菜单，ESC 呼出暂停菜单
-        _menu = new GameMenu(NewGame, SaveNamed, LoadSlot, ReturnToTitle);
-        AddChild(_menu);
+        _build.Hud = _hud;
 
         // 王爷府建成钩子：实时放置才触发（读档重建不经 PlaceBuilding，不会重复拨款/重生夫妻）
         EventBus.BuildingPlaced += OnBuildingPlaced;
@@ -130,6 +143,7 @@ public partial class Main : Node3D
 
         _desirability.EnsureUpdated(gs);
         _growth.TickDay(gs);
+        _farmland.TickDay(gs); // 耕种区：农艺村民自动开垦/升级田块
         _lifecycle.TickDay(gs);
         _jobs.TickDay(gs);
         _taxes.TickDay(gs);
@@ -144,11 +158,12 @@ public partial class Main : Node3D
         _demand.TickDay(gs); // 中央需求账本：城市级供需统计 + 内部广播（置于日结末，捕获当日终态）
     }
 
-    /// <summary>每月结算：大事（老化生死/重税民怨/植物生长/动物繁育）与账本轮转。</summary>
+    /// <summary>每月结算：大事（老化生死/重税民怨/植物生长/动物繁育）、月结工钱与账本轮转。</summary>
     private void OnMonthPassed()
     {
         var gs = GameState.I;
         _economy.PayMonthlySalary(gs); // 王爷月俸先入账
+        _economy.PayWages(gs); // 批次七十四：雇工工钱改月结（下工只记账，月底统一发放）
         _lifecycle.TickMonth(gs);
         _taxes.TickMonth(gs);
         _goods.TickMonth(gs); // 农田到期收获，收成散落田格
@@ -160,9 +175,10 @@ public partial class Main : Node3D
     public override void _Process(double delta)
     {
         UpdateFog();
+        UpdateDayNight((float)delta);
 
-        // 自动保存：仅在游戏进行中（未暂停）累计真实时间
-        if (GameSettings.AutoSaveMinutes <= 0 || GetTree().Paused)
+        // 自动保存：仅在游戏进行中（已进世界且未暂停）累计真实时间
+        if (_hud == null || GameSettings.AutoSaveMinutes <= 0 || GetTree().Paused)
             return;
         _autoSaveTimer += (float)delta;
         if (_autoSaveTimer < GameSettings.AutoSaveMinutes * 60f)
@@ -171,6 +187,20 @@ public partial class Main : Node3D
         // 异步原子保存：主线程快照+序列化，后台线程写盘免卡帧；完成回调在后台线程，用 CallDeferred marshal 回主线程再碰 HUD
         SaveService.SaveAsync(_clock, SaveService.AutoSlot, "自动保存", ok =>
             Callable.From(() => _hud.ShowCellInfo(ok ? "已自动保存" : "自动保存失败（详见日志）")).CallDeferred());
+    }
+
+    /// <summary>昼夜光照联动（批次七十四）：夜晚主光与环境光调暗（保持可操作），平滑过渡；
+    /// 白天/夜晚边界见 TimeConfig（DayStartHour=6 天亮 / NightStartHour=18 天黑）。</summary>
+    private void UpdateDayNight(float delta)
+    {
+        if (_sun == null || _env == null)
+            return;
+        bool night = _clock != null && _clock.IsNight;
+        float targetSun = night ? WorldConfig.NightSunEnergy : WorldConfig.DaySunEnergy;
+        float targetAmb = night ? WorldConfig.NightAmbientEnergy : WorldConfig.DayAmbientEnergy;
+        float k = 1f - Mathf.Exp(-delta * WorldConfig.DayNightSmoothPerSec);
+        _sun.LightEnergy = Mathf.Lerp(_sun.LightEnergy, targetSun, k);
+        _env.AmbientLightEnergy = Mathf.Lerp(_env.AmbientLightEnergy, targetAmb, k);
     }
 
     /// <summary>深度雾化当前已关闭：每帧确保 FogEnabled=false（保留按拉距开关的骨架，后续如需重启用回下方逻辑）。
@@ -183,11 +213,12 @@ public partial class Main : Node3D
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
 
-    /// <summary>新建城池：重置世界数据后全树暂停，挂加载画面走后台生成；
-    /// 完成回调（主线程）恢复暂停、归零日历并广播刷新（渲染器据 MapChanged 全量重建）。</summary>
-    private void NewGame(string cityName)
+    /// <summary>新建城池（预览页确认后携种子调用）：此刻才建 GameState（1024² 地图），
+    /// 全树暂停挂加载画面，后台以同种子重新生成——与预览地形完全一致；
+    /// 完成回调（主线程）装配世界、归零日历并广播刷新（渲染器据 MapChanged 全量重建）。</summary>
+    private void NewGame(string cityName, int seed)
     {
-        GameState.I = new GameState(GameState.I.Defs) { CityName = cityName };
+        GameState.I = new GameState(_defs) { CityName = cityName };
 
         // 生成期间整树暂停（LoadingScreen 自身 ProcessMode=Always 不受影响），防系统碰半成品数据
         GetTree().Paused = true;
@@ -195,7 +226,8 @@ public partial class Main : Node3D
         {
             OnFinished = () =>
             {
-                GetTree().Paused = false;
+                EnterWorld();
+                StartFirstMansionPlacement(); // 开局即进入王爷府选位放置（点击地图落成），建成钩子拨款+安置随迁夫妻
                 _clock.SetDate(1, 1);
                 _autoSaveTimer = 0f;
                 GameState.I.CurYear = 1;
@@ -205,10 +237,11 @@ public partial class Main : Node3D
                 EventBus.RaiseZonesChanged();
                 EventBus.RaiseStatsChanged();
                 EventBus.RaiseGameLoaded();
+                GetTree().Paused = false;
             },
         };
         AddChild(loading);
-        WorldGenerator.GenerateAsync(GameState.I);
+        WorldGenerator.GenerateAsync(GameState.I, seed);
     }
 
     private void SaveNamed(string saveName)
@@ -217,7 +250,88 @@ public partial class Main : Node3D
             Callable.From(() => _hud.ShowCellInfo(ok ? $"已保存：{saveName}" : $"保存失败：{saveName}（详见日志）")).CallDeferred());
     }
 
-    private bool LoadSlot(string slot) => SaveService.Load(_clock, slot);
+    /// <summary>异步读档：挂加载面板（自定义完成源），后台线程读 LMDB；
+    /// 完成回调（主线程）应用存档并装配世界；失败按来源提示——菜单发起留在读档页（树保持暂停），
+    /// F9 快速读档仅 HUD 提示并恢复游戏。</summary>
+    private void LoadSlotAsync(string slot)
+    {
+        _loadDone = false;
+        _loadResult = null;
+        GetTree().Paused = true;
+        var loading = new LoadingScreen("读档中", () => _loadDone, () => "复原山河", () => 0.5f)
+        {
+            OnFinished = () =>
+            {
+                if (_loadResult == null)
+                {
+                    // 读档失败：菜单发起 → 留在读档页提示；F9 → 仅 HUD 提示并恢复游戏
+                    if (_menu.Visible)
+                        _menu.NotifyLoadFailed("读取失败：存档不完整或版本不符");
+                    else
+                    {
+                        _hud.ShowCellInfo("读档失败（详见日志）");
+                        GetTree().Paused = false;
+                    }
+                    return;
+                }
+                var (gs, meta) = _loadResult.Value;
+                _loadResult = null;
+                GameState.I = gs; // 先替换世界数据：主菜单读档时 _clock 尚不存在，EnterWorld 会新建
+                EnterWorld();     // 装配渲染/系统/时钟（_inWorld 守卫：F9 游戏中读档不二次装配）
+                FocusEnterView(); // 读档视角定位：王爷府（缺失时兜底地图中心）
+                _clock.SetDate(meta.Year, meta.Month, meta.Day, meta.Hour);
+                _autoSaveTimer = 0f;
+
+                EventBus.RaiseMapChanged();
+                EventBus.RaiseZonesChanged();
+                EventBus.RaiseStatsChanged();
+                EventBus.RaiseGameLoaded();
+                _menu.MarkInGame();
+                _menu.Resume();
+                _hud.ShowCellInfo("已读档");
+            },
+        };
+        AddChild(loading);
+        SaveService.LoadAsync(slot, _defs, (gs, meta) =>
+            Callable.From(() => { _loadResult = gs != null ? (gs, meta) : null; _loadDone = true; }).CallDeferred());
+    }
+
+    /// <summary>进入世界后的进场落点（批次八十二）：读档与新建同一套进场动画（俯冲节奏完全一致），
+    /// 仅落点不同——读档重放动画落王爷府（缺失时兜底地图中心）；新地图不调用，由相机默认落点（中心）自然完成。</summary>
+    private void FocusEnterView()
+    {
+        if (_cameraRig == null)
+            return;
+        var mansion = FindMansion();
+        _cameraRig.RestartIntro(mansion != null ? MansionCenter(mansion) : Vector3.Zero); // 无王府（旧档/移除定义）兜底中心
+    }
+
+    /// <summary>查全局唯一王爷府实例（读档定位用）。</summary>
+    private static BuildingInstance FindMansion()
+    {
+        foreach (var b in GameState.I.Buildings.Values)
+            if (b.Def.Id == PrinceMansionConfig.DefId)
+                return b;
+        return null;
+    }
+
+    /// <summary>王爷府占地中心（世界坐标，镜头落点；与 InspectPanel.BuildingCenter 同口径）。</summary>
+    private static Vector3 MansionCenter(BuildingInstance b) =>
+        MapGrid.CellToWorld(b.Origin)
+        + new Vector3(b.Def.SizeX * MapGrid.CellSize / 2f, 0f, b.Def.SizeY * MapGrid.CellSize / 2f);
+
+    /// <summary>开局进入王爷府选位放置模式（批次八十一：王爷府由玩家手动首建，不再自动落成）：
+    /// 预览跟随鼠标，点击地图即落成；建成钩子 OnBuildingPlaced 自动拨给开基资源并安置随迁夫妻，
+    /// 落成后 TryPlaceBuilding 自动退出建造模式，首建门槛随之解锁一切营造。
+    /// 读档不调用（旧档王爷府已建，PrinceMansionBuilt 自然跳过；mod 移除定义同样跳过）。</summary>
+    private void StartFirstMansionPlacement()
+    {
+        var gs = GameState.I;
+        if (gs.PrinceMansionBuilt || !gs.Defs.TryGetValue(PrinceMansionConfig.DefId, out var def))
+            return;
+        _build.SetBuildingMode(def);
+        _hud.ShowCellInfo("请点击地图落成王爷府——落成后解锁道路/桥梁/坊区与一切营造");
+    }
 
     private void ReturnToTitle()
     {
@@ -235,19 +349,18 @@ public partial class Main : Node3D
 
     private void LoadGame()
     {
-        if (SaveService.Load(_clock, SaveService.QuickSlot))
-        {
-            _menu.MarkInGame();
-            _hud.ShowCellInfo("已读档 (F9)");
-        }
-        else
+        if (!SaveService.SaveExists(SaveService.QuickSlot))
         {
             _hud.ShowCellInfo("没有快速存档");
+            return;
         }
+        LoadSlotAsync(SaveService.QuickSlot);
     }
 
     public override void _UnhandledKeyInput(InputEvent e)
     {
+        if (_hud == null)
+            return; // 标题菜单阶段 F5/F9 无副作用
         if (e is not InputEventKey key || !key.Pressed || key.Echo)
             return;
 
@@ -260,14 +373,14 @@ public partial class Main : Node3D
 
     private void SetupEnvironment()
     {
-        var sun = new DirectionalLight3D
+        _sun = new DirectionalLight3D
         {
             RotationDegrees = new Vector3(-55f, -35f, 0f),
             ShadowEnabled = true,
             LightColor = new Color(1f, 0.96f, 0.88f), // 微暖阳光，去冷白感
-            LightEnergy = 0.95f,
+            LightEnergy = WorldConfig.DaySunEnergy,
         };
-        AddChild(sun);
+        AddChild(_sun);
 
         var env = new Godot.Environment
         {

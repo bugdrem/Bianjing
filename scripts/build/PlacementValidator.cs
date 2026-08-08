@@ -17,7 +17,10 @@ public static class PlacementValidator
         if (cell.HasWater)
             return !cell.HasBridge && (GameSettings.InfiniteMoney || gs.Money >= GameState.BridgeCost);
         if (!cell.IsEmpty)
-            return false;
+            // 高级覆盖低级（批次八十）：已有更低等级路面可升级重铺（主→辅/小、辅→小）；建筑/桥面/同级不覆盖
+            return cell.HasRoad && !cell.HasBridge
+                && GameState.RoadRank(kind) > GameState.RoadRank(cell.RoadKind)
+                && (GameSettings.InfiniteMoney || gs.Money >= GameState.RoadCostOf(kind));
         if (!SlopeWalkable(gs, c)) // 陡壁不可铺路（坡度≤上限才能修路供村民翻山）
             return false;
         return GameSettings.InfiniteMoney || gs.Money >= GameState.RoadCostOf(kind);
@@ -85,7 +88,7 @@ public static class PlacementValidator
 
         if (isMansion)
         {
-            // 王爷府免临路（首建时全图无路可依，自带小路环），仅验钱
+            // 王爷府免临路（首建时全图无路可依，自带小路环），仅验钱；朝廷机构朝廷拨款不验玩家钱
             if (checkCost && !GameSettings.InfiniteMoney && def.Category == "official" && gs.Money < def.Cost)
                 return false;
             return true;
@@ -94,6 +97,7 @@ public static class PlacementValidator
         if (gs.Map.FindAdjacentRoad(origin, def.SizeX, def.SizeY) == null)
             return false;
 
+        // 朝廷机构（court）朝廷拨款营造，不校验玩家官库余额（批次七十七）
         if (checkCost && !GameSettings.InfiniteMoney && def.Category == "official" && gs.Money < def.Cost)
             return false;
 

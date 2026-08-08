@@ -34,6 +34,7 @@ public partial class Hud : CanvasLayer
         _finance = new FinancePanel();
         _tech = new TechPanel();
         _inspect = new InspectPanel();
+        _inspect.Build = _build; // 批次七十：注入建造控制器（面板定位镜头用）
         var news = new NewsPanel(); // 公告栏：列表右下角弹出，开关按钮交给底部操作栏摆在最右
         AddChild(new TopBar(_clock, _onSave, _onLoad,
             () => OpenExclusive(_policy, _policy.Toggle),

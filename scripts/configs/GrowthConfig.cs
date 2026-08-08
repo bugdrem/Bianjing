@@ -3,9 +3,9 @@ using System;
 namespace Bianjing;
 
 /// <summary>
-/// 坊区生长配置：村民自建住宅的选址打分/地价、升级与转业分布、扩建与布门
+/// 坊区生长配置：村民自建住宅的选址打分/地价、升级、扩建与布门
 /// （业务归属：ZoneGrowthSystem 全流程、GameState 小路环与布门）。
-/// 转业模型：住宅升级掷中时按临路档位（主路/辅路/仅小路）取一组去向分布，余量 = 维持住宅照常升级。
+/// 创业模型：住宅转商铺/工坊的条件与门槛见 EconomyConfig 创业常量段（技能+家庭资金+市场缺口三条件）。
 /// </summary>
 public static class GrowthConfig
 {
@@ -17,10 +17,11 @@ public static class GrowthConfig
     /// <summary>选址扫描半径（米）：占地外扩此距内找偏好要素（主/辅路、河道、邻居）。</summary>
     public const int SiteScanDist = 4;
 
-    /// <summary>选址分项：主路 / 辅路 / 河道各计一次，可叠加；邻居改按密度计分（见下）。</summary>
+    /// <summary>选址分项：主路 / 辅路 / 河道各计一次，可叠加；邻居改按密度计分（见下）。
+    /// 批次六十八：河流降权（1.5→0.5）——河道只是基础加分项，村民建房优先贴主路辅路。</summary>
     public const double SiteMainRoadScore = 3;
     public const double SiteSideRoadScore = 2;
-    public const double SiteRiverScore = 1.5;
+    public const double SiteRiverScore = 0.5;
 
     /// <summary>邻居密度计分：扫描范围内每栋建筑（按实例去重）加此分，计分栋数封顶——
     /// 3 栋即满 3.6 分与主路同档，使民居明显倾向贴着已有建筑成片聚居（可脱离主辅路向外扩片）。</summary>
@@ -40,20 +41,20 @@ public static class GrowthConfig
     public static double SiteWeightOf(double score) =>
         Math.Pow(Math.Max(0.1, score), SitePickPower);
 
-    // ---- 地价（需求 §4.1 四级：资源点近旁 4,000 / 普通 5,000 / 临街 7,500 / 城中心 12,500 文；
-    // 原值减半以提速房屋生成，寄居者更快攒够自建）----
+    // ---- 地价（需求 §4.1 四级：资源点近旁 2,000 / 普通 2,500 / 临街 3,750 / 城中心 6,250 文；
+    // 批次七十：在上一轮减半基础上再减半，寄居者更快攒够自建）----
 
     /// <summary>资源点近旁地价（文）：近树/近水的宅基地最贱，鼓励定居者近资源谋生。</summary>
-    public const long LandPriceResource = 4_000;
+    public const long LandPriceResource = 2_000;
 
     /// <summary>普通宅基地地价（文）。</summary>
-    public const long LandPricePlain = 5_000;
+    public const long LandPricePlain = 2_500;
 
     /// <summary>临街地价（文）：选址分达“临街档”（贴主/辅路或成片聚居）即按此计价。</summary>
-    public const long LandPriceStreet = 7_500;
+    public const long LandPriceStreet = 3_750;
 
-    /// <summary>城中心地价（文）：选址高分（十字路口/河边且邻居密集）按此计价。</summary>
-    public const long LandPriceCenter = 12_500;
+    /// <summary>城中心地价（文）：选址高分（主路十字路口/密集聚居）按此计价。</summary>
+    public const long LandPriceCenter = 6_250;
 
     /// <summary>选址分分档：≥ LandPriceCenterScore 按城中心计价；≥ LandPriceStreetScore 按临街计价；否则普通地价。</summary>
     public const double LandPriceCenterScore = 6;
@@ -76,8 +77,18 @@ public static class GrowthConfig
     /// <summary>全城自发工商户占比封顶（约十间住宅出两三家）。</summary>
     public const float BizRatioCap = 0.3f;
 
-    /// <summary>住宅扩建边长上限（米）。</summary>
-    public const int ExpandMaxSide = 8;
+    /// <summary>住宅扩建边长上限（米）：初始建房尺寸与拥挤扩建均不超此限（批次六十六 8→6）。</summary>
+    public const int ExpandMaxSide = 6;
+
+    // ---- 初始建房尺寸（批次六十六：默认 2×2，按资产阶梯放大，人口多者再 +1，上限 6×6）----
+
+    /// <summary>初始建房边长按预算（文）阶梯：索引 0 起对应边长 2..6（预算达阈值即起更大宅；
+    /// 目标边长无合法落位时由 TryBuildHouse 逐档退小）。
+    /// 批次七十：门槛随地价再减半（6,000/15,000/35,000/75,000）——平民起步更容易盖大宅。</summary>
+    public static readonly long[] HouseSideByAssets = { 0, 6_000, 15_000, 35_000, 75_000 };
+
+    /// <summary>家庭人口达此数时初始边长再 +1（人多家业大，起手就盖大宅；上限仍受 ExpandMaxSide 约束）。</summary>
+    public const int HouseSidePeopleBonus = 5;
 
     // ---- 吸引力（原 DesirabilityConfig 并入）：道路临街加成，业务归属 DesirabilitySystem；
     // 建筑自身的加成/污染在 buildings.json 的 desirabilityBonus/pollution 字段，数据驱动不在此 ----
@@ -92,28 +103,10 @@ public static class GrowthConfig
     /// <summary>道路吸引力泼溅半径（米，线性衰减）。</summary>
     public const float DesirRoadRadius = 12f;
 
-    // ---- 转业 ----
+    // ---- 创业 ----
 
-    /// <summary>住宅转业（商铺/工坊）的最小占地（平米）：起步 2×2=4，扩建一次（2×3=6）即够格开店。</summary>
-    public const int ConvertMinArea = 6;
-
-    /// <summary>符合条件的路边住宅每日转业概率（独立于升级链；全城工商占比封顶在 TryConvertHouse 内约束）。</summary>
-    public const float ConvertChancePerDay = 0.03f;
-
-    /// <summary>转业临路判定半径（米）：占地边缘到主/辅路在此距内才算“贴近”该级道路。</summary>
-    public const int ConvertRoadDist = 6;
-
-    /// <summary>贴近主路：商铺大概率 / 工坊中概率 /（余 0.2）更高级住宅小概率。</summary>
-    public const double MainShopChance = 0.5;
-    public const double MainWorkshopChance = 0.3;
-
-    /// <summary>贴近辅路（不贴主路）：工坊与住宅（余 0.5）都高，商铺小概率。</summary>
-    public const double SideShopChance = 0.1;
-    public const double SideWorkshopChance = 0.4;
-
-    /// <summary>只靠自带小路：高概率（余 0.85）维持住宅升级，小概率转工坊，不出商铺。</summary>
-    public const double LaneShopChance = 0;
-    public const double LaneWorkshopChance = 0.15;
+    /// <summary>住宅转业（商铺/工坊）的最小占地（平米）：起步 2×2=4 即够格开店（批次八十三放宽）。</summary>
+    public const int ConvertMinArea = 4;
 
     // ---- 布门 ----
 

@@ -19,6 +19,7 @@ public enum SkillType
     Commerce,    // 商业
     Scholarship, // 文化
     Combat,      // 战斗（散勇随身，需求 §2.2）
+    Farming,     // 农艺（耕种区开垦务农，需求 §农田）
 }
 
 /// <summary>就业形态：无业 / 受雇于建筑（含修缮房）/ 进山自谋生路（伐木采猎）。</summary>
@@ -89,6 +90,10 @@ public class Citizen
     public JobKind JobKind = JobKind.None;
     public int WorkplaceId = -1;
 
+    /// <summary>应发工钱（文，批次七十四工钱月结）：下工只记账，月底由 EconomySystem.PayWages 统一发放后清零；
+    /// 随存档（旧档缺省 0），亡故/迁出者未领部分自然作废。</summary>
+    public long WagesOwed;
+
     /// <summary>个人资产（文）。</summary>
     public long Money;
 
@@ -120,7 +125,7 @@ public class Citizen
     public float PosZ;
     public bool PosValid;
 
-    /// <summary>背包（统一仓储接口，典型案例二）：容量一担，后期载具货舱同接口；待搬回家/入仓或去市集交易。</summary>
+    /// <summary>背包（统一仓储接口，典型案例二）：容量一担，后期载具货舱同接口；待搬回家/入仓或上市交易。</summary>
     public Inventory Pack = new() { Capacity = Goods.LoadUnits };
 
     /// <summary>背包首堆货品 id（空背包返回空串，兼容旧逻辑的单货品判断）。</summary>
@@ -172,7 +177,7 @@ public class Citizen
                 "palace" => "仆役",
                 "shop" => "商贩",
                 "workshop" => "工匠",
-                "farm" => "农夫",
+                "farmland" => "农夫",
                 "repairhouse" => "修缮匠",
                 "taxoffice" => "税吏",
                 "mint" => "铸钱匠",

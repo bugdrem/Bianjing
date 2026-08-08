@@ -176,6 +176,10 @@ public partial class AgentManager : Node
             OnCitizenAdded(c);
     }
 
+    /// <summary>居民当前世界坐标（批次七十：面板定位镜头用）；代理不在场（超上限只模拟不上屏）返回 null。</summary>
+    public Vector3? AgentPosition(int citizenId) =>
+        _agents.TryGetValue(citizenId, out var agent) ? agent.Position : null;
+
     /// <summary>随机道路格：直接取自 GameState 增量维护的道路格列表，无需全图扫描重建缓存。</summary>
     public Vector2I? RandomRoadCell(Random rng)
     {

@@ -69,6 +69,9 @@ public class MapSave
     /// <summary>v9：与 RoadCells 一一对应的道路种类（(int)RoadKind）。</summary>
     public List<int> RoadKinds = new();
 
+    /// <summary>v24：与 RoadCells 一一对应的小路归属建筑 Id（非小路格/无主为 -1；批次六十六小路独立个体）。</summary>
+    public List<int> LaneOwnerIds = new();
+
     public List<int> ZoneCells = new();
     public List<int> ZoneTypes = new();
     public List<int> WaterCells = new();
@@ -112,4 +115,10 @@ public class BuildingSave
     /// <summary>v9：实例占地（住宅扩建；0 表示沿用定义占地）。</summary>
     public int SizeX;
     public int SizeY;
+
+    /// <summary>v23：业主居民 Id（田块等自营建筑的田主；-1 无）。</summary>
+    public int OwnerCitizenId = -1;
+
+    /// <summary>v24：升级增补的副营货品（商铺/工坊升级多品种）。</summary>
+    public List<string> ExtraGoods = new();
 }

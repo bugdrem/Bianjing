@@ -5,9 +5,10 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 水系生成（批次五十起）：在侵蚀完成的「成品地形」上循坡走线——只读地势、不改地势
-/// （唯一例外：河床下压，把水格顶点压到本格水面之下），保证地形生成算法的纯粹性。
-/// ① 河源取峰间鞍部（沿草图峰点放大到世界坐标），沿最陡下降走线，撞既有水体即汇流（树状水系）；
+/// 水系生成（批次五十起，批次六十一改走线来源）：河流定线在 128 草图完成（WorldSketch.WalkRivers，
+/// 预览所见），此处把定线 ×8 放大为引导线，在侵蚀完成的「成品地形」上走廊循坡细化——
+/// 只读地势、不改地势（唯一例外：河床下压，把水格顶点压到本格水面之下），保证地形生成算法的纯粹性。
+/// ① 沿引导线循坡细化（前向扇区取最低 + 拉力拉回），撞既有水体即汇流（树状水系），出图缘即河口；
 /// ② 逐格水位 Cell.WaterH：沿程取「平滑地形的运行最小值」、下限 0（以 0 为最低点）——
 ///    水面随地势逐级下降形成流向观感，河岸高差由地形自然涌现（平原浅滩、山区峡谷）；
 /// ③ 湖泊坐落干流低平处：谐波湾汊圈内「地形低于湖面」的格才着水，高地自然留成湖中岛/岬角；
@@ -15,15 +16,14 @@ namespace Bianjing;
 /// </summary>
 public static class RiverGenerator
 {
-    /// <summary>水系总入口：走线 → 刻水/赋水位/流向 → 干流点湖 → 河床下压。peaks 为世界坐标峰点。</summary>
-    public static void BuildWaterSystem(MapGrid map, List<(Vector2 pos, float h)> peaks, Random rng)
+    /// <summary>水系总入口：细化走线 → 刻水/赋水位/流向 → 干流点湖 → 河床下压。sketch 提供草图定线。</summary>
+    public static void BuildWaterSystem(MapGrid map, WorldSketch sketch, Random rng)
     {
-        var sources = PickSources(map, peaks, rng);
-        for (int i = 0; i < sources.Count; i++)
+        for (int i = 0; i < sketch.Rivers.Count; i++)
         {
-            var path = TracePath(map, sources[i]);
-            if (path.Count < 40)
-                continue; // 走线过短（源点即贴水/贴缘）：弃之
+            var path = FollowGuide(map, GuideFromSketch(sketch.Rivers[i]));
+            if (path.Count < WaterConfig.MinRiverPathCells)
+                continue; // 细化后过短（源点即贴水/贴缘）：弃之
             var levels = ComputeLevels(map, path);
             CarveRiver(map, path, levels, isMain: i == 0);
             if (i == 0)
@@ -32,108 +32,72 @@ public static class RiverGenerator
         CarveBed(map);
     }
 
-    // ---- ① 河源与走线 ----
+    // ---- ① 草图定线 → 全图循坡细化 ----
 
-    /// <summary>河源候选：每峰与最近邻峰的中点（鞍部），按该点地形海拔降序，取 RiverCount 条。</summary>
-    private static List<Vector2I> PickSources(MapGrid map, List<(Vector2 pos, float h)> peaks, Random rng)
+    /// <summary>草图路径 → 世界坐标引导线（草图 1 格 = SketchScale 格）。</summary>
+    private static List<Vector2I> GuideFromSketch(List<Vector2I> sketchPath)
     {
-        var candidates = new List<Vector2>();
-        for (int i = 0; i < peaks.Count; i++)
-        {
-            float bestD = float.MaxValue;
-            Vector2 mid = default;
-            for (int j = 0; j < peaks.Count; j++)
-            {
-                if (j == i) continue;
-                float d = peaks[j].pos.DistanceTo(peaks[i].pos);
-                if (d < bestD)
-                {
-                    bestD = d;
-                    mid = (peaks[i].pos + peaks[j].pos) / 2f;
-                }
-            }
-            if (bestD < float.MaxValue && candidates.TrueForAll(s => s.DistanceTo(mid) > 40f))
-                candidates.Add(mid);
-        }
-        candidates.Sort((a, b) =>
-            map.Height.SampleWorld(b.X - MapGrid.Size / 2f, b.Y - MapGrid.Size / 2f)
-            .CompareTo(map.Height.SampleWorld(a.X - MapGrid.Size / 2f, a.Y - MapGrid.Size / 2f))); // 海拔高者先走（成干流）
-
-        int count = Math.Min(candidates.Count,
-            WaterConfig.RiverCountMin + rng.Next(WaterConfig.RiverCountMax - WaterConfig.RiverCountMin + 1));
-        var sources = new List<Vector2I>();
-        for (int i = 0; i < count; i++)
-            sources.Add(new Vector2I(
-                Math.Clamp((int)candidates[i].X, 1, MapGrid.Size - 2),
-                Math.Clamp((int)candidates[i].Y, 1, MapGrid.Size - 2)));
-        return sources;
+        int k = TerrainConfig.SketchScale;
+        var guide = new List<Vector2I>(sketchPath.Count);
+        foreach (var p in sketchPath)
+            guide.Add(new Vector2I(p.X * k, p.Y * k));
+        return guide;
     }
 
-    /// <summary>单条走线（1024² 格中心高上循坡）：8 邻取未访问的最低格；洼地/平地向东南强制滑行
-    /// （维持西北→东南大势，连续强制超限即断）；撞既有水体即汇流终止；出图缘终止。</summary>
-    private static List<Vector2I> TracePath(MapGrid map, Vector2I source)
+    /// <summary>沿引导线走廊循坡细化（1024² 格中心高）：锚点间每步从前向扇区（直行+两斜前）选
+    /// 「高度 + 拉力×到锚点距离」最低的格——大方向由草图定线（预览所见），局部贴合全图地形
+    /// （fBm 细节/侵蚀）；撞既有水体即汇流终止；出图缘终止（引导线末点在图缘，必达河口）。
+    /// 强制滑行无上限：河流终点只可能是图缘或汇流，不再中途断流。</summary>
+    private static List<Vector2I> FollowGuide(MapGrid map, List<Vector2I> guide)
     {
         var path = new List<Vector2I>();
         var visited = new HashSet<int>();
-        int x = source.X, y = source.Y;
-        int forcedRun = 0;
-
-        for (int step = 0; step < MapGrid.Size * 4; step++)
+        var cur = guide[0];
+        for (int gi = 1; gi < guide.Count; gi++)
         {
-            if (x < 1 || y < 1 || x >= MapGrid.Size - 1 || y >= MapGrid.Size - 1)
+            var target = guide[gi];
+            int guard = 0;
+            while ((cur.X != target.X || cur.Y != target.Y) && guard++ < 64)
             {
-                path.Add(new Vector2I(x, y));
-                break; // 出图缘：河口
-            }
-            var cur = new Vector2I(x, y);
-            path.Add(cur);
-            visited.Add(y * MapGrid.Size + x);
-
-            // 汇流检测（离源 32 步后才检，防在源头附近自撞）
-            if (step > 32 && map.CellAt(cur).HasWater)
-                break;
-
-            // 8 邻中选未走过的最低格
-            int bx = 0, by = 0;
-            float bestH = float.MaxValue;
-            for (int oy = -1; oy <= 1; oy++)
-            {
-                for (int ox = -1; ox <= 1; ox++)
+                if (cur.X < 1 || cur.Y < 1 || cur.X >= MapGrid.Size - 1 || cur.Y >= MapGrid.Size - 1)
                 {
-                    if (ox == 0 && oy == 0) continue;
-                    int nx = x + ox, ny = y + oy;
-                    if (nx < 0 || ny < 0 || nx >= MapGrid.Size || ny >= MapGrid.Size
-                        || visited.Contains(ny * MapGrid.Size + nx))
-                        continue;
-                    float h = map.Height.CellCenterH(new Vector2I(nx, ny));
-                    if (h < bestH)
+                    path.Add(cur);
+                    return path; // 出图缘：河口
+                }
+                path.Add(cur);
+                visited.Add(cur.Y * MapGrid.Size + cur.X);
+                if (path.Count > 32 && map.CellAt(cur).HasWater)
+                    return path; // 撞既有水体：汇流终止（树状水系）
+
+                int dx = Math.Sign(target.X - cur.X), dy = Math.Sign(target.Y - cur.Y);
+                int bx = 0, by = 0;
+                float bestScore = float.MaxValue;
+                for (int oy = -1; oy <= 1; oy++)
+                {
+                    for (int ox = -1; ox <= 1; ox++)
                     {
-                        bestH = h;
-                        bx = ox; by = oy;
+                        if ((ox == 0 && oy == 0) || ox * dx + oy * dy <= 0)
+                            continue; // 原地/后退不入候选：前向扇区
+                        int nx = cur.X + ox, ny = cur.Y + oy;
+                        if (nx < 0 || ny < 0 || nx >= MapGrid.Size || ny >= MapGrid.Size
+                            || visited.Contains(ny * MapGrid.Size + nx))
+                            continue;
+                        float score = map.Height.CellCenterH(new Vector2I(nx, ny))
+                            + WaterConfig.GuidePull * (Math.Abs(nx - target.X) + Math.Abs(ny - target.Y));
+                        if (score < bestScore)
+                        {
+                            bestScore = score;
+                            bx = ox; by = oy;
+                        }
                     }
                 }
+                if (bx == 0 && by == 0)
+                    break; // 前向扇区全堵（visited 围困）：放弃本段，段末仍对齐锚点
+                cur = new Vector2I(cur.X + bx, cur.Y + by);
             }
-            float curH = map.Height.CellCenterH(cur);
-            if (bestH >= curH - 0.0001f)
-            {
-                // 洼地/平地：向东南强制滑行（东/东南/南三邻取最低），维持大势；连续强制过久即弃
-                if (++forcedRun > WaterConfig.MaxForcedSteps)
-                    break;
-                bx = 1; by = 1;
-                float hE = map.Height.CellCenterH(new Vector2I(x + 1, y));
-                float hS = map.Height.CellCenterH(new Vector2I(x, y + 1));
-                float hSE = map.Height.CellCenterH(new Vector2I(x + 1, y + 1));
-                if (hE <= hS && hE <= hSE && !visited.Contains(y * MapGrid.Size + x + 1)) { bx = 1; by = 0; }
-                else if (hS <= hSE && !visited.Contains((y + 1) * MapGrid.Size + x)) { bx = 0; by = 1; }
-            }
-            else
-            {
-                forcedRun = 0;
-            }
-            if (bx == 0 && by == 0)
-                break; // 无处可走
-            x += bx; y += by;
+            cur = target; // 段末对齐锚点：细化路径始终贴近预览定线（跳变 ≤ 数格，刻盘重叠掩盖）
         }
+        path.Add(cur);
         return path;
     }
 

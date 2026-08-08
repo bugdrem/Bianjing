@@ -22,11 +22,11 @@ public static class EconomyConfig
     public const long CourtRewardMax = 50_000;
 
     // ===== 朝廷采购 =====
-    /// <summary>朝廷机构（柴炭司等）从工坊批量收购的固定单价倍率：支付价 = 货品基价 × 本倍率（1.0=平价收购）。</summary>
-    public const double CourtProcurementPriceFactor = 1.2;
 
-    /// <summary>朝廷每月采购配额上限（份）。</summary>
-    public const long CourtProcurementQuota = 200;
+    /// <summary>朝廷收购价倍率（批次七十七全场最低价）：朝廷出价低于城内收购价（城内铺面/工坊按基价收），
+    /// 村民富余资源先供城内、卖不完的才卖给朝廷兜底；0.8 = 基价八折。朝廷收购不设配额上限，
+    /// 衙门库容每月清空（朝廷漕运拉走，见 GoodsSystem.TickMonth），只受月内库容自然限制。</summary>
+    public const double CourtProcurementPriceFactor = 0.8;
 
     // ===== 货担与价差 =====
 
@@ -41,8 +41,18 @@ public static class EconomyConfig
 
     // ===== 消耗 =====
 
-    /// <summary>人均日耗官粮（份，官库口粮，区别于家中口粮）。</summary>
-    public const double OfficialFoodPerCapita = 0.2;
+    /// <summary>人均日耗官粮（份，官库赈济储备，区别于家中口粮；批次七十八：0.2→0.05——
+    /// 官粮不再是人人每天的口粮，而是官府赈济/公务用度，补给靠朝廷粮饷 + 农田田赋）。</summary>
+    public const double OfficialFoodPerCapita = 0.05;
+
+    /// <summary>朝廷粮饷（批次七十八）：朝廷按人口每月拨入官仓的官粮（份/人/月，凭空生成）——
+    /// 官粮从此有稳定补给，不再只靠开局存量耗尽即饥荒；农田田赋为额外增收。</summary>
+    public const double CourtFoodAmmoPerCapitaMonth = 3;
+
+    /// <summary>田赋（批次七十三/八十五）：农田 grain 收成按此比例入官粮，余下散落田面归村民——
+    /// 官粮此前只有开局存量、无任何产出（buildings.json 无 foodOutput 定义），耗尽即永久饥荒、全民早亡；
+    /// 批次八十五 0.2→0.1：农田改发固定工资后，种田家庭现金收入大头是工钱而非卖粮，田赋减半补农户收成。</summary>
+    public const double GrainTaxShare = 0.1;
 
     /// <summary>每人每日口粮 / 柴薪 / 饮水消耗（份，家中库存）。</summary>
     public const double FoodPerDay = 0.1;
@@ -73,13 +83,13 @@ public static class EconomyConfig
     /// <summary>地面物资堆单堆容量（份），满堆后多余收成烂在地里。</summary>
     public const double PileCapacity = 40;
 
-    // ===== 商铺/市集 =====
+    // ===== 商铺/工坊 =====
 
-    /// <summary>市集每货备货线（份）：市集存量低于此线即构成收购需求（CitizenAgent 供货派单）。</summary>
-    public const double MarketStockLine = 40;
-
-    /// <summary>采买判定半径（米）：此范围内有备货的市集/铺面就去买，否则自主采集。</summary>
+    /// <summary>采买判定半径（米）：此范围内有备货的铺面/官营产业就去买，否则自主采集。</summary>
     public const int BuySearchRadius = 160;
+
+    /// <summary>商铺/工坊升级后的副营种类上限（批次六十七：基本专营，升级才增补同大类，防垄断）。</summary>
+    public const int MaxSpecialtiesPerShop = 3;
 
     // ===== 库存联动定价（需求 §6.3）=====
     /// <summary>库存 / 容量各档阈值与对应的价格浮动倍率（售出价 = 基价 × 倍率）。</summary>
@@ -103,6 +113,26 @@ public static class EconomyConfig
     public const float SkillExpPerDay = 2f;
     public const float SkillExpSkilled = 200f;
     public const float SkillExpExpert = 600f;
+
+    // ===== 自主创业（批次六十四：技能+家庭资金+市场缺口三条件，缺货越狠门槛越低）=====
+
+    /// <summary>创业基础日概率（无缺口时也保留小额创业可能）。</summary>
+    public const double StartupChancePerDay = 0.01;
+
+    /// <summary>缺口加成系数：缺口每多一分（可支撑天数逼近 0），日概率额外加此值×缺口度。</summary>
+    public const double StartupScarcityBonus = 0.02;
+
+    /// <summary>创业技能经验基础门槛（文/经验点，随缺口打折，下限 = 基础×（1-MaxDiscount））。</summary>
+    public const double StartupSkillExpReq = 120;
+
+    /// <summary>创业家庭公产基础门槛（文，随缺口打折）。</summary>
+    public const double StartupAssetsReq = 8_000;
+
+    /// <summary>缺口折扣上限：可支撑天数 0（最缺）时门槛最低打此折扣（0.5 = 五折）。</summary>
+    public const double StartupMaxDiscount = 0.5;
+
+    /// <summary>全城专营同货的铺面数上限（防垄断撞车；选品/转业均受此限）。</summary>
+    public const int ShopSameGoodsCap = 3;
 
     // ===== 修缮（原 MaintenanceConfig 并入）：建筑老化与两条修缮线，各量按月值逐日 1/DaysPerMonth 结算 =====
 

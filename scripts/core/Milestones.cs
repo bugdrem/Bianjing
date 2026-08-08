@@ -65,7 +65,8 @@ public static class Milestones
     public static int MaxHouseLevel(GameState gs) => Of(gs.MilestoneLevel).MaxHouseLevel;
 
     /// <summary>居民分级需求：达到指定里程碑后新增的日常消耗（依次尝试候选货品，家中无存则上市购买）。
-    /// 州城起的成品需求（酒/腌货、木器/铁器）为加工链补上消费端出口。</summary>
+    /// 集镇起的烧饼需求为工坊打开早期销路，郡城起的薪炭、州城起的副食、府城起的酒馔、京城起的器用
+    /// 逐级为加工链补上消费端出口。</summary>
     public class TierNeed
     {
         public int MilestoneRequired;
@@ -84,7 +85,7 @@ public static class Milestones
     /// <summary>分级需求表（数据驱动：后续增改分级直接改表）。</summary>
     public static readonly TierNeed[] TierNeeds =
     {
-        new() { MilestoneRequired = 3, Label = "烧饼", GoodsIds = new[] { Goods.Flatbread },
+        new() { MilestoneRequired = 2, Label = "烧饼", GoodsIds = new[] { Goods.Flatbread }, // 批次八十三：集镇起即需烧饼，早期制造出市场缺口驱动创业
                 PerDay = 0.02, FunPenalty = 0.4f },
         new() { MilestoneRequired = 4, Label = "薪炭", GoodsIds = new[] { Goods.Charcoal },
                 PerDay = 0.015, FunPenalty = 0.4f },

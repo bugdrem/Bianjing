@@ -43,20 +43,20 @@
 │  GridRenderer  AnimalRenderer  PileRenderer  BuildingStockRenderer│
 │  AgentManager/CitizenAgent  RtsCameraRig  BuildController  UI/*   │
 └───────────────▲───────────────────────────────┬─────────────────┘
-                │ 订阅 EventBus 事件重建/刷新     │ 读写
+				│ 订阅 EventBus 事件重建/刷新     │ 读写
 ┌───────────────┴───────────────────────────────▼─────────────────┐
 │  模拟系统层（每日/每月 Tick，无长期状态，操作 GameState）          │
 │  Lifecycle Job Tax Economy Maintenance Goods Crafting            │
 │  PlantGrowth Wildlife ZoneGrowth Desirability Milestone Tech     │
 └───────────────────────────────▲─────────────────────────────────┘
-                                 │ 读写唯一真源
+								 │ 读写唯一真源
 ┌────────────────────────────────┴────────────────────────────────┐
 │  数据模型层（可 JSON 序列化的纯数据 / 唯一运行时真源）             │
 │  GameState（单例） MapGrid+HeightField+Cell  Citizen Family      │
 │  BuildingInstance PlantObj AnimalObj ItemPileObj Ledger TaxPolicy │
 └───────────────────────────────────────────────────────────────┘
-              ▲ 只读参数                       ▲ 静态定义
-        configs/*（常量与公式）        data/buildings.json（数据驱动 + mod）
+			  ▲ 只读参数                       ▲ 静态定义
+		configs/*（常量与公式）        data/buildings.json（数据驱动 + mod）
 ```
 
 **核心设计原则：**

@@ -1,5 +1,4 @@
 using System;
-using System.Collections.Generic;
 using System.Threading.Tasks;
 using Godot;
 
@@ -11,7 +10,8 @@ namespace Bianjing;
 /// ② 双线性上采样映射 1025² 顶点高度场 + 高频 fBm 细节（坡度削减，防山脚毛刺）→
 /// ③ 全图 droplet 水力侵蚀（冲沟/冲积扇纹理）→
 /// ④ 热侵蚀塌方松弛（磨平侵蚀残留的坡脚毛刺，保留冲沟纹理）→
-/// ⑤ 水系落地：在成品地形上循坡走线（逐格水位、下限 0、湖岛自然涌现）+ 河床下压 →
+/// ⑤ 水系落地：草图定线（预览所见）放大为引导线，在成品地形上走廊循坡细化
+///    （逐格水位、下限 0、湖岛自然涌现）+ 河床下压 →
 /// ⑥ 树木/野物播种照旧。
 /// 「主动限制」全部集中在收尾单步（ClampHeights 上下限），不侵入基础地形算法。
 /// 全程纯数据操作（Map/Plants/Animals），可在后台线程运行；
@@ -30,8 +30,9 @@ public static class WorldGenerator
     /// <summary>生成是否完成（LoadingScreen 轮询到 true 即回调收尾）。</summary>
     public static volatile bool Done;
 
-    /// <summary>后台异步生成：Task.Run 包一层，异常兜底记日志后仍置 Done（避免加载画面卡死）。</summary>
-    public static void GenerateAsync(GameState gs)
+    /// <summary>后台异步生成：Task.Run 包一层，异常兜底记日志后仍置 Done（避免加载画面卡死）。
+    /// 种子由调用方提供（新游戏地图预览页掷定）：同种子从头重跑草图 → 与预览完全一致。</summary>
+    public static void GenerateAsync(GameState gs, int seed)
     {
         Done = false;
         Progress = 0f;
@@ -39,7 +40,7 @@ public static class WorldGenerator
         {
             try
             {
-                Generate(gs, new Random());
+                Generate(gs, new Random(seed));
             }
             catch (Exception e)
             {
@@ -70,11 +71,8 @@ public static class WorldGenerator
         ClampHeights(gs.Map.Height.Raw);
 
         Report("引水成河", 0.7f);
-        // 峰点草图坐标 ×8 放大到世界格坐标，供取河源（峰间鞍部）
-        var peaks = new List<(Vector2 pos, float h)>();
-        foreach (var (pos, h) in sketch.Peaks)
-            peaks.Add((pos * TerrainConfig.SketchScale, h));
-        RiverGenerator.BuildWaterSystem(gs.Map, peaks, rng);
+        // 河流定线已在草图阶段完成（预览所见）：放大为引导线后循坡细化刻水
+        RiverGenerator.BuildWaterSystem(gs.Map, sketch, rng);
 
         Report("播种林木", 0.85f);
         TreeGenerator.Scatter(gs, rng);

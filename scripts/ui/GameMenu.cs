@@ -7,13 +7,13 @@ namespace Bianjing;
 /// <summary>
 /// 游戏菜单：启动进入主菜单（新游戏/读档/设置/退出），游戏中 ESC 呼出暂停菜单。
 /// 打开时暂停整棵场景树（本节点 ProcessMode=Always 不受影响），关闭恢复。
-/// 子页面：新游戏命名 / 存档命名与覆盖 / 读档列表 / 设置（含自动保存间隔）/ 退出确认。
+/// 子页面：新游戏命名+地图预览（随机/确认）/ 存档命名与覆盖 / 读档列表（异步）/ 设置（含自动保存间隔）/ 退出确认。
 /// </summary>
 public partial class GameMenu : CanvasLayer
 {
-    private readonly Action<string> _onNewGame;
+    private readonly Action<string, int> _onNewGame;
     private readonly Action<string> _onSaveNamed;
-    private readonly Func<string, bool> _onLoadSlot;
+    private readonly Action<string> _onLoadSlot;
     private readonly Action _onReturnTitle;
 
     private VBoxContainer _titleBox;
@@ -27,6 +27,11 @@ public partial class GameMenu : CanvasLayer
     private VBoxContainer _backTarget; // 设置/读档页的返回去向
 
     private LineEdit _cityNameEdit;
+    /// <summary>128×128 地图俯视预览：同种子生成，确认建城即此地形（所见即所得）。</summary>
+    private TextureRect _mapPreview;
+    private Label _seedLabel;
+    /// <summary>当前预览种子：确认建城后以此种子生成真实地图，与预览完全一致。</summary>
+    private int _seed;
     private LineEdit _saveNameEdit;
     private ItemList _saveList;
     private ItemList _loadList;
@@ -39,8 +44,8 @@ public partial class GameMenu : CanvasLayer
     private bool _inGame;
     private string _lastSaveName = "";
 
-    public GameMenu(Action<string> onNewGame, Action<string> onSaveNamed,
-        Func<string, bool> onLoadSlot, Action onReturnTitle)
+    public GameMenu(Action<string, int> onNewGame, Action<string> onSaveNamed,
+        Action<string> onLoadSlot, Action onReturnTitle)
     {
         _onNewGame = onNewGame;
         _onSaveNamed = onSaveNamed;
@@ -124,25 +129,95 @@ public partial class GameMenu : CanvasLayer
     {
         _newGameBox = NewBox();
 
-        var title = new Label { Text = "为你的城池命名", HorizontalAlignment = HorizontalAlignment.Center };
+        var title = new Label { Text = "勾画山河，为城池命名", HorizontalAlignment = HorizontalAlignment.Center };
         title.AddThemeFontSizeOverride("font_size", 24);
         _newGameBox.AddChild(title);
 
         _cityNameEdit = new LineEdit { Text = "汴京", PlaceholderText = "城市名", MaxLength = 12 };
         _newGameBox.AddChild(_cityNameEdit);
 
-        AddButton(_newGameBox, "开始建城", () =>
+        // 128×128 地图俯视预览：与真实地图同种子生成，确认建城即此地形（所见即所得）
+        _mapPreview = new TextureRect
         {
-            string name = _cityNameEdit.Text.Trim();
-            if (name.Length == 0)
-                name = "汴京";
-            _inGame = true;
-            _lastSaveName = name;
-            _onNewGame?.Invoke(name);
-            Resume();
-        });
+            CustomMinimumSize = new Vector2(384, 384),
+            StretchMode = TextureRect.StretchModeEnum.Scale,
+            ExpandMode = TextureRect.ExpandModeEnum.IgnoreSize,
+            TextureFilter = CanvasItem.TextureFilterEnum.Nearest, // 像素放大 3 倍防糊
+        };
+        _newGameBox.AddChild(_mapPreview);
+
+        _seedLabel = new Label { Text = "", HorizontalAlignment = HorizontalAlignment.Center };
+        _seedLabel.AddThemeFontSizeOverride("font_size", 12);
+        _seedLabel.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f));
+        _newGameBox.AddChild(_seedLabel);
+
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 12);
+        AddButton(row, "随机", RollMap);
+        AddButton(row, "确认建城", ConfirmNewGame);
+        _newGameBox.AddChild(row);
+
         AddButton(_newGameBox, "返回", () => ShowBox(_titleBox));
+
+        RollMap(); // 进入页面即掷定首幅预览
         return _newGameBox;
+    }
+
+    /// <summary>重掷种子并重绘 128×128 地形预览：同种子从头重跑草图 → 与确认后真实地图完全一致；
+    /// 逐像素高度着色（草图无水面，纯高度色阶）。</summary>
+    private void RollMap()
+    {
+        _seed = Random.Shared.Next();
+        _seedLabel.Text = $"种子 #{_seed}";
+        var sketch = WorldSketch.Build(new Random(_seed));
+        const int S = TerrainConfig.SketchSize;
+        var img = Image.CreateEmpty(S, S, false, Image.Format.Rgb8);
+        for (int y = 0; y < S; y++)
+        {
+            for (int x = 0; x < S; x++)
+                img.SetPixel(x, y, HeightColor(sketch.H[y * S + x]));
+        }
+        DrawRivers(img, sketch, S); // 叠加河流定线：预览所见即最终河的位置
+        _mapPreview.Texture = ImageTexture.CreateFromImage(img);
+    }
+
+    /// <summary>在预览图上叠加河流定线（浅蓝 1px）：草图路径 8 邻连续，逐点着色即可。</summary>
+    private static void DrawRivers(Image img, WorldSketch sketch, int s)
+    {
+        var river = WaterConfig.PreviewRiverColor;
+        foreach (var path in sketch.Rivers)
+        {
+            foreach (var p in path)
+            {
+                if (p.X < 0 || p.Y < 0 || p.X >= s || p.Y >= s)
+                    continue;
+                img.SetPixel(p.X, p.Y, river);
+            }
+        }
+    }
+
+    /// <summary>预览高度着色（与成品地形视觉一致的色阶；草图无水面，纯高度插值）：
+    /// h≤0 深青绿 → 0 翠绿 → 12m 黄绿 → 24m 黄褐 → 40m 灰褐 → ≥64m 灰白。</summary>
+    private static Color HeightColor(float h)
+    {
+        if (h <= 0f) return new Color(0.10f, 0.34f, 0.26f);
+        if (h < 12f) return new Color(0.16f, 0.48f, 0.22f).Lerp(new Color(0.42f, 0.55f, 0.20f), h / 12f);
+        if (h < 24f) return new Color(0.42f, 0.55f, 0.20f).Lerp(new Color(0.58f, 0.47f, 0.24f), (h - 12f) / 12f);
+        if (h < 40f) return new Color(0.58f, 0.47f, 0.24f).Lerp(new Color(0.52f, 0.50f, 0.46f), (h - 24f) / 16f);
+        if (h < 64f) return new Color(0.52f, 0.50f, 0.46f).Lerp(new Color(0.78f, 0.78f, 0.74f), (h - 40f) / 24f);
+        return new Color(0.78f, 0.78f, 0.74f);
+    }
+
+    /// <summary>确认建城：校验城名后携种子回调 Main（同种子生成真实地图），随即关菜单恢复游戏。</summary>
+    private void ConfirmNewGame()
+    {
+        string name = _cityNameEdit.Text.Trim();
+        if (name.Length == 0)
+            name = "汴京";
+        _inGame = true;
+        _lastSaveName = name;
+        Resume(); // 先关菜单（NewGame 会立即重新暂停并挂加载面板）
+        _onNewGame?.Invoke(name, _seed);
     }
 
     private VBoxContainer BuildSaveBox()
@@ -203,16 +278,9 @@ public partial class GameMenu : CanvasLayer
                 return;
             }
             var info = _loadInfos[selected[0]];
-            if (_onLoadSlot != null && _onLoadSlot(info.Slot))
-            {
-                _inGame = true;
-                _lastSaveName = info.SaveName;
-                Resume();
-            }
-            else
-            {
-                _loadHint.Text = "读取失败：存档不完整";
-            }
+            _lastSaveName = info.SaveName;
+            // 异步读档：Main 挂加载面板后台读取，完成回调再 MarkInGame/Resume（失败 NotifyLoadFailed）
+            _onLoadSlot?.Invoke(info.Slot);
         });
         AddButton(_loadBox, "删除所选", () =>
         {
@@ -356,7 +424,7 @@ public partial class GameMenu : CanvasLayer
         return box;
     }
 
-    private static Button AddButton(VBoxContainer box, string text, Action onPressed)
+    private static Button AddButton(BoxContainer box, string text, Action onPressed)
     {
         var btn = new Button { Text = text };
         btn.Pressed += () => onPressed();
@@ -418,6 +486,13 @@ public partial class GameMenu : CanvasLayer
     /// <summary>读档成功后由外部标记已进入游戏（如 F9 快速读档）。</summary>
     public void MarkInGame() => _inGame = true;
 
+    /// <summary>读档失败提示（异步读档完成后由 Main 调用）：留在读档页并显示原因。</summary>
+    public void NotifyLoadFailed(string msg)
+    {
+        _loadHint.Text = msg;
+        ShowBox(_loadBox);
+    }
+
     private void Open()
     {
         Visible = true;
@@ -425,10 +500,11 @@ public partial class GameMenu : CanvasLayer
         ShowBox(_inGame ? _pauseBox : _titleBox);
     }
 
-    private void Resume()
+    /// <summary>关闭菜单恢复游戏（异步读档完成后由 Main 调用；主菜单模式下无游戏可回）。</summary>
+    public void Resume()
     {
         if (!_inGame)
-            return; // 主菜单模式下无游戏可回
+            return;
         Visible = false;
         GetTree().Paused = false;
     }

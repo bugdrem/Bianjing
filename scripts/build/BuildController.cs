@@ -1,3 +1,4 @@
+using System.Collections.Generic;
 using Godot;
 
 namespace Bianjing;
@@ -11,6 +12,24 @@ public enum BuildMode
     Zone,
     Tree,
     Demolish,
+}
+
+/// <summary>分区工具（批次七十一）：拖拽拉矩形（默认）、笔刷沿路径涂抹、油漆桶洪水填充；
+/// 与分区操作（规划/删除）正交组合，由分区菜单按钮切换，暂未绑定快捷键。</summary>
+public enum ZoneTool
+{
+    Brush,
+    Rect,
+    Bucket,
+}
+
+/// <summary>道路绘制工具（批次八十）：直线（默认）/贝塞尔曲线/手绘涂抹，主路辅路桥梁通用；
+/// 直线与曲线为“按下定起点、拖动中预览、松开一次性落笔”，手绘为拖动实时涂抹。</summary>
+public enum RoadTool
+{
+    Straight,
+    Bezier,
+    Freehand,
 }
 
 /// <summary>建造交互控制器：鼠标网格预览、放置/拖动铺路/拖框划坊/拆除。坊区划定（ZoneController 职责）合并于此。</summary>
@@ -28,10 +47,20 @@ public partial class BuildController : Node
     /// <summary>居民代理管理器（点选拾取 NPC 用）。</summary>
     public AgentManager Agents { get; set; }
 
+    /// <summary>相机云台（供点选面板定位镜头用）。</summary>
+    public RtsCameraRig Rig => _rig;
+
     public BuildMode Mode { get; private set; } = BuildMode.None;
 
     private BuildingDef _def;
-    private ZoneType _zone;
+    private ZoneType _zone = ZoneType.Buildable; // 默认建筑区：进分区模式未选类型时不致误清规划
+    public ZoneType Zone => _zone; // 分区类型（分区菜单按钮组初始态同步用）
+
+    /// <summary>分区工具与操作（批次七十一）：油漆桶/笔刷/拖拽 × 规划/删除，按钮切换。</summary>
+    public ZoneTool ZoneTool { get; private set; } = ZoneTool.Rect;
+    public bool ZoneErase { get; private set; }
+    private Vector2I? _lastBrushCell; // 笔刷上一盖戳格（沿线插值防跳格）
+    private bool _zoneDirty; // 笔刷/拖框的分区变更累积标记：每帧至多广播一次重建
     private bool _dragging;
     private Vector2I _dragStart;
     private Vector2I _hover = new(-1, -1);
@@ -39,6 +68,16 @@ public partial class BuildController : Node
 
     // 道路/桥方形画笔拖动：上一盖戳中心格（沿线插值防跳格）
     private Vector2I? _lastRoadCell;
+
+    /// <summary>道路绘制工具（批次八十）：默认直线；主路/辅路/桥梁共用一套工具。</summary>
+    public RoadTool RoadTool { get; private set; } = RoadTool.Straight;
+
+    /// <summary>直线/曲线：按下时的起点格（拖动中预览、松开一次性落笔）。</summary>
+    private Vector2I? _roadStart;
+
+    // 直线/曲线路径预览：把落笔格序列画成一排贴地半透明方块（不实际铺路）
+    private MeshInstance3D _pathPreview;
+    private ImmediateMesh _pathMesh;
 
     private MeshInstance3D _preview;
     private StandardMaterial3D _previewMat;
@@ -65,6 +104,22 @@ public partial class BuildController : Node
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
         GetParent().CallDeferred(Node.MethodName.AddChild, _preview);
+
+        // 路径预览（批次八十）：直线/曲线拖动中整条线半透明显示，材质与单格预览同款
+        _pathMesh = new ImmediateMesh();
+        _pathPreview = new MeshInstance3D
+        {
+            Mesh = _pathMesh,
+            MaterialOverride = new StandardMaterial3D
+            {
+                Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+                AlbedoColor = ValidColor,
+            },
+            Visible = false,
+            CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
+        };
+        GetParent().CallDeferred(Node.MethodName.AddChild, _pathPreview);
     }
 
     // ---- 模式切换（由 BuildMenu 调用）----
@@ -94,17 +149,59 @@ public partial class BuildController : Node
         SwitchMode(BuildMode.Zone);
     }
 
+    /// <summary>切换分区工具（拖拽/笔刷/油漆桶）：未在分区模式则自动进入。</summary>
+    public void SetZoneTool(ZoneTool tool)
+    {
+        ZoneTool = tool;
+        if (Mode != BuildMode.Zone)
+            SwitchMode(BuildMode.Zone);
+    }
+
+    /// <summary>切换道路绘制工具（直线/曲线/手绘）：未在铺路模式则自动进入（沿用当前道路类型）。</summary>
+    public void SetRoadTool(RoadTool tool)
+    {
+        RoadTool = tool;
+        if (Mode != BuildMode.Road && Mode != BuildMode.Bridge)
+            SwitchMode(BuildMode.Road);
+    }
+
+    /// <summary>切换分区操作：规划（落当前类型）/ 删除（清点击处一切规划，与类型无关）。</summary>
+    public void SetZoneErase(bool erase)
+    {
+        ZoneErase = erase;
+        if (Mode != BuildMode.Zone)
+            SwitchMode(BuildMode.Zone);
+    }
+
     public void SetDemolishMode() => SwitchMode(BuildMode.Demolish);
 
     public void SetTreeMode() => SwitchMode(BuildMode.Tree);
 
     private void SwitchMode(BuildMode mode)
     {
+        // 首建门槛（批次八十一）：王爷府未落成前锁定一切模式切换——开局选位中右键/选择/分区等
+        // 均不可退出放置模式（菜单无王爷府入口，退出即死锁），只能落成王爷府；落成后恢复正常切换。
+        // 放行当前正在放置王爷府本体；放置成功时 PrinceMansionBuilt 已为真，退出不受阻。
+        if (!GameState.I.PrinceMansionBuilt
+            && !(mode == BuildMode.Building && _def != null && _def.Id == PrinceMansionConfig.DefId))
+        {
+            Hud?.ShowCellInfo("请先点击地图落成王爷府——落成后解锁一切营造");
+            return;
+        }
         Mode = mode;
         _dragging = false;
         _lastRoadCell = null;
+        _lastBrushCell = null;
+        _roadStart = null; // 直线/曲线的待落笔起点作废
+        if (_zoneDirty)
+        {
+            _zoneDirty = false;
+            EventBus.RaiseZonesChanged(); // 笔刷残留变更即时落盘，防切模式后色块缺角
+        }
         _renderer.SetGridVisible(mode != BuildMode.None);
+        _renderer.SetZonesVisible(mode == BuildMode.Zone); // 批次七十：规划色块仅分区模式显示
         _preview.Visible = false;
+        _pathPreview.Visible = false;
     }
 
     // ---- 输入 ----
@@ -152,19 +249,37 @@ public partial class BuildController : Node
             case BuildMode.Road:
                 _dragging = true;
                 _lastRoadCell = null;
-                DragRoadTo(_hover, isBridge: false);
+                if (RoadTool == RoadTool.Freehand)
+                    DragRoadTo(_hover, isBridge: false); // 手绘：按下即落第一戳
+                else
+                    _roadStart = _hover; // 直线/曲线：按下定起点，拖动中预览，松开一次性落笔
                 break;
             case BuildMode.Bridge:
                 _dragging = true;
                 _lastRoadCell = null;
-                DragRoadTo(_hover, isBridge: true);
+                if (RoadTool == RoadTool.Freehand)
+                    DragRoadTo(_hover, isBridge: true);
+                else
+                    _roadStart = _hover;
                 break;
             case BuildMode.Building:
                 TryPlaceBuilding(BuildingOrigin());
                 break;
             case BuildMode.Zone:
+                // 批次七十一：按工具分派——油漆桶单击填充/清除（删除模式不查闭合），笔刷与拖拽进入拖动
+                if (ZoneTool == ZoneTool.Bucket)
+                {
+                    if (ZoneErase)
+                        FillZoneErase(_hover);
+                    else
+                        FillZone(_hover);
+                    break;
+                }
                 _dragging = true;
                 _dragStart = _hover;
+                _lastBrushCell = null;
+                if (ZoneTool == ZoneTool.Brush)
+                    BrushZoneTo(_hover);
                 break;
             case BuildMode.Tree:
                 _dragging = true;
@@ -179,9 +294,23 @@ public partial class BuildController : Node
 
     private void OnLeftReleased()
     {
-        if (Mode == BuildMode.Zone && _dragging && _hoverInMap)
-            ApplyZoneRect(_dragStart, _hover);
+        if (Mode == BuildMode.Zone)
+        {
+            if (_dragging && _hoverInMap && ZoneTool == ZoneTool.Rect)
+                ApplyZoneRect(_dragStart, _hover);
+            FlushZoneDirty();
+        }
+        else if ((Mode == BuildMode.Road || Mode == BuildMode.Bridge) && _dragging && _hoverInMap
+            && RoadTool != RoadTool.Freehand && _roadStart.HasValue)
+        {
+            // 直线/曲线落笔：从起点到悬停格整条线一次性盖戳（手绘在拖动中已逐格盖戳）
+            StampPathCells(CurrentPathCells(), Mode == BuildMode.Bridge);
+        }
         _dragging = false;
+        _lastRoadCell = null;
+        _lastBrushCell = null;
+        _roadStart = null;
+        _pathPreview.Visible = false;
     }
 
     public override void _Process(double delta)
@@ -191,15 +320,28 @@ public partial class BuildController : Node
         if (_dragging && _hoverInMap)
         {
             if (Mode == BuildMode.Road)
-                DragRoadTo(_hover, isBridge: false);
+            {
+                if (RoadTool == RoadTool.Freehand)
+                    DragRoadTo(_hover, isBridge: false);
+                else
+                    UpdatePathPreview(isBridge: false); // 直线/曲线：拖动中只预览不落笔
+            }
             else if (Mode == BuildMode.Bridge)
-                DragRoadTo(_hover, isBridge: true);
+            {
+                if (RoadTool == RoadTool.Freehand)
+                    DragRoadTo(_hover, isBridge: true);
+                else
+                    UpdatePathPreview(isBridge: true);
+            }
             else if (Mode == BuildMode.Tree)
                 GameState.I.PlaceTree(_hover);
             else if (Mode == BuildMode.Demolish)
                 GameState.I.DemolishAt(_hover);
+            else if (Mode == BuildMode.Zone && ZoneTool == ZoneTool.Brush)
+                BrushZoneTo(_hover); // 笔刷沿拖动轨迹涂抹
         }
 
+        FlushZoneDirty(); // 笔刷拖动中每帧至多广播一次分区重建（防逐格刷爆）
         UpdatePreview();
     }
 
@@ -270,32 +412,266 @@ public partial class BuildController : Node
             gs.PlaceRoadStamp(center, _roadKind);
     }
 
+    // ---- 直线/曲线落笔与预览（批次八十）----
+
+    /// <summary>当前工具从起点到悬停格的落笔格序列（直线 Bresenham / 贝塞尔采样）。</summary>
+    private List<Vector2I> CurrentPathCells()
+        => RoadTool == RoadTool.Straight
+            ? StraightLineCells(_roadStart!.Value, _hover)
+            : BezierCells(_roadStart!.Value, _hover);
+
+    /// <summary>直线落笔：Bresenham 直线（含两端点），逐格盖戳。</summary>
+    private static List<Vector2I> StraightLineCells(Vector2I a, Vector2I b)
+    {
+        var cells = new List<Vector2I>();
+        int dx = Mathf.Abs(b.X - a.X), dy = Mathf.Abs(b.Y - a.Y);
+        int sx = a.X < b.X ? 1 : -1, sy = a.Y < b.Y ? 1 : -1;
+        int err = dx - dy;
+        var c = a;
+        while (true)
+        {
+            cells.Add(c);
+            if (c == b)
+                break;
+            int e2 = 2 * err;
+            if (e2 > -dy) { err -= dy; c.X += sx; }
+            if (e2 < dx) { err += dx; c.Y += sy; }
+        }
+        return cells;
+    }
+
+    /// <summary>贝塞尔曲线落笔：二次贝塞尔，控制点 = 起点终点连线中点沿拖动方向右法线偏移 30% 弧高
+    /// （曲线始终弯向拖动方向右侧）；按每半格一个采样点，大弯处补 Bresenham 防跳格。</summary>
+    private static List<Vector2I> BezierCells(Vector2I p0, Vector2I p3)
+    {
+        var cells = new List<Vector2I> { p0 };
+        var v0 = new Vector2(p0.X, p0.Y);
+        var v3 = new Vector2(p3.X, p3.Y);
+        float len = (v3 - v0).Length();
+        if (len < 0.5f)
+            return cells;
+        var d = (v3 - v0) / len;
+        var ctrl = (v0 + v3) / 2f + new Vector2(-d.Y, d.X) * (len * 0.3f); // 右法线 × 30% 弧高
+        int steps = Mathf.Max(2, (int)Mathf.Ceil(len * 2f));
+        Vector2I? last = null;
+        for (int i = 1; i <= steps; i++)
+        {
+            float t = i / (float)steps;
+            float u = 1f - t;
+            var p = u * u * v0 + 2f * u * t * ctrl + t * t * v3;
+            var c = new Vector2I((int)Mathf.Round(p.X), (int)Mathf.Round(p.Y));
+            if (c == last)
+                continue;
+            if (last.HasValue && Mathf.Max(Mathf.Abs(c.X - last.Value.X), Mathf.Abs(c.Y - last.Value.Y)) > 1)
+                cells.AddRange(StraightLineCells(last.Value, c)); // 大弯处采样跨格：补线防断档
+            cells.Add(c);
+            last = c;
+        }
+        return cells;
+    }
+
+    /// <summary>沿线逐格盖戳（直线/曲线落笔共用；每格内部自己处理宽笔与桥/覆盖/计费）。</summary>
+    private void StampPathCells(List<Vector2I> cells, bool isBridge)
+    {
+        foreach (var c in cells)
+            LayStamp(GameState.I, c, isBridge);
+    }
+
+    /// <summary>拖动中更新路径预览（直线/曲线）：起点到悬停格整条线的半透明方块。
+    /// 预览不校验落笔合法性（落笔时逐格自行跳过不可放格），常显绿色便于看清路径走向。</summary>
+    private void UpdatePathPreview(bool isBridge)
+    {
+        if (_roadStart == null)
+            return;
+        ShowPathPreview(CurrentPathCells());
+    }
+
+    /// <summary>路径预览绘制：把格子序列画成一排贴地半透明方块（ImmediateMesh 单实例，每格一个 quad）。</summary>
+    private void ShowPathPreview(List<Vector2I> cells)
+    {
+        const float cs = MapGrid.CellSize;
+        _pathMesh.ClearSurfaces();
+        _pathMesh.SurfaceBegin(Mesh.PrimitiveType.Triangles);
+        foreach (var c in cells)
+        {
+            var w = MapGrid.CellToWorld(c);
+            float y = GameState.I.Map.GroundY(c) + 0.12f; // 逐格贴地，台地上不悬空
+            var v0 = new Vector3(w.X - cs / 2f, y, w.Z - cs / 2f);
+            var v1 = new Vector3(w.X + cs / 2f, y, w.Z - cs / 2f);
+            var v2 = new Vector3(w.X + cs / 2f, y, w.Z + cs / 2f);
+            var v3 = new Vector3(w.X - cs / 2f, y, w.Z + cs / 2f);
+            _pathMesh.SurfaceAddVertex(v0);
+            _pathMesh.SurfaceAddVertex(v1);
+            _pathMesh.SurfaceAddVertex(v2);
+            _pathMesh.SurfaceAddVertex(v0);
+            _pathMesh.SurfaceAddVertex(v2);
+            _pathMesh.SurfaceAddVertex(v3);
+        }
+        _pathMesh.SurfaceEnd();
+        _pathPreview.Visible = true;
+    }
+
     private void TryPlaceBuilding(Vector2I origin)
     {
         var gs = GameState.I;
         if (PlacementValidator.CanPlaceBuilding(gs, _def, origin))
+        {
             gs.PlaceBuilding(_def, origin);
+            // 王爷府首建（批次八十一）：一次性落成，放置成功即退出建造模式（预览收起，落成后解锁一切营造）
+            if (_def.Id == PrinceMansionConfig.DefId)
+                SetModeNone();
+        }
     }
 
     private void ApplyZoneRect(Vector2I a, Vector2I b)
     {
-        var gs = GameState.I;
         int x0 = Mathf.Min(a.X, b.X), x1 = Mathf.Max(a.X, b.X);
         int y0 = Mathf.Min(a.Y, b.Y), y1 = Mathf.Max(a.Y, b.Y);
-        bool changed = false;
         for (int x = x0; x <= x1; x++)
-        {
             for (int y = y0; y <= y1; y++)
-            {
-                var c = new Vector2I(x, y);
-                if (!PlacementValidator.CanZone(gs, c))
-                    continue;
-                gs.SetZone(c, _zone); // 经索引写入，坊区候选集同步维护
-                changed = true;
-            }
+                ApplyZoneStamp(new Vector2I(x, y)); // 逐格盖戳（规划/删除同路）
+        FlushZoneDirty();
+    }
+
+    /// <summary>单格分区写操作（批次七十一）：规划=仅可规划空地落当前类型；删除=清除该格一切规划。
+    /// 经 GameState.SetZone 统一写入口，分区索引同步维护；只置脏标记，由 FlushZoneDirty 统一广播。
+    /// 返回是否实际变更（幂等同格返回 false）。</summary>
+    private bool ApplyZoneStamp(Vector2I c)
+    {
+        var gs = GameState.I;
+        if (ZoneErase)
+        {
+            if (gs.Map.CellAt(c).Zone == ZoneType.None)
+                return false;
+            gs.SetZone(c, ZoneType.None);
+            _zoneDirty = true;
+            return true;
         }
-        if (changed)
-            EventBus.RaiseZonesChanged();
+        if (!PlacementValidator.CanZone(gs, c) || gs.Map.CellAt(c).Zone == _zone)
+            return false;
+        gs.SetZone(c, _zone);
+        _zoneDirty = true;
+        return true;
+    }
+
+    /// <summary>笔刷涂抹（批次七十一）：沿拖动轨迹逐格盖戳，快速拖动时从上一格插值补格（同铺路）。</summary>
+    private void BrushZoneTo(Vector2I c)
+    {
+        if (_lastBrushCell == null)
+        {
+            ApplyZoneStamp(c);
+            _lastBrushCell = c;
+            return;
+        }
+        var from = _lastBrushCell.Value;
+        if (c == from)
+            return;
+        var d = c - from;
+        int steps = Mathf.Max(Mathf.Abs(d.X), Mathf.Abs(d.Y));
+        for (int i = 1; i <= steps; i++)
+            ApplyZoneStamp(new Vector2I(from.X + d.X * i / steps, from.Y + d.Y * i / steps));
+        _lastBrushCell = c;
+    }
+
+    /// <summary>分区变更统一广播（每帧至多一次）：笔刷拖动期间不逐格重建分区色块。</summary>
+    private void FlushZoneDirty()
+    {
+        if (!_zoneDirty)
+            return;
+        _zoneDirty = false;
+        EventBus.RaiseZonesChanged();
+    }
+
+    /// <summary>油漆桶填充分区（批次七十）：Shift+左键单击——以道路（主/辅/桥面，不含小路）与河流为界，
+    /// 向四周扩散把整片封闭区域刷成当前分区类型；扩散出图（围合未封闭）则提示且不生效。
+    /// 树/已有建筑不阻断填充（非围合线），但只有可规划空地才落区。</summary>
+    private void FillZone(Vector2I start)
+    {
+        var gs = GameState.I;
+        ref var sc = ref gs.Map.CellAt(start);
+        if ((sc.HasRoad && sc.RoadKind != RoadKind.Lane) || sc.HasWater)
+        {
+            Hud?.ShowCellInfo("油漆桶需点击封闭区域内部（以主/辅路与河流为界）");
+            return;
+        }
+
+        const int MaxFillCells = 400_000; // 单次填充上限：防全图开放区刷爆（正常封闭区域远小于此）
+        var visited = new HashSet<Vector2I>();
+        var queue = new Queue<Vector2I>();
+        queue.Enqueue(start);
+        bool closed = true;
+        int changed = 0;
+        while (queue.Count > 0)
+        {
+            var c = queue.Dequeue();
+            if (!visited.Add(c))
+                continue;
+            if (visited.Count > MaxFillCells)
+            {
+                closed = false; // 区域过大：按未封闭处理，免整图刷爆
+                break;
+            }
+            if (!MapGrid.InBounds(c))
+            {
+                closed = false; // 扩散出图：围合边界不封闭
+                break;
+            }
+            ref var cell = ref gs.Map.CellAt(c);
+            // 边界墙：道路（不含小路）与河流——只作围合线，不扩散不填充
+            if ((cell.HasRoad && cell.RoadKind != RoadKind.Lane) || cell.HasWater)
+                continue;
+            if (ApplyZoneStamp(c))
+                changed++;
+            queue.Enqueue(c + new Vector2I(1, 0));
+            queue.Enqueue(c + new Vector2I(-1, 0));
+            queue.Enqueue(c + new Vector2I(0, 1));
+            queue.Enqueue(c + new Vector2I(0, -1));
+        }
+        if (!closed)
+        {
+            Hud?.ShowCellInfo("油漆桶未生效：区域未封闭（道路/河流未围拢）");
+            return;
+        }
+        if (changed > 0)
+            FlushZoneDirty();
+        else
+            Hud?.ShowCellInfo("该封闭区域内没有可规划的空地");
+    }
+
+    /// <summary>油漆桶删除（批次七十一）：从点击处向四周扩散清除一切分区规划（与类型无关），
+    /// 路/河照旧作扩散边界；不检查闭合——扩散出图即止、不提示不撤销（规划版出图会判未封闭）。</summary>
+    private void FillZoneErase(Vector2I start)
+    {
+        var gs = GameState.I;
+        const int MaxFillCells = 400_000; // 单次扩散上限：防全图刷爆
+        var visited = new HashSet<Vector2I>();
+        var queue = new Queue<Vector2I>();
+        queue.Enqueue(start);
+        int changed = 0;
+        while (queue.Count > 0)
+        {
+            var c = queue.Dequeue();
+            if (!visited.Add(c))
+                continue;
+            if (visited.Count > MaxFillCells)
+                break;
+            if (!MapGrid.InBounds(c))
+                continue; // 出图即止：删除模式不做闭合检查
+            ref var cell = ref gs.Map.CellAt(c);
+            // 边界墙与规划版一致（主/辅路与河流）；树/建筑不阻断扩散
+            if ((cell.HasRoad && cell.RoadKind != RoadKind.Lane) || cell.HasWater)
+                continue;
+            if (ApplyZoneStamp(c))
+                changed++;
+            queue.Enqueue(c + new Vector2I(1, 0));
+            queue.Enqueue(c + new Vector2I(-1, 0));
+            queue.Enqueue(c + new Vector2I(0, 1));
+            queue.Enqueue(c + new Vector2I(0, -1));
+        }
+        if (changed > 0)
+            FlushZoneDirty();
+        else
+            Hud?.ShowCellInfo("该区域没有分区规划");
     }
 
     // ---- 预览 ----
@@ -317,6 +693,9 @@ public partial class BuildController : Node
         {
             case BuildMode.Road:
             {
+                // 直线/曲线拖动中：整条路径由 _pathPreview 显示，不再重复画单格方块
+                if (_dragging && RoadTool != RoadTool.Freehand)
+                    break;
                 // 方形画笔预览：w×w整块（宽 4 时偏移 -1..2，中心偏移半格）
                 int w = GameState.RoadWidthOf(_roadKind);
                 SetPreviewBox(StampCenter(w) + Vector3.Up * (groundY + 0.15f), StampSize(w, 0.3f),
@@ -325,6 +704,9 @@ public partial class BuildController : Node
             }
 
             case BuildMode.Bridge:
+                // 直线/曲线拖动中同理交给路径预览
+                if (_dragging && RoadTool != RoadTool.Freehand)
+                    break;
                 SetPreviewBox(StampCenter(GameState.BridgeWidth) + Vector3.Up * 0.25f, StampSize(GameState.BridgeWidth, 0.5f),
                     PlacementValidator.CanPlaceBridge(gs, _hover) ? ValidColor : InvalidColor);
                 break;
@@ -342,12 +724,22 @@ public partial class BuildController : Node
 
             case BuildMode.Zone:
             {
-                var a = _dragging ? _dragStart : _hover;
-                var wa = MapGrid.CellToWorld(a);
-                var wb = MapGrid.CellToWorld(_hover);
-                var center = (wa + wb) / 2f + Vector3.Up * (groundY + 0.1f);
-                var size = new Vector3(Mathf.Abs(wa.X - wb.X) + cs, 0.2f, Mathf.Abs(wa.Z - wb.Z) + cs);
-                SetPreviewBox(center, size, ValidColor);
+                // 批次七十一：拖拽显示拖框，笔刷/油漆桶显示单格落点；删除模式用拆除色区分
+                var color = ZoneErase ? DemolishColor : ValidColor;
+                if (ZoneTool == ZoneTool.Rect)
+                {
+                    var a = _dragging ? _dragStart : _hover;
+                    var wa = MapGrid.CellToWorld(a);
+                    var wb = MapGrid.CellToWorld(_hover);
+                    var center = (wa + wb) / 2f + Vector3.Up * (groundY + 0.1f);
+                    var size = new Vector3(Mathf.Abs(wa.X - wb.X) + cs, 0.2f, Mathf.Abs(wa.Z - wb.Z) + cs);
+                    SetPreviewBox(center, size, color);
+                }
+                else
+                {
+                    SetPreviewBox(MapGrid.CellToWorld(_hover) + Vector3.Up * (groundY + 0.1f),
+                        new Vector3(cs, 0.2f, cs), color);
+                }
                 break;
             }
 

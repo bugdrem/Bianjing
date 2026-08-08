@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.IO;
+using System.Linq;
 using System.Text;
 using System.Text.Json;
 using Godot;
@@ -16,7 +17,7 @@ namespace Bianjing;
 public static class SaveService
 {
     /// <summary>v21：水位改逐格变化（Cell.WaterH 随地势、下限 0），新增 WaterLevels 随档；旧档无水位数据，拒读。</summary>
-    public const int FormatVersion = 22; // 批次五十六：货币 double→long(文)，税制三税种，货品表全换
+    public const int FormatVersion = 24; // 批次六十六：小路独立个体（LaneOwnerId 随档）
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -212,14 +213,15 @@ public static class SaveService
 
         var map = new MapSave();
 
-        // 道路/坊区直接取增量索引（RoadCells/BuildableCells），与架构方向一致；
+        // 道路/坊区/耕种区直接取增量索引（RoadCells/BuildableCells/FarmlandCells），与架构方向一致；
         // 全图扫描仅保留给无索引的水面/桥面格
         foreach (var rc in gs.RoadCells)
         {
             map.RoadCells.Add(rc.Y * MapGrid.Size + rc.X);
             map.RoadKinds.Add((int)gs.Map.CellAt(rc).RoadKind); // 与 RoadCells 一一对应
+            map.LaneOwnerIds.Add(gs.Map.CellAt(rc).LaneOwnerId); // v24：小路归属随档（非小路为 -1）
         }
-        foreach (var zc in gs.BuildableCells)
+        foreach (var zc in gs.BuildableCells.Concat(gs.FarmlandCells))
         {
             map.ZoneCells.Add(zc.Y * MapGrid.Size + zc.X);
             map.ZoneTypes.Add((int)gs.Map.CellAt(zc).Zone);
@@ -254,6 +256,8 @@ public static class SaveService
                 Specialty = b.Specialty, Inv = b.Inv, MonthsSinceHarvest = b.MonthsSinceHarvest,
                 Abandoned = b.Abandoned,
                 SizeX = b.SizeX, SizeY = b.SizeY,
+                OwnerCitizenId = b.OwnerCitizenId,
+                ExtraGoods = b.ExtraGoods,
             });
 
         var citizens = new List<Citizen>(gs.Citizens.Values);
@@ -299,7 +303,11 @@ public static class SaveService
     {
         try
         {
-            return LoadCore(clock, slot);
+            var data = LoadData(slot, GameState.I.Defs);
+            if (data == null)
+                return false;
+            ApplyLoaded(clock, data.Value.gs, data.Value.meta);
+            return true;
         }
         catch (Exception e)
         {
@@ -308,11 +316,45 @@ public static class SaveService
         }
     }
 
-    private static bool LoadCore(GameClock clock, string slot)
+    /// <summary>异步读档：后台线程执行读档数据段（LoadData，不碰场景树/EventBus），
+    /// 完成后回调 onLoaded（在后台线程，调用方须用 Callable.From 等 marshal 回主线程再应用）；
+    /// 异常/版本不符时回调 (null, null)。</summary>
+    public static void LoadAsync(string slot, Dictionary<string, BuildingDef> defs,
+        Action<GameState, SaveMeta> onLoaded)
+    {
+        System.Threading.Tasks.Task.Run(() =>
+        {
+            try
+            {
+                var data = LoadData(slot, defs);
+                onLoaded?.Invoke(data.HasValue ? data.Value.gs : null, data.HasValue ? data.Value.meta : null);
+            }
+            catch (Exception e)
+            {
+                GD.PushWarning($"读取存档 {slot} 失败：{e.Message}");
+                onLoaded?.Invoke(null, null);
+            }
+        });
+    }
+
+    /// <summary>主线程应用读档结果（读档回调里调用）：替换 GameState、校时、广播全量刷新。</summary>
+    private static void ApplyLoaded(GameClock clock, GameState gs, SaveMeta meta)
+    {
+        GameState.I = gs;
+        clock.SetDate(meta.Year, meta.Month, meta.Day, meta.Hour);
+        EventBus.RaiseMapChanged();
+        EventBus.RaiseZonesChanged();
+        EventBus.RaiseStatsChanged();
+        EventBus.RaiseGameLoaded();
+    }
+
+    /// <summary>读档数据段（可在后台线程执行）：读 LMDB + 反序列化 + 重建全新 GameState 与地图/建筑/居民；
+    /// 不赋值 GameState.I、不广播（应用与广播必须回主线程）。任何异常/版本不符返回 null。</summary>
+    private static (GameState gs, SaveMeta meta)? LoadData(string slot, Dictionary<string, BuildingDef> defs)
     {
         string dir = SlotDir(slot);
         if (!File.Exists(Path.Combine(dir, "data.mdb")))
-            return false;
+            return null;
 
         SaveMeta meta;
         WorldSave world;
@@ -342,18 +384,18 @@ public static class SaveService
         if (meta == null || world == null || map == null)
         {
             GD.PushWarning($"存档 {slot} 数据不完整，读取取消。");
-            return false;
+            return null;
         }
 
         // 早期开发不做跨版本迁移：格式不符直接拒读，避免半坏数据污染运行时
         if (meta.Version != FormatVersion)
         {
             GD.PushWarning($"存档 {slot} 版本 v{meta.Version} 与当前 v{FormatVersion} 不兼容，读取取消。");
-            return false;
+            return null;
         }
 
         // 复用已加载的建筑定义，重建全新 GameState 后整体替换
-        var gs = new GameState(GameState.I.Defs)
+        var gs = new GameState(defs)
         {
             Money = world.Money,
             Food = world.Food,
@@ -393,6 +435,8 @@ public static class SaveService
             cell.HasRoad = true;
             // v9：道路种类与 RoadCells 一一对应（桥面格为 None）
             cell.RoadKind = i < (map.RoadKinds?.Count ?? 0) ? (RoadKind)map.RoadKinds[i] : RoadKind.None;
+            // v24：小路归属随档恢复（无主/非小路为 -1）
+            cell.LaneOwnerId = i < (map.LaneOwnerIds?.Count ?? 0) ? map.LaneOwnerIds[i] : -1;
             gs.Roads.SetRoad(c, true, cell.RoadKind); // 含寻路权重重建（主路代价低）
             gs.RegisterRoadCell(c); // 重建增量道路格索引
         }
@@ -458,6 +502,8 @@ public static class SaveService
                 Abandoned = bs.Abandoned,
                 SizeX = bs.SizeX,
                 SizeY = bs.SizeY,
+                OwnerCitizenId = bs.OwnerCitizenId,
+                ExtraGoods = bs.ExtraGoods ?? new List<string>(),
             };
             gs.Buildings[b.Id] = b;
             // 按实例占地标格（住宅扩建后大于定义占地）
@@ -471,14 +517,15 @@ public static class SaveService
         foreach (var f in families ?? new List<Family>())
             gs.Families[f.Id] = f;
 
-        GameState.I = gs;
-        clock.SetDate(meta.Year, meta.Month, meta.Day, meta.Hour);
+        // v24：资金家庭化——读档把个人私产一次性并入家庭公产（个人 Money 停止流通，字段保留兼容）
+        foreach (var c in gs.Citizens.Values)
+            if (c.Money > 0 && gs.Families.TryGetValue(c.FamilyId, out var fam))
+            {
+                fam.SharedAssets += c.Money;
+                c.Money = 0;
+            }
 
-        EventBus.RaiseMapChanged();
-        EventBus.RaiseZonesChanged();
-        EventBus.RaiseStatsChanged();
-        EventBus.RaiseGameLoaded();
-        return true;
+        return (gs, meta);
     }
 
     // ---- LMDB 工具 ----
