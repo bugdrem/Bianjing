@@ -28,7 +28,7 @@ public class TechDef
     /// <summary>前置科技 id 列表（全部研成才可解锁/立项）。</summary>
     public List<string> Prerequisites { get; set; } = new();
 
-    /// <summary>主动模式：总研习经费（贯，逐日均摊拨付）与所需天数。</summary>
+    /// <summary>主动模式：总研习经费（文，逐日均摊拨付）与所需天数。</summary>
     public double CostMoney { get; set; }
     public int ResearchDays { get; set; } = 30;
 

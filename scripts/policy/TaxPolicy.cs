@@ -18,40 +18,41 @@ public class TaxPolicy
     /// <summary>人口税是否开启（默认关闭）；开启时从雇工工资中扣 20%，持续降幸福。</summary>
     public bool PollTaxEnabled;
 
-    /// <summary>土地税档位 0-3（兼容旧 UI：免征/轻/中/重），0→1%, 1→3%, 2→6%, 3→10%。</summary>
+    /// <summary>土地税档位 0-3（兼容旧 UI：免征/轻/中/重），档位与税率全部引用 EconomyConfig 常量
+    /// （批次八十七：旧版 getter 写死 0.03/0.06 字面量，配置调整后两处口径分裂）。</summary>
     public int LandTaxLevel
     {
         get
         {
             if (LandTaxRate <= EconomyConfig.LandTaxRateMin) return 0;
-            if (LandTaxRate <= 0.03) return 1;
-            if (LandTaxRate <= 0.06) return 2;
+            if (LandTaxRate <= EconomyConfig.LandTaxRateDefault) return 1;
+            if (LandTaxRate <= EconomyConfig.LandTaxRateHeavy) return 2;
             return 3;
         }
         set => LandTaxRate = value switch
         {
             0 => EconomyConfig.LandTaxRateMin,
-            1 => 0.03,
-            2 => 0.06,
+            1 => EconomyConfig.LandTaxRateDefault,
+            2 => EconomyConfig.LandTaxRateHeavy,
             _ => EconomyConfig.LandTaxRateMax,
         };
     }
 
-    /// <summary>商税档位 0-3（兼容旧 UI），0→2%, 1→5%, 2→10%, 3→15%。</summary>
+    /// <summary>商税档位 0-3（兼容旧 UI），档位与税率全部引用 EconomyConfig 常量（批次八十七：同土地税）。</summary>
     public int TradeTaxLevel
     {
         get
         {
             if (TradeTaxRate <= EconomyConfig.TradeTaxRateMin) return 0;
-            if (TradeTaxRate <= 0.05) return 1;
-            if (TradeTaxRate <= 0.10) return 2;
+            if (TradeTaxRate <= EconomyConfig.TradeTaxRateDefault) return 1;
+            if (TradeTaxRate <= EconomyConfig.TradeTaxRateHeavy) return 2;
             return 3;
         }
         set => TradeTaxRate = value switch
         {
             0 => EconomyConfig.TradeTaxRateMin,
-            1 => 0.05,
-            2 => 0.10,
+            1 => EconomyConfig.TradeTaxRateDefault,
+            2 => EconomyConfig.TradeTaxRateHeavy,
             _ => EconomyConfig.TradeTaxRateMax,
         };
     }

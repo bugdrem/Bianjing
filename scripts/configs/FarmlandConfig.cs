@@ -11,10 +11,11 @@ public static class FarmlandConfig
     /// <summary>田块开垦尺寸阶梯（边长米，按序尝试：优先大块，块内放不下依次退小块）。</summary>
     public static readonly int[] FieldSizeTiers = { 6, 4, 2 };
 
-    /// <summary>田块升级资产门槛（文，索引 0 = 一级升二级；升到 N 级需 N-1 项），升级同时扣款入家庭公产。</summary>
+    /// <summary>田块升级资产门槛（文，索引 0 = 一级升二级；升到 N 级需 N-1 项），升级同时扣款入官库
+    /// （土地相关交王爷，批次七十八起——旧注释“入家庭公产”与实现不符）。</summary>
     public static readonly long[] UpgradeAssets = { 5_000, 20_000, 50_000 };
 
-    /// <summary>田块升级扣款（文，索引与 UpgradeAssets 对齐）：农户扩大生产投入，公产不足则不升。</summary>
+    /// <summary>田块升级扣款（文，索引与 UpgradeAssets 对齐）：农户扩大生产投入，家庭公产不足则不升（款入官库）。</summary>
     public static readonly long[] UpgradeCosts = { 5_000, 20_000, 50_000 };
 
     /// <summary>田块升级的额外硬条件：全城存在此数以上的闲置农艺劳动力（升级才有意义，防白升）。</summary>

@@ -93,7 +93,7 @@ public class BuildingDef
     /// <summary>税所：每名在岗吏员对全城税收的加成比例（如 0.1 = +10%）。</summary>
     public double TaxBoostPerWorker { get; set; }
 
-    /// <summary>铸币局：每名在岗工匠每日铸钱入官库（贯）。</summary>
+    /// <summary>铸币局：每名在岗工匠每日铸钱入官库（文）。</summary>
     public double MintPerWorkerDay { get; set; }
 
     /// <summary>朝廷采购衙门（批次七十六：柴炭司/市易务等朝廷直属机构）：非空时表示该衙门收购的货品清单，

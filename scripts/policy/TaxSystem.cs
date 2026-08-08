@@ -36,22 +36,25 @@ public class TaxSystem
             long baseAmount = BuildingTaxBase(b.Def, b.Level);
             if (baseAmount <= 0)
                 continue;
-            long daily = Math.Max(1, (long)(baseAmount * rateFactor / days));
+            // 批次八十七：四舍五入取日额（旧版 Math.Max(1) 截断——低税率档每日 0.14 文被放大成 1 文，
+            // 免税档反而多收）；记账按实收额（旧版记全额，公产不足时账实不符）
+            long daily = Math.Max(0, (long)Math.Round(baseAmount * rateFactor / days, MidpointRounding.AwayFromZero));
             // 批次七十二：税款从住户/店主家庭公产实扣入官库（旧版凭空造钱，家庭财富不回官库）
-            if (gs.TakeLandTax(b, daily))
-                gs.Ledger.Add("土地税", daily);
+            long paid = gs.TakeLandTax(b, daily);
+            if (paid > 0)
+                gs.Ledger.Add("土地税", paid);
         }
     }
 
     /// <summary>每月结算：重税民怨 + 人口税幸福度影响。</summary>
     public void TickMonth(GameState gs)
     {
-        // 土地税重税（高于 6% 视为重税）
-        if (gs.Taxes.LandTaxRate > 0.06)
+        // 土地税重税（高于重税线视为重税，见 EconomyConfig.LandTaxRateHeavy）
+        if (gs.Taxes.LandTaxRate > EconomyConfig.LandTaxRateHeavy)
             ApplyMoralePenalty(gs, "重敛伤民");
 
-        // 商税重税（高于 10% 视为重税）
-        if (gs.Taxes.TradeTaxRate > 0.10)
+        // 商税重税（高于重税线视为重税，见 EconomyConfig.TradeTaxRateHeavy）
+        if (gs.Taxes.TradeTaxRate > EconomyConfig.TradeTaxRateHeavy)
             ApplyMoralePenalty(gs, "关市苛征");
 
         // 人口税

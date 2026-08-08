@@ -21,7 +21,7 @@ public class MilestoneDef
     /// <summary>预留：晋级所需标志建筑定义 id（空串不要求，方案 c 融合口）。</summary>
     public string RequiredBuildingId = "";
 
-    /// <summary>晋级时官库一次性拨款（贯）。</summary>
+    /// <summary>晋级时官库一次性拨款（文）。</summary>
     public int Reward;
 
     /// <summary>本级下住宅可升到的最高等级（转业工商同受限）。</summary>

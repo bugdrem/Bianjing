@@ -163,16 +163,16 @@ public class GameState
     /// <summary>以 center 为中心的方形道路画笔（w×w，宽度随道路种类）：陆地空格铺路，
     /// 遇水面格自动架一座与路同宽的小桥（辅路w2、主路w4）——“和道路同步”，拖拉一次画成不断档；
     /// 岸上路段按道路单价、跨水桥段按桥梁单价，各按等效延米（新格数÷宽）计费（重叠盖戳不多扣）；
-    /// 已占用格（路/已有桥/建筑）跳过；钱不够时不铺。返回是否铺下了新格。</summary>
+    /// 已占用格（路/已有桥/建筑）跳过；钱不够时不铺。返回是否铺下了新格。
+    /// 批次八十七：先扫描统计总价再一次性资金校验（旧版只校验单格成本，一印多格时总价可超官库，
+    /// 默认模式下官库被扣成负数——与 GameSettings 注释“无限钱才允许扣至负数”不符）。</summary>
     public bool PlaceRoadStamp(Vector2I center, RoadKind kind)
     {
-        int roadCost = RoadCostOf(kind);
-        if (!GameSettings.InfiniteMoney && Money < roadCost)
-            return false;
-
         // 宽度为偶数，偏移范围 -(w-1)/2..w/2 两轴一致（宽 4 时 -1..2）
         int w = RoadWidthOf(kind);
-        int newRoadCells = 0, newBridgeCells = 0;
+
+        // 第一遍：扫描统计可铺/可升级/可架桥格（不落地）
+        var pending = new List<(Vector2I c, bool bridge, bool upgrade)>();
         for (int ox = -((w - 1) / 2); ox <= w / 2; ox++)
         {
             for (int oy = -((w - 1) / 2); oy <= w / 2; oy++)
@@ -186,50 +186,63 @@ public class GameState
                     // 路跨水：在无桥的水面格架同宽小桥（已有桥则跳过）
                     if (cell.HasBridge)
                         continue;
-                    LayBridgeCell(c);
-                    newBridgeCells++;
+                    pending.Add((c, true, false));
                 }
                 else if (cell.IsEmpty)
                 {
-                    LayRoadCell(c, kind);
-                    newRoadCells++;
+                    pending.Add((c, false, false));
                 }
                 else if (cell.HasRoad && !cell.HasBridge && RoadRank(kind) > RoadRank(cell.RoadKind))
                 {
                     // 高级覆盖低级（批次八十）：主路压辅路/小路、辅路压小路；同级/低级不覆盖，桥面不升级
-                    UpgradeRoadCell(c, kind);
-                    newRoadCells++;
+                    pending.Add((c, false, true));
                 }
                 // 其它（已有同级/高级路、建筑）跳过
             }
         }
+        if (pending.Count == 0)
+            return false;
+
+        int newRoadCells = 0, newBridgeCells = 0;
+        foreach (var (_, bridge, _) in pending)
+        {
+            if (bridge) newBridgeCells++;
+            else newRoadCells++;
+        }
+        long roadCharge = (long)RoadCostOf(kind) * newRoadCells / w; // 新格数/宽 = 等效延米，斜拖/重叠不多扣
+        long bridgeCharge = (long)BridgeCost * newBridgeCells / w;    // 跨水段按桥梁单价
+        if (!GameSettings.InfiniteMoney && Money < roadCharge + bridgeCharge)
+            return false;
+
+        // 第二遍：统一落地（先校验后动地图，钱不够时一张格都不铺）
+        foreach (var (c, bridge, upgrade) in pending)
+        {
+            if (bridge) LayBridgeCell(c);
+            else if (upgrade) UpgradeRoadCell(c, kind);
+            else LayRoadCell(c, kind);
+        }
         if (newRoadCells > 0)
         {
-            long charge = (long)roadCost * newRoadCells / w; // 新格数/宽 = 等效延米，斜拖/重叠不多扣
-            long paid = PayBuildWages(charge); // 批次七十九：先发放、按实扣款（无人领则钱留官库）
+            long paid = PayBuildWages(roadCharge); // 批次七十九：先发放、按实扣款（无人领则钱留官库）
             Money -= paid;
             Ledger.Add("营造道路", -paid);
         }
         if (newBridgeCells > 0)
         {
-            long charge = (long)BridgeCost * newBridgeCells / w; // 跨水段按桥梁单价
-            long paid = PayBuildWages(charge);
+            long paid = PayBuildWages(bridgeCharge);
             Money -= paid;
             Ledger.Add("营造桥梁", -paid);
         }
-        if (newRoadCells > 0 || newBridgeCells > 0)
-            EventBus.RaiseStatsChanged();
-        return newRoadCells > 0 || newBridgeCells > 0;
+        EventBus.RaiseStatsChanged();
+        return true;
     }
 
     /// <summary>以 center 为中心的方形桥梁画笔（4×4 米）：只在无桥的水面格架设，
-    /// 按实际新架格数折算延米计价（同道路，重叠盖戳不多扣）。</summary>
+    /// 按实际新架格数折算延米计价（同道路，重叠盖戳不多扣）。
+    /// 批次八十七：先统计总价再一次性资金校验（旧版只校验单格成本，一印多格时官库可被扣成负数）。</summary>
     public bool PlaceBridgeStamp(Vector2I center)
     {
-        if (!GameSettings.InfiniteMoney && Money < BridgeCost)
-            return false;
-
-        int newCells = 0;
+        var pending = new List<Vector2I>();
         for (int ox = -((BridgeWidth - 1) / 2); ox <= BridgeWidth / 2; ox++)
         {
             for (int oy = -((BridgeWidth - 1) / 2); oy <= BridgeWidth / 2; oy++)
@@ -240,19 +253,23 @@ public class GameState
                 ref var cell = ref Map.CellAt(c);
                 if (!cell.HasWater || cell.HasBridge)
                     continue; // 岸上/已有桥的格跳过，桥只跨水
-                LayBridgeCell(c);
-                newCells++;
+                pending.Add(c);
             }
         }
-        if (newCells > 0)
-        {
-            long charge = (long)BridgeCost * newCells / BridgeWidth;
-            long paid = PayBuildWages(charge); // 批次七十九：同道路营造，按实扣款
-            Money -= paid;
-            Ledger.Add("营造桥梁", -paid);
-            EventBus.RaiseStatsChanged();
-        }
-        return newCells > 0;
+        if (pending.Count == 0)
+            return false;
+
+        long charge = (long)BridgeCost * pending.Count / BridgeWidth;
+        if (!GameSettings.InfiniteMoney && Money < charge)
+            return false;
+
+        foreach (var c in pending)
+            LayBridgeCell(c);
+        long paid = PayBuildWages(charge); // 批次七十九：同道路营造，按实扣款
+        Money -= paid;
+        Ledger.Add("营造桥梁", -paid);
+        EventBus.RaiseStatsChanged();
+        return true;
     }
 
     /// <summary>架单格桥面（水面格，等效辅路可通行；条带内部用，不扣费不广播统计）。</summary>
@@ -267,11 +284,13 @@ public class GameState
     }
 
     /// <summary>升级已有路面（高级覆盖低级，批次八十）：只换道路种类与寻路权重，
-    /// 不重登记索引、不砍树（有路格无树）、不清坊区（铺路时已清）。</summary>
+    /// 不重登记索引、不砍树（有路格无树）、不清坊区（铺路时已清）。
+    /// 批次八十七：覆盖时解除有主小路归属（旧版 LaneOwnerId 残留——屋主拆迁时也不再清除，成永久死数据）。</summary>
     private void UpgradeRoadCell(Vector2I c, RoadKind kind)
     {
         ref var cell = ref Map.CellAt(c);
         cell.RoadKind = kind;
+        cell.LaneOwnerId = -1;
         Roads.SetRoad(c, true, kind); // 同步寻路权重：主路代价低，居民偏好走主路
         EventBus.RaiseCellChanged(c);
     }
@@ -424,6 +443,7 @@ public class GameState
         {
             cell.HasBridge = false;
             cell.HasRoad = false;
+            cell.LaneOwnerId = -1; // 批次八十七：拆桥清路时同步解归属（旧版残留死数据）
             Roads.SetRoad(c, false);
             UnregisterRoadCell(c);
             EventBus.RaiseCellChanged(c);
@@ -432,6 +452,7 @@ public class GameState
         {
             cell.HasRoad = false;
             cell.RoadKind = RoadKind.None;
+            cell.LaneOwnerId = -1; // 批次八十七：同拆桥，拆路同步解归属
             Roads.SetRoad(c, false);
             UnregisterRoadCell(c);
             EventBus.RaiseCellChanged(c);
@@ -760,11 +781,11 @@ public class GameState
         return dropped;
     }
 
-    /// <summary>可落堆的净地：无路无水无建筑（树下可堆，落果本就堆在树格）。</summary>
+    /// <summary>可落堆的净地：无路无水无建筑（树下可堆，落果本就堆在树格；与 Cell.IsEmpty 同口径）。</summary>
     private bool IsPileableCell(Vector2I c)
     {
         ref var cell = ref Map.CellAt(c);
-        return !cell.HasRoad && !cell.HasWater && cell.BuildingId < 0;
+        return cell.IsEmpty;
     }
 
     /// <summary>就近落堆：卸货人常站在路边/路上，货不能落在路面/水面/房底——
@@ -984,9 +1005,9 @@ public class GameState
     }
 
     /// <summary>土地税征收（批次七十二）：从建筑住户/店主家庭公产实扣入官库，家庭无钱则免收；
-    /// 返回是否实收（账本记账用）。民营店坊按店主家庭（OwnerCitizenId）征收，民居按户主家庭（HouseholdHead）。
-    /// 旧版凭空造钱入官库（不扣家庭），家庭财富永不回流官库，是官库持续失血的原因之一。</summary>
-    public bool TakeLandTax(BuildingInstance b, long amount)
+    /// 返回实收金额（文，账本按实记账——批次八十七：旧版返回 bool 且记账记全额，公产不足时账实不符）。
+    /// 民营店坊按店主家庭（OwnerCitizenId）征收，民居按户主家庭（HouseholdHead）。</summary>
+    public long TakeLandTax(BuildingInstance b, long amount)
     {
         Citizen payer = null;
         if (b.OwnerCitizenId >= 0 && Citizens.TryGetValue(b.OwnerCitizenId, out var owner))
@@ -994,11 +1015,11 @@ public class GameState
         else
             payer = HouseholdHead(b.Id);
         if (payer == null || !Families.TryGetValue(payer.FamilyId, out var fam) || fam.SharedAssets <= 0)
-            return false;
+            return 0;
         long paid = Math.Min(amount, fam.SharedAssets);
         fam.SharedAssets -= paid;
         Money += paid;
-        return true;
+        return paid;
     }
 
     /// <summary>居民所属家庭公产余额（文，家庭不存在返回 0）。</summary>
@@ -1023,10 +1044,11 @@ public class GameState
             return 0; // 无人经营付不出钱
         long paid = 0;
         long share = amount / staff.Count;
-        foreach (var w in staff)
+        for (int i = 0; i < staff.Count; i++)
         {
-            long p = Math.Min(FamilyMoney(w), share);
-            TakeFromFamily(w, p);
+            // 批次八十七：末位员工承担除不尽余数（旧版只付 amount/人数，余数凭空消失）
+            long p = Math.Min(FamilyMoney(staff[i]), i == staff.Count - 1 ? amount - paid : share);
+            TakeFromFamily(staff[i], p);
             paid += p;
         }
         PayToFamily(to, paid);
@@ -1049,8 +1071,10 @@ public class GameState
         var staff = StaffOf(b);
         if (staff.Count > 0)
         {
-            foreach (var w in staff)
-                PayToFamily(w, amount / staff.Count);
+            long share = amount / staff.Count;
+            // 批次八十七：末位员工收除不尽余数（旧版除不尽余数无人接收、凭空消失）
+            for (int i = 0; i < staff.Count; i++)
+                PayToFamily(staff[i], i == staff.Count - 1 ? amount - share * (staff.Count - 1) : share);
         }
         else
         {

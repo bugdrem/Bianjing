@@ -82,8 +82,16 @@ public partial class TopBar : PanelContainer
         return label;
     }
 
+    private float _refreshTimer;
+
     public override void _Process(double delta)
     {
+        // 批次八十七：0.5s 节流刷新（旧版每帧遍历全家求城财富 + 写主题覆盖，面板常驻时持续开销）
+        _refreshTimer += (float)delta;
+        if (_refreshTimer < 0.5f)
+            return;
+        _refreshTimer = 0f;
+
         var gs = GameState.I;
         _money.Text = CurrencyHelper.FormatWen(gs.Money);
         _money.AddThemeColorOverride("font_color", gs.Money < 0 ? new Color(1f, 0.3f, 0.3f) : new Color(1f, 0.9f, 0.5f));

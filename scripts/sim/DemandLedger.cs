@@ -116,7 +116,9 @@ public class DemandSystem
         e.DailyDemand += amount;
     }
 
-    /// <summary>全城库存：建筑库存 + 居民背包 + 地面堆 + 官库官粮（仅 grain，官粮可济民）。</summary>
+    /// <summary>全城库存：建筑库存 + 居民背包 + 地面堆。
+    /// 批次八十七：官粮（gs.Food）不再计入——官粮是朝廷赈济储备（只进不出的单向池），
+    /// 计入会使 grain 永不短缺，缺粮驱动的全部机制静默失效（开垦加速/升级折扣/缺粮招工/创业选品）。</summary>
     private static double TotalStock(GameState gs, string goodsId)
     {
         double s = 0;
@@ -126,8 +128,6 @@ public class DemandSystem
             s += c.Pack.AmountOf(goodsId);
         foreach (var p in gs.Piles.Values)
             s += p.Inv.AmountOf(goodsId);
-        if (goodsId == Goods.Grain)
-            s += gs.Food;
         return s;
     }
 

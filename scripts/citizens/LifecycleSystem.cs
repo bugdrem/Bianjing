@@ -8,7 +8,7 @@ namespace Bianjing;
 /// 居民生命周期系统：
 /// 每日——迁入（需求 §2.2 四类流民模型）→ 适龄婚配 → 生育 → 交友；
 /// 每月——老化 → 死亡 → 无家处理/迁出。
-/// 概率均为「日频」直接取值：1x 下一游戏日 ≈ 20 现实秒、一游戏月 ≈ 10 现实分钟，
+/// 概率均为「日频」直接取值：时间口径见 TimeConfig（一游戏日 ≈ 43 现实秒、一游戏月 ≈ 5 现实分钟），
 /// 故迁入/婚育以「日」为单位小幅调参，约一游戏年（2 现实小时）内可把开局坊区填满。
 /// 只操作数据层，不涉及任何表现节点。
 /// </summary>
@@ -615,7 +615,9 @@ public class LifecycleSystem
         // 空房继承（批次八十六）：空置民居由无住所寄居家庭低价过户入住（先继承后自建，空房不再只增不减）
         InheritVacantHomes(gs, occupancy);
     
-        foreach (var b in gs.Buildings.Values)
+        // 批次八十七：遍历快照——循环内 TryLeaveAndBuild 会经 PlaceBuilding 向 Buildings 插入新房，
+        // 旧版直接枚举字典：分家建房成功时字典版本号变化，下次 MoveNext 抛 InvalidOperationException 中断月结
+        foreach (var b in gs.Buildings.Values.ToList())
         {
             if (b.Def.Category != "grown")
                 continue;
@@ -762,14 +764,16 @@ public class LifecycleSystem
     }
 
     /// <summary>NPC 建房土地交割（批次七十六）：地价全额入官库（土地归王爷，售地收入），
-    /// 另提 3 成作为建房工钱发给当日无业者（村民雇人盖房，钱仍在玩家↔村民循环内）。</summary>
+    /// 另提 3 成作为建房工钱发给当日无业者（村民雇人盖房，钱仍在玩家↔村民循环内）。
+    /// 批次八十七：工钱从地价中出——先发放、按实扣款（无人领则钱留官库），
+    /// 旧版 +cost 后再凭空发 30% 工钱且不扣官库，每建一宅货币净增 30% 房款（持续通胀源）。</summary>
     private static void LandSaleToPlayer(GameState gs, long cost)
     {
         if (cost <= 0)
             return;
-        gs.Money += cost;
-        gs.Ledger.Add("售地", cost);
-        gs.PayBuildWages(cost * 3 / 10);
+        long paid = gs.PayBuildWages(cost * 3 / 10);
+        gs.Money += cost - paid;
+        gs.Ledger.Add("售地", cost - paid);
     }
 
     /// <summary>住户中的成年未婚男（有则触发“独立门户搬出”）：优先迁出次子，长子（继承人）留守祖宅；

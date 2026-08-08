@@ -67,10 +67,12 @@ public partial class AgentManager : Node
         EventBus.CitizenSelected -= OnCitizenSelected;
     }
 
-    /// <summary>每帧重建空间哈希桶（父节点 _Process 先于子节点执行，代理拿到的是本帧数据）；末尾重绘选中居民路线。</summary>
+    /// <summary>每帧重建空间哈希桶（父节点 _Process 先于子节点执行，代理拿到的是本帧数据）；末尾重绘选中居民路线。
+    /// 批次八十七：只清空每格 List 不清字典（桶随代理分布惰性增长），旧版每帧 new List + 清字典造成持续 GC 压力。</summary>
     public override void _Process(double delta)
     {
-        _buckets.Clear();
+        foreach (var list in _buckets.Values)
+            list.Clear();
         foreach (var agent in _agents.Values)
         {
             var cell = MapGrid.WorldToCell(agent.Position);
@@ -88,7 +90,17 @@ public partial class AgentManager : Node
     /// 无选中、代理不在场（超上限只模拟不上屏）或无路径时隐藏。</summary>
     private void UpdatePathLine()
     {
-        if (_selectedId < 0 || !_agents.TryGetValue(_selectedId, out var agent)
+        // 批次八十七：无选中时只隐藏不清网格（旧版每帧 ClearSurfaces 无条件执行）
+        if (_selectedId < 0)
+        {
+            if (_pathLine.Visible)
+            {
+                _pathLine.Visible = false;
+                _pathMesh.ClearSurfaces();
+            }
+            return;
+        }
+        if (!_agents.TryGetValue(_selectedId, out var agent)
             || agent.PathPoints == null || agent.PathIndex >= agent.PathPoints.Count)
         {
             _pathMesh.ClearSurfaces();

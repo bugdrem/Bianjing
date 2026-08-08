@@ -6,7 +6,7 @@ namespace Bianjing;
 /// </summary>
 public static class WorldConfig
 {
-    /// <summary>主路 / 辅路每延米造价（贯，不计宽度）。</summary>
+    /// <summary>主路 / 辅路每延米造价（文，不计宽度）。</summary>
     public const int MainRoadCost = 18;
     public const int SideRoadCost = 10;
 
@@ -17,7 +17,7 @@ public static class WorldConfig
     public const int MainRoadWidth = 4;
     public const int SideRoadWidth = 2;
 
-    /// <summary>桥梁每延米造价（贯）/ 占地宽度（米/格，独立桥工具用；画路跨水时桥随路同宽）。</summary>
+    /// <summary>桥梁每延米造价（文）/ 占地宽度（米/格，独立桥工具用；画路跨水时桥随路同宽）。</summary>
     public const int BridgeCost = 30;
     public const int BridgeWidth = 4;
 

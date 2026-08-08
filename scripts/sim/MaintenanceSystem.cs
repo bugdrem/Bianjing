@@ -31,7 +31,17 @@ public class MaintenanceSystem
         RepairOfficial(gs);
         RepairPrivate(gs);
         Collapse(gs);
+
+        // 批次八十七：完好度逐日变化，每月广播一次供老化变暗渲染刷新（旧版改 Condition 从不广播，
+        // 建筑变暗只靠其它事件顺带重建；逐日广播会全量重建建筑层，故取月频）
+        if (++_daysSinceRefresh >= Days)
+        {
+            _daysSinceRefresh = 0;
+            EventBus.RaiseBuildingsChanged();
+        }
     }
+
+    private static int _daysSinceRefresh;
 
     /// <summary>公共设施：修缮匠（受雇于修缮房）逐座抢修最破的官方建筑，直到当日工量用尽（料钱记账）。</summary>
     private static void RepairOfficial(GameState gs)
@@ -86,6 +96,7 @@ public class MaintenanceSystem
             if (!residents.TryGetValue(b.Id, out var list))
                 continue;
 
+            long feeTotal = 0, paidTotal = 0;
             foreach (var c in list)
             {
                 // 批次七十二：修缮摊派从家庭公产实扣（旧版扣在已停用的个人 Money 字段上=免费修缮，
@@ -93,6 +104,8 @@ public class MaintenanceSystem
                 // 旧版扣款无收款方凭空消失
                 long fee = Math.Max(1, RepairFeePerResident / Days);
                 long paid = Math.Min(fee, gs.FamilyMoney(c));
+                feeTotal += fee;
+                paidTotal += paid;
                 if (paid > 0)
                 {
                     gs.TakeFromFamily(c, paid);
@@ -100,7 +113,10 @@ public class MaintenanceSystem
                     gs.Ledger.Add("修缮摊派", paid);
                 }
             }
-            b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount / Days);
+            // 批次八十七：回血按实收比例折算（旧版无条件全额回血——住户见底时等于免费维修，
+            // 摊派收入与修缮服务脱钩；实收不足则建筑照常老化，终至坍塌回收）
+            if (feeTotal > 0)
+                b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount / Days * paidTotal / feeTotal);
         }
     }
 

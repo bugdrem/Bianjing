@@ -83,7 +83,7 @@ public partial class Hud : CanvasLayer
     private void OnMilestone(int level)
     {
         var def = Milestones.Of(level);
-        ShowCellInfo($"城市晋级为【{def.Name}】！官库拨款 {def.Reward} 贯，新建筑已解锁");
+        ShowCellInfo($"城市晋级为【{def.Name}】！官库拨款 {def.Reward} 文，新建筑已解锁");
     }
 
     private void OnTechUnlocked(string techId)

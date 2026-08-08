@@ -645,6 +645,10 @@ public partial class CitizenAgent : Node3D
     {
         if (gs.FamilyMoney(C) <= 0)
             return null;
+        // 批次八十七：买不起一份不去空跑（旧版只看有无钱，到店发现不够再折返，反复白跑）
+        long price = Goods.PriceOf(goodsId);
+        if (price <= 0 || gs.FamilyMoney(C) < (long)(price * (1 + gs.Taxes.TradeTaxRate)))
+            return null;
         var pos = MapGrid.WorldToCell(Position);
         BuildingInstance best = null;
         float bestDist = float.MaxValue;
@@ -1106,7 +1110,8 @@ public partial class CitizenAgent : Node3D
                     {
                         C.Pack.Store(_buyGoodsId, got);
                         long pay = (long)(price * got);
-                        long tax = (long)(pay * taxRate);
+                        // 批次八十七：四舍五入（旧版 long 截断——小额交易税 <1 文直接归零，商税档位名存实亡）
+                        long tax = (long)Math.Round(pay * taxRate, MidpointRounding.AwayFromZero);
                         gs.TakeFromFamily(C, pay + tax); // 货款 + 商税由家庭公产支付
                         if (tax > 0)
                         {

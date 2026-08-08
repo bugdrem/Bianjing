@@ -23,7 +23,8 @@ public class EconomySystem
             foodNet += b.Def.FoodOutput;
         }
 
-        long dailyUpkeep = Math.Max(1, (long)totalUpkeep / GameClock.DaysPerMonth);
+        // 批次八十七：无维护对象（全城无非 court 建筑）时不发——旧版 Math.Max(1,0) 空城也凭空发 1 文/日
+        long dailyUpkeep = totalUpkeep <= 0 ? 0 : Math.Max(1, (long)totalUpkeep / GameClock.DaysPerMonth);
         // 批次七十九：维护费发当日无业者（官府营造杂役用工，按实扣款）——
         // 旧版维护费只扣不付，是官库每月凭空流失的黑洞；发工钱后钱在玩家↔村民循环内
         long upkeepPaid = gs.PayBuildWages(dailyUpkeep);
@@ -44,8 +45,12 @@ public class EconomySystem
         gs.Ledger.Add("王爷月俸", salary);
 
         // 朝廷粮饷（批次七十八）：朝廷按人口每月拨粮入官仓（赈济储备，凭空生成）——
-        // 旧版官粮只靠开局存量 + 农田 20% 田赋，而消耗 0.2 份/人/日 远超补给，耗尽即永久饥荒
-        gs.Food += (long)(gs.Population * EconomyConfig.CourtFoodAmmoPerCapitaMonth);
+        // 旧版官粮只靠开局存量 + 农田 20% 田赋，而消耗 0.2 份/人/日 远超补给，耗尽即永久饥荒；
+        // 批次八十七：官仓设容量上限（≈半年赈济储备，见 CourtFoodCapPerCapita），超限少拨——
+        // 旧版无限净流入使官粮无限膨胀，需求账本把官粮计入 grain 库存后缺粮判定永不触发
+        double ammo = gs.Population * EconomyConfig.CourtFoodAmmoPerCapitaMonth;
+        double cap = gs.Population * EconomyConfig.CourtFoodCapPerCapita;
+        gs.Food = Math.Min(gs.Food + ammo, cap);
     }
 
     /// <summary>月结工钱（批次七十四）：雇工下工只记账（Citizen.WagesOwed），月底统一发放——

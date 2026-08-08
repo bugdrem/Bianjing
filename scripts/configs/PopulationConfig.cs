@@ -4,7 +4,7 @@ namespace Bianjing;
 
 /// <summary>
 /// 人口配置：迁入/婚配/生育/交友/迁出的日月频概率、生育概率公式与流民自带资产
-/// （业务归属：LifecycleSystem——概率均为「日频」直接取值，1x 下一游戏日 ≈ 20 现实秒；
+/// （业务归属：LifecycleSystem——概率均为「日频」直接取值，时间口径见 TimeConfig（一游戏日 ≈ 43 现实秒），
 /// 人口增长靠「迁入+分家建房」驱动，迁入细则见文中「迁入」段）。
 /// </summary>
 public static class PopulationConfig
@@ -137,7 +137,7 @@ public static class PopulationConfig
 
     /// <summary>公式：家庭人均资产（文） → 高胎次生育系数（越富越不易再生，钳制在下限与 1 之间）。</summary>
     public static double BirthWealthFactor(long perCapitaAssets) =>
-        Math.Clamp(1.0 - perCapitaAssets / 40_000.0, BirthWealthFactorMin, 1.0);
+        Math.Clamp(1.0 - perCapitaAssets / WealthEase, BirthWealthFactorMin, 1.0);
 
     /// <summary>流民类型（需求 §2.2）：归民（务农无技能）/ 寓商（经商）/ 散勇（携兵刃）/ 客士（携书籍）。</summary>
     public enum ImmigrantType

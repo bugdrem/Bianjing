@@ -49,6 +49,11 @@ public static class EconomyConfig
     /// 官粮从此有稳定补给，不再只靠开局存量耗尽即饥荒；农田田赋为额外增收。</summary>
     public const double CourtFoodAmmoPerCapitaMonth = 3;
 
+    /// <summary>官仓储量上限（份/人，≈ 半年赈济储备：消耗 0.05 份/人/日 × 30 日 × 6 月）：
+    /// 朝廷粮饷/田赋进官仓按此封顶（批次八十七），超限少拨少收——旧版官粮净流入无限膨胀，
+    /// 且需求账本把官粮计入 grain 库存后缺粮判定永不触发。</summary>
+    public const double CourtFoodCapPerCapita = 9;
+
     /// <summary>田赋（批次七十三/八十五）：农田 grain 收成按此比例入官粮，余下散落田面归村民——
     /// 官粮此前只有开局存量、无任何产出（buildings.json 无 foodOutput 定义），耗尽即永久饥荒、全民早亡；
     /// 批次八十五 0.2→0.1：农田改发固定工资后，种田家庭现金收入大头是工钱而非卖粮，田赋减半补农户收成。</summary>
@@ -154,10 +159,16 @@ public static class EconomyConfig
     public const double LandTaxRateMin = 0.01;
     public const double LandTaxRateMax = 0.10;
 
+    /// <summary>土地税重税线（批次八十七：TaxPolicy 档位 2 上限、TaxSystem 重敛伤民阈值共用，旧版两处各自写死）。</summary>
+    public const double LandTaxRateHeavy = 0.06;
+
     /// <summary>商税：默认税率（2%~15% 可调，默认 5%），交易发生时自动扣除。</summary>
     public const double TradeTaxRateDefault = 0.05;
     public const double TradeTaxRateMin = 0.02;
     public const double TradeTaxRateMax = 0.15;
+
+    /// <summary>商税重税线（批次八十七：TaxPolicy 档位 2 上限、TaxSystem 关市苛征阈值共用，旧版两处各自写死）。</summary>
+    public const double TradeTaxRateHeavy = 0.10;
 
     /// <summary>人口税：默认关闭（-1 = 关闭），开启时 20% 从工资扣。</summary>
     public const double PollTaxRate = 0.20;

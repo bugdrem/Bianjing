@@ -128,7 +128,8 @@ public class GoodsSystem
             if (goodsId == Goods.Grain && b.Def.Category == "field")
             {
                 double tithe = yield * EconomyConfig.GrainTaxShare;
-                gs.Food += tithe;
+                // 批次八十七：官仓设容量上限（≈半年赈济储备），超限少收——旧版无限净流入使官粮无限膨胀
+                gs.Food = Math.Min(gs.Food + tithe, gs.Population * EconomyConfig.CourtFoodCapPerCapita);
                 yield -= tithe;
             }
 
@@ -254,7 +255,8 @@ public class GoodsSystem
                 continue;
 
             long pay = (long)(got * unitPrice);
-            long tax = (long)(pay * taxRate);
+            // 批次八十七：四舍五入（旧版 long 截断——小额交易税 <1 文直接归零，商税档位名存实亡）
+            long tax = (long)Math.Round(pay * taxRate, MidpointRounding.AwayFromZero);
             gs.TakeFromFamily(c, pay + tax); // 货款 + 商税由家庭公产支付
             if (tax > 0)
             {

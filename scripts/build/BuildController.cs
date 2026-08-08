@@ -103,7 +103,10 @@ public partial class BuildController : Node
             Visible = false,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
-        GetParent().CallDeferred(Node.MethodName.AddChild, _preview);
+        // 批次八十七：直接挂自身（旧版 GetParent().CallDeferred 延迟到帧末挂父节点，
+        // 父节点若在帧末前释放（返回标题重载场景）会 AddChild 到已释放节点；
+        // BuildController 自身无变换，预览用局部坐标与挂父等价）
+        AddChild(_preview);
 
         // 路径预览（批次八十）：直线/曲线拖动中整条线半透明显示，材质与单格预览同款
         _pathMesh = new ImmediateMesh();
@@ -119,7 +122,7 @@ public partial class BuildController : Node
             Visible = false,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
         };
-        GetParent().CallDeferred(Node.MethodName.AddChild, _pathPreview);
+        AddChild(_pathPreview);
     }
 
     // ---- 模式切换（由 BuildMenu 调用）----
