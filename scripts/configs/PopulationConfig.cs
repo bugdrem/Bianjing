@@ -3,22 +3,22 @@ using System;
 namespace Bianjing;
 
 /// <summary>
-/// 人口配置：迁入/婚配/生育/交友/迁出的日月频概率、生育概率公式与流民自带资产
-/// （业务归属：LifecycleSystem——概率均为「日频」直接取值，时间口径见 TimeConfig（一游戏日 ≈ 43 现实秒），
+/// 人口配置：迁入/婚配/生育/交友/迁出的旬月频概率、生育概率公式与流民自带资产
+/// （业务归属：LifecycleSystem——概率均为「旬频」直接取值，时间口径见 TimeConfig（一游戏旬 = 1 现实分钟），
 /// 人口增长靠「迁入+分家建房」驱动，迁入细则见文中「迁入」段）。
 /// </summary>
 public static class PopulationConfig
 {
-    /// <summary>每日迁入事件概率（四类流民按权重抽一，成行还需流民营/店坊有寄居空位；见 LifecycleSystem.Immigration）。</summary>
-    public const float ImmigrationChancePerDay = 0.1f;
+    /// <summary>每旬迁入事件概率（四类流民按权重抽一，成行还需流民营/店坊有寄居空位；批次九十一：日值×7/3 保年流入量；见 LifecycleSystem.Immigration）。</summary>
+    public const float ImmigrationChancePerDay = 0.2333f;
 
     /// <summary>单身迁入者为男性的概率。</summary>
     public const float SingleMaleChance = 0.6f;
 
-    /// <summary>每日概率：单身男婚配 / 生育基础值 / 成年人结交新友。</summary>
-    public const float MarriageChancePerDay = 0.01f;
-    public const float BirthChancePerDay = 0.003f;
-    public const float FriendChancePerDay = 0.01f;
+    /// <summary>每旬概率：单身男婚配 / 生育基础值 / 成年人结交新友（批次九十一：日值×7/3 保年次数）。</summary>
+    public const float MarriageChancePerDay = 0.0233f;
+    public const float BirthChancePerDay = 0.007f;
+    public const float FriendChancePerDay = 0.0233f;
 
     /// <summary>婚配每次抽样的候选人数（近亲跳过，抽满未果则本日作罢）。</summary>
     public const int MarriageTryCandidates = 8;
@@ -99,8 +99,9 @@ public static class PopulationConfig
     public const double SettlerFarmChance = 0.5;
 
     /// <summary>归民（未得农艺）中带手艺技能的比例：工匠流民是工坊创业主力（批次八十四——此前 Craft 技能
-    /// 无任何迁入来源，创业只出商铺不出工坊）。</summary>
-    public const double SettlerCraftChance = 0.25;
+    /// 无任何迁入来源，创业只出商铺不出工坊；批次九十二 0.25→0.5：对齐工商比例工坊3:商铺2，
+    /// 0.25 时工匠池仅为商才池的 1/3，工坊创业被商铺挤占）。</summary>
+    public const double SettlerCraftChance = 0.5;
 
     /// <summary>迁入成人各技能经验下限（批次六十五：迁入技能点随机，按类型区间抽初值；
     /// 寓商/散勇/客士各有行业积累，归民农艺从零起步）。</summary>
@@ -119,7 +120,8 @@ public static class PopulationConfig
         SkillType.Combat => 200,
         SkillType.Scholarship => 250,
         SkillType.Farming => 120,
-        SkillType.Craft => 120, // 批次八十四：工匠流民带经验底子（0~120，与农艺同档），缺货时创业门槛打折可较快达标
+        SkillType.Craft => 250, // 批次九十二 120→250：工匠流民经验 0~250（均 125 ≥ 创业门槛 120），
+        // 与商才同档——旧 0~120 均值 60 低于门槛，无缺货时工坊创业几乎全员不达标
         _ => 0,
     };
 

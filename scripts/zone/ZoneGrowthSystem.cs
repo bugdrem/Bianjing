@@ -4,13 +4,13 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>坊区生长系统（每日结算，日频概率——时间口径见 TimeConfig（一游戏日 ≈ 43 现实秒）：
+/// <summary>坊区生长系统（每旬结算，旬频概率——时间口径见 TimeConfig（一游戏旬 = 1 现实分钟）：
 /// 住宅不再缺房自动生成（人口靠迁入 + 分家建房驱动，见 LifecycleSystem）；
 /// 住宅容量=占地格数，住满后由拥挤事件驱动扩地；升级只影响楼高观感，
-/// 路边（主/辅路旁）够格占地的住宅按日概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
+/// 路边（主/辅路旁）够格占地的住宅按旬概率转业为商铺/工坊（前店后宅，带来就业与交易）。</summary>
 public class ZoneGrowthSystem
 {
-    /// <summary>建筑每日升级概率（调参见 configs/GrowthConfig）。</summary>
+    /// <summary>建筑每旬升级概率（调参见 configs/GrowthConfig）。</summary>
     private const float LevelUpChancePerDay = GrowthConfig.LevelUpChancePerDay;
 
     private readonly Random _rng = new();
@@ -46,18 +46,19 @@ public class ZoneGrowthSystem
         }
     }
 
-    /// <summary>单宅创业判定：找本宅合格创业者 → 按技能定去向并认领缺货 → 门槛/概率掷签 → 就地转业。</summary>
+    /// <summary>单宅创业判定：找本宅合格创业者 → 按技能/配比定去向并认领缺货 → 门槛/概率掷签 → 就地转业。</summary>
     private void TryStartup(GameState gs, BuildingInstance b)
     {
-        // 全城工商户数封顶 30%：大致对应“10 间住宅中两三个升级成工坊或商铺”
+        // 全城工商户数封顶（批次九十二 0.3→0.55：工商 5 : 民居 4，对应中后期职业比例士1商2工3民4；
+        // 旧 0.3 时商铺（创业池大）先占满封顶，工坊被挤出）
         int grown = 0, biz = 0;
         foreach (var g in gs.Buildings.Values)
         {
             if (g.Def.Category != "grown")
                 continue;
             grown++;
-            if (g.Def.Id != "house")
-                biz++;
+            if (g.Def.Id != "house" && g.Def.Id != "mansion")
+                biz++; // 批次九十二：宅邸是民居（豪宅），不再挤占工商户数名额
         }
         if (grown > 0 && biz >= grown * GrowthConfig.BizRatioCap)
             return;
@@ -66,17 +67,36 @@ public class ZoneGrowthSystem
         if (!TouchesRoad(gs, b))
             return;
 
-        // 本宅创业者：成年住户中找有技能方向者（商业/手艺），在业者亦可创业（转业时辞工）；主妇守家不创业
+        // 工商结构配比（批次九十二）：目标工坊:商铺 = 3:2（1 商铺配 1.5 工坊——商铺只购销不加工，
+        // 生产全在工坊）。工坊不足目标时创业向工坊倾斜（founder 放宽为非商才住户，出资雇匠开工坊）；
+        // 达标后回落技能方向逻辑，随商铺增长动态维持 3:2。
+        int shopCount = 0, workshopCount = 0;
+        foreach (var g in gs.Buildings.Values)
+        {
+            if (g.Def.Id == "shop") shopCount++;
+            else if (g.Def.Id == "workshop") workshopCount++;
+        }
+        bool wantWorkshop = workshopCount < shopCount * 1.5;
+
+        // 本宅创业者：工坊不足时非商才住户（含无技能者）皆可当坊主（工匠优先）；
+        // 工坊达标后仍须有技能方向（商业/手艺），在业者亦可创业（转业时辞工）；主妇守家不创业
         Citizen founder = null;
         foreach (var c in gs.Citizens.Values)
         {
-            if (c.HomeId != b.Id || c.IsChild)
+            if (!EligibleFounder(gs, b, c, wantWorkshop))
                 continue;
-            if (c.IsMarried && c.Gender == Gender.Female
-                && gs.Citizens.TryGetValue(c.SpouseId, out var husband) && husband.HasJob)
-                continue; // 丈夫在业的主妇持家采购，不创业
-            if (c.Skill == SkillType.Commerce || c.Skill == SkillType.Craft)
+            if (c.Skill == SkillType.Craft || c.Skill == SkillType.Commerce)
             {
+                founder = c;
+                break;
+            }
+        }
+        if (founder == null && wantWorkshop)
+        {
+            foreach (var c in gs.Citizens.Values)
+            {
+                if (!EligibleFounder(gs, b, c, wantWorkshop))
+                    continue;
                 founder = c;
                 break;
             }
@@ -84,7 +104,8 @@ public class ZoneGrowthSystem
         if (founder == null)
             return;
 
-        // 去向与选品：商业→商铺、手艺→工坊；认领最缺的可经营货品（无缺货时随机不饱和者）
+        // 去向与选品：商业→商铺、手艺→工坊；工坊不足时非商才者一律开工坊；
+        // 认领最缺的可经营货品（无缺货时随机不饱和者）
         string target = founder.Skill == SkillType.Commerce ? "shop" : "workshop";
         string goods = PickScarceGoods(gs, target);
         if (goods == "")
@@ -96,8 +117,11 @@ public class ZoneGrowthSystem
             * Math.Clamp(1.0 - days / EconomyConfig.DemandShortDays, 0.0, 1.0);
         double factor = 1.0 - scarcity;
 
-        // 门槛：技能经验与家庭公产，随缺口折扣
-        if (founder.SkillExp < EconomyConfig.StartupSkillExpReq * factor)
+        // 门槛：技能经验与家庭公产，随缺口折扣；非工匠坊主（雇匠开坊）经验门槛再减半
+        double expReq = EconomyConfig.StartupSkillExpReq * factor;
+        if (wantWorkshop && founder.Skill != SkillType.Craft)
+            expReq *= 0.5;
+        if (founder.SkillExp < expReq)
             return;
         if (!gs.Families.TryGetValue(founder.FamilyId, out var fam)
             || fam.SharedAssets < EconomyConfig.StartupAssetsReq * factor)
@@ -117,8 +141,25 @@ public class ZoneGrowthSystem
             founder.WorkplaceId = -1;
         }
         gs.ConvertGrown(b, target, goods); // 批次八十四：按认领缺货品专营（旧版 ConvertGrown 内随机重置，选品结果丢失）
-        gs.LogLifeEvent(founder, $"见市面缺{Goods.NameOf(goods)}，把住宅改成{target}");
+        bool hiredMaster = wantWorkshop && founder.Skill != SkillType.Craft; // 雇匠开坊（非工匠坊主）
+        gs.LogLifeEvent(founder, hiredMaster
+            ? $"出资雇匠，把住宅改成工坊专营{Goods.NameOf(goods)}"
+            : $"见市面缺{Goods.NameOf(goods)}，把住宅改成{target}");
         gs.PostNews("biz", $"{founder.Name}创业：住宅改营{target}，专营{Goods.NameOf(goods)}");
+    }
+
+    /// <summary>是否可作本宅创业者：非童、主妇守家不创业；工坊不足（wantWorkshop）时非商才皆可
+    /// （出资雇匠开工坊），否则须有商业/手艺技能方向。</summary>
+    private static bool EligibleFounder(GameState gs, BuildingInstance b, Citizen c, bool wantWorkshop)
+    {
+        if (c.HomeId != b.Id || c.IsChild)
+            return false;
+        if (c.IsMarried && c.Gender == Gender.Female
+            && gs.Citizens.TryGetValue(c.SpouseId, out var husband) && husband.HasJob)
+            return false; // 丈夫在业的主妇持家采购，不创业
+        if (wantWorkshop)
+            return c.Skill != SkillType.Commerce; // 工坊不足：非商才住户可雇匠开坊
+        return c.Skill == SkillType.Commerce || c.Skill == SkillType.Craft;
     }
 
     /// <summary>占地外扩 1 圈内是否有任意道路格（主/辅/小路皆可）：创业铺面贴路才有人流。</summary>

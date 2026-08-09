@@ -4,7 +4,7 @@
 	"effects": { "harvest": 0.15 } },
 
   { "id": "niangjiu",  "name": "酿酒秘方", "mode": "active",  "milestoneRequired": 2,
-	"costMoney": 300, "researchDays": 30,
+	"costMoney": 300, "researchDays": 13,
 	"description": "延请酒匠改良曲蘖，工坊加工产量增加一成",
 	"effects": { "craft": 0.1 } },
 
@@ -14,7 +14,7 @@
 	"effects": { "harvest": 0.2 } },
 
   { "id": "huozi",     "name": "活字印刷", "mode": "active",  "milestoneRequired": 3,
-	"costMoney": 400, "researchDays": 45,
+	"costMoney": 400, "researchDays": 19,
 	"description": "刊印工艺图谱流布坊间，各坊加工产量增加两成",
 	"effects": { "craft": 0.2 } },
 
@@ -24,7 +24,7 @@
 
   { "id": "jiaozi",    "name": "交子钱法", "mode": "active",  "milestoneRequired": 5,
 	"prerequisites": [ "huozi" ],
-	"costMoney": 600, "researchDays": 60,
+	"costMoney": 600, "researchDays": 26,
 	"description": "发行纸币便利商贸，全城税入增加一成半",
 	"effects": { "tax": 0.15 } }
 ]

@@ -2,25 +2,25 @@ namespace Bianjing;
 
 /// <summary>
 /// 时间与作息配置：日历换算、流速与居民上下工时刻
-/// （业务归属：GameClock 时钟驱动、各系统“月值/7 逐日结算”的分母、CitizenAgent 日常决策）。
-/// 一天 24 小时、一月 7 天、一年 12 月（批次七十五：日历由 10 天/月改 7 天/月，
-/// 面板仍 30 天制——后台 7 天显示 1/5/10/15/20/25/30 日；流速保持 1 游戏年 = 1 现实小时）。
-/// 调整 DaysPerMonth 即缩放每日的真实时长（日长 = SecondsPerGameHour × 24，年长恒为 3600 秒）。
+/// （业务归属：GameClock 时钟驱动、各系统“月值/3 逐旬结算”的分母、CitizenAgent 日常决策）。
+/// 一天 24 小时、一月 3 旬、一年 12 月（批次九十一：日历由 7 天/月改 3 旬/月，
+/// 显示上旬/中旬/下旬；流速改为 1 游戏旬 = 1 现实分钟，一游戏年 = 36 现实分钟）。
+/// 调整 DaysPerMonth 即缩放每旬的真实时长（旬长 = SecondsPerGameHour × 24）。
 /// </summary>
 public static class TimeConfig
 {
     /// <summary>每天小时数（24 小时，白天/夜晚各 12 时，见 DayStartHour/NightStartHour）。</summary>
     public const int HoursPerDay = 24;
 
-    /// <summary>每月天数（压缩日历：7 天为一月，一游戏日 ≈ 43 现实秒、一游戏月 ≈ 5 现实分钟）。</summary>
-    public const int DaysPerMonth = 7;
+    /// <summary>每月旬数（3 旬为一月：上旬/中旬/下旬，一游戏旬 = 1 现实分钟、一游戏月 ≈ 3 现实分钟）。</summary>
+    public const int DaysPerMonth = 3;
 
     /// <summary>每年月数。</summary>
     public const int MonthsPerYear = 12;
 
     /// <summary>1x 速度下一个游戏小时对应的真实秒数（速度主控旋钮）。
-    /// 基准：1 游戏年（84 天） = 1 现实小时 = 3600 秒（公式随 DaysPerMonth 自动重算）。</summary>
-    public const float SecondsPerGameHour = 3600f / (24 * DaysPerMonth * MonthsPerYear);
+    /// 基准：1 游戏旬 = 1 现实分钟 = 60 秒（旬 24 时 ÷ 60 秒 = 2.5 秒/游戏时，年 36 旬 = 36 分钟）。</summary>
+    public const float SecondsPerGameHour = 60f / 24;
 
     /// <summary>白天/夜晚分界（时）：白天 = [DayStartHour, NightStartHour)，其余为夜晚。
     /// 批次七十四：去除十二时辰，昼夜两态（显示与作息判定共用，光照夜间联动变暗）。</summary>
@@ -33,6 +33,6 @@ public static class TimeConfig
     public const int WorkStartHour = 6;
     public const int WorkEndHour = 18;
 
-    /// <summary>轮休周期（天）：每满此天数休息一天（按个体错峰，不全城同日停工）。</summary>
-    public const int RestCycleDays = 5;
+    /// <summary>轮休周期（旬）：每满此旬数休息一天（按个体错峰，不全城同日停工；旧 5 日×3/7≈2 旬）。</summary>
+    public const int RestCycleDays = 2;
 }

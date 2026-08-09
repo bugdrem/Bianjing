@@ -379,6 +379,7 @@ public partial class Main : Node3D
             ShadowEnabled = true,
             LightColor = new Color(1f, 0.96f, 0.88f), // 微暖阳光，去冷白感
             LightEnergy = WorldConfig.DaySunEnergy,
+            // 批次九十二：卷轴装裱层材质一律 Unshaded（不受光照），光照效果仅作用于地图内
         };
         AddChild(_sun);
 

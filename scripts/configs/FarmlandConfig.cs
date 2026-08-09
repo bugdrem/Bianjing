@@ -21,12 +21,12 @@ public static class FarmlandConfig
     /// <summary>田块升级的额外硬条件：全城存在此数以上的闲置农艺劳动力（升级才有意义，防白升）。</summary>
     public const int UpgradeSpareFarmers = 1;
 
-    /// <summary>开垦/升级的每日结算概率：给全城农场推进留出呼吸感，避免划区瞬间齐刷刷长满。</summary>
-    public const float FarmChancePerDay = 0.25f;
+    /// <summary>开垦/升级的每旬结算概率（批次九十一：日值×7/3）：给全城农场推进留出呼吸感，避免划区瞬间齐刷刷长满。</summary>
+    public const float FarmChancePerDay = 0.5833f;
 
     // ---- 一年两熟与产量加成（批次七十四/八十五）：农田只在收获窗口内产出——每年 6 月、9 月两熟，
     // 窗口外（含冬季 10-12 月）累计月数归零重新播种；一工两熟年产 100 份（田赋 10% 后 90）≈ 供 2.5 人年食
-    // （口粮 0.1 份/人/日，旧注释 60 份标 5 人年食与实际口径脱节），配合家庭采果/野味补足一 4-5 口之家；
+    // （口粮 0.2333 份/人/旬，旧注释 60 份标 5 人年食与实际口径脱节），配合家庭采果/野味补足一 4-5 口之家；
     // 批次八十五：农田岗位发固定工钱（salary 800），农民家庭现金收入不再只靠卖粮（≈40 文/月，不足开销 1/5）----
 
     /// <summary>农田收获月份窗口 [HarvestStartMonth, HarvestEndMonth]（含）：窗口外归零重播，冬季（10-12 月）休整。</summary>

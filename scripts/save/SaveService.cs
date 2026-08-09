@@ -17,7 +17,7 @@ namespace Bianjing;
 public static class SaveService
 {
     /// <summary>v21：水位改逐格变化（Cell.WaterH 随地势、下限 0），新增 WaterLevels 随档；旧档无水位数据，拒读。</summary>
-    public const int FormatVersion = 24; // 批次六十六：小路独立个体（LaneOwnerId 随档）
+    public const int FormatVersion = 25; // 批次九十一：旬历（Day 1-3 为旬）+ Citizen.AgeYears 独立字段
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -537,7 +537,18 @@ public static class SaveService
             MapSize = MapSizeBytes,
             MaxDatabases = 1,
         };
-        env.Open();
+        try
+        {
+            env.Open();
+        }
+        catch
+        {
+            // Open 失败（锁冲突/损坏档）也必须显式释放：LightningEnvironment 的终结器
+            // 会在未 Dispose 时直接抛 InvalidOperationException（库硬性设计，批次八十九），
+            // 旧版此处泄漏——GC 终结时进程崩溃（启动 8 秒菜单列档正撞此路径）
+            env.Dispose();
+            throw;
+        }
         return env;
     }
 

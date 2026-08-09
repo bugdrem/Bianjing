@@ -3,15 +3,15 @@ using System;
 namespace Bianjing;
 
 /// <summary>经济系统（批次五十六：单位切文、增加月俸与朝廷采购）。
-/// 每日结算：建筑维护费、官粮消耗、铸币；月俸由 Main.OnMonthPassed 触发；朝廷采购待后续对接。</summary>
+/// 每旬结算：建筑维护费、官粮消耗、铸币；月俸由 Main.OnMonthPassed 触发；朝廷采购待后续对接。</summary>
 public class EconomySystem
 {
-    /// <summary>人均日耗官粮：转发自 EconomyConfig。</summary>
+    /// <summary>人均旬耗官粮：转发自 EconomyConfig。</summary>
     private static double FoodPerCapita => EconomyConfig.OfficialFoodPerCapita;
 
     public void TickDay(GameState gs)
     {
-        // 建筑维护费（文/月 → 文/日）
+        // 建筑维护费（文/月 → 文/旬）
         int totalUpkeep = 0;
         double foodNet = -gs.Population * FoodPerCapita;
 
@@ -81,7 +81,7 @@ public class EconomySystem
             }
     }
 
-    /// <summary>铸币：铸币局每名在岗工匠每日铸钱入官库（文，数据驱动自 buildings.json，冶铸科技加成）。</summary>
+    /// <summary>铸币：铸币局每名在岗工匠每旬铸钱入官库（文，数据驱动自 buildings.json，冶铸科技加成）。</summary>
     private static void MintCoins(GameState gs)
     {
         double minted = 0;

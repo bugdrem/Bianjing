@@ -5,7 +5,7 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 耕种区系统（每日结算，日频概率——时间口径见 TimeConfig（一游戏日 ≈ 43 现实秒）：
+/// 耕种区系统（每旬结算，旬频概率——时间口径见 TimeConfig（一游戏旬 = 1 现实分钟）：
 /// 玩家划定耕种区（ZoneType.Farmland）后，区内空地按连通块分组；
 /// 具备农艺技能的村民自动开垦——在块内按尺寸阶梯（6×6→4×4→2×2）生成田块实体
 /// （田块为 buildings.json 的 farmland 定义，category=field，复用建筑占位/库存/月结收获链路）；

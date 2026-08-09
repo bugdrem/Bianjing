@@ -74,8 +74,11 @@ public class Citizen
     public string Name = "";
     public Gender Gender;
 
-    /// <summary>年龄按游戏月计（每月结算 +1）。</summary>
+    /// <summary>月龄（历法月数，每月结算 +1）：连续量，驱动成长动画等表现。</summary>
     public int AgeMonths;
+
+    /// <summary>岁数（历法岁，批次九十一：1 月/7 月各 +1，一年两岁）：社会年龄，成年/婚育/退休/死亡判定用。</summary>
+    public int AgeYears;
 
     // ---- 社会关系（存 Id，避免对象图循环）----
     public int FamilyId = -1;
@@ -134,7 +137,7 @@ public class Citizen
     /// <summary>无家可归的持续月数，过久则迁出。</summary>
     public int HomelessMonths;
 
-    /// <summary>连续缺粮/缺柴天数（家中无存货且买不到，需求面板展示）。</summary>
+    /// <summary>连续缺粮/缺柴旬数（家中无存货且买不到，需求面板展示）。</summary>
     public int FoodShortDays;
     public int FuelShortDays;
 
@@ -150,7 +153,6 @@ public class Citizen
     public Dictionary<string, string> Extra = new();
 
     // ---- 派生属性 ----
-    public int AgeYears => AgeMonths / 12;
     public bool IsChild => AgeYears < LifeConfig.AdultAgeYears;
     public bool IsAdult => AgeYears >= LifeConfig.AdultAgeYears && AgeYears < LifeConfig.ElderAgeYears;
     public bool IsElder => AgeYears >= LifeConfig.ElderAgeYears;

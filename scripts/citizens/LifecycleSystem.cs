@@ -6,10 +6,10 @@ namespace Bianjing;
 
 /// <summary>
 /// 居民生命周期系统：
-/// 每日——迁入（需求 §2.2 四类流民模型）→ 适龄婚配 → 生育 → 交友；
+/// 每旬——迁入（需求 §2.2 四类流民模型）→ 适龄婚配 → 生育 → 交友；
 /// 每月——老化 → 死亡 → 无家处理/迁出。
-/// 概率均为「日频」直接取值：时间口径见 TimeConfig（一游戏日 ≈ 43 现实秒、一游戏月 ≈ 5 现实分钟），
-/// 故迁入/婚育以「日」为单位小幅调参，约一游戏年（2 现实小时）内可把开局坊区填满。
+/// 概率均为「旬频」直接取值：时间口径见 TimeConfig（一游戏旬 = 1 现实分钟、一游戏月 ≈ 3 现实分钟），
+/// 故迁入/婚育以「旬」为单位小幅调参，约一游戏年（36 现实分钟）内可把开局坊区填满。
 /// 只操作数据层，不涉及任何表现节点。
 /// </summary>
 public class LifecycleSystem
@@ -24,7 +24,7 @@ public class LifecycleSystem
 
     private readonly Random _rng = new();
 
-    /// <summary>每日：迁入/婚配/生育/交友（日频概率）。</summary>
+    /// <summary>每旬：迁入/婚配/生育/交友（旬频概率）。</summary>
     public void TickDay(GameState gs)
     {
         Immigration(gs);
@@ -45,7 +45,12 @@ public class LifecycleSystem
     private static void Age(GameState gs)
     {
         foreach (var c in gs.Citizens.Values)
+        {
             c.AgeMonths++;
+            // 批次九十一：一年两岁——1 月与 7 月各增一岁（岁数不再由月龄整除派生）
+            if (gs.CurMonth == 1 || gs.CurMonth == 7)
+                c.AgeYears++;
+        }
     }
 
     private void Deaths(GameState gs)
@@ -146,7 +151,7 @@ public class LifecycleSystem
         }
     }
 
-    /// <summary>迁入（需求 §2.2 四类流民 + §8.1 流民营启动链）：每日一次事件，按权重抽一类流民寄居；
+    /// <summary>迁入（需求 §2.2 四类流民 + §8.1 流民营启动链）：每旬一次事件，按权重抽一类流民寄居；
     /// 人口税开启时流入停滞（§4.4）；须有可寄居处（流民营优先，其次有居住空位的店坊）才成行——
     /// 流民现金买不起地（§8.2），先落脚就业攒钱，再由 BuildUpFromLodging 攒够自建迁出。</summary>
     private void Immigration(GameState gs)
@@ -275,26 +280,30 @@ public class LifecycleSystem
     private Citizen NewNobleAdult(GameState gs, Gender gender)
     {
         var (surname, fullName) = NameGenerator.NewName(gender);
+        int years = PrinceMansionConfig.AdultAgeMin + _rng.Next(PrinceMansionConfig.AdultAgeSpan);
         return gs.AddCitizen(new Citizen
         {
             Surname = surname,
             Name = fullName,
             Gender = gender,
-            AgeMonths = (PrinceMansionConfig.AdultAgeMin + _rng.Next(PrinceMansionConfig.AdultAgeSpan)) * 12 + _rng.Next(12),
+            AgeYears = years,
+            AgeMonths = years * 12 + _rng.Next(12),
         });
     }
 
     private Citizen NewAdult(GameState gs, Gender gender)
     {
         var (surname, fullName) = NameGenerator.NewName(gender);
+        // 迁入成人年龄与随身家产：年龄取自 PopulationConfig；
+        // 家产由调用方按流民类型估资后注入家庭公产（批次六十八：资金家庭化）
+        int years = PopulationConfig.ArriveAgeMin + _rng.Next(PopulationConfig.ArriveAgeSpan);
         return gs.AddCitizen(new Citizen
         {
             Surname = surname,
             Name = fullName,
             Gender = gender,
-            // 迁入成人年龄与随身家产：年龄取自 PopulationConfig；
-            // 家产由调用方按流民类型估资后注入家庭公产（批次六十八：资金家庭化）
-            AgeMonths = (PopulationConfig.ArriveAgeMin + _rng.Next(PopulationConfig.ArriveAgeSpan)) * 12 + _rng.Next(12),
+            AgeYears = years,
+            AgeMonths = years * 12 + _rng.Next(12),
         });
     }
 
@@ -496,6 +505,7 @@ public class LifecycleSystem
                 Name = father.Surname + NameGenerator.GivenName(gender),
                 Gender = gender,
                 AgeMonths = 0,
+                AgeYears = 0, // 新生儿 0 岁（1 月/7 月加龄）
                 FatherId = father.Id,
                 MotherId = mother.Id,
                 FamilyId = mother.FamilyId,

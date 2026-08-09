@@ -75,10 +75,10 @@ public static class Milestones
         /// <summary>候选货品（任一满足即可，按序尝试）。</summary>
         public string[] GoodsIds = System.Array.Empty<string>();
 
-        /// <summary>每人每日消耗（份）。</summary>
+        /// <summary>每人每旬消耗（份；批次九十一：日值×7/3 保年耗量）。</summary>
         public double PerDay;
 
-        /// <summary>断供时每日兴致扣减。</summary>
+        /// <summary>断供时每旬兴致扣减。</summary>
         public float FunPenalty;
     }
 
@@ -86,20 +86,20 @@ public static class Milestones
     public static readonly TierNeed[] TierNeeds =
     {
         new() { MilestoneRequired = 2, Label = "烧饼", GoodsIds = new[] { Goods.Flatbread }, // 批次八十三：集镇起即需烧饼，早期制造出市场缺口驱动创业
-                PerDay = 0.02, FunPenalty = 0.4f },
+                PerDay = 0.0467, FunPenalty = 0.4f },
         new() { MilestoneRequired = 4, Label = "薪炭", GoodsIds = new[] { Goods.Charcoal },
-                PerDay = 0.015, FunPenalty = 0.4f },
+                PerDay = 0.035, FunPenalty = 0.4f },
         new() { MilestoneRequired = 5, Label = "副食", GoodsIds = new[] { Goods.Fruit },
-                PerDay = 0.03, FunPenalty = 0.5f },
+                PerDay = 0.07, FunPenalty = 0.5f },
         new() { MilestoneRequired = 6, Label = "酒馔", GoodsIds = new[] { Goods.Wine, Goods.Cured },
-                PerDay = 0.015, FunPenalty = 0.5f },
+                PerDay = 0.035, FunPenalty = 0.5f },
         new() { MilestoneRequired = 7, Label = "器用", GoodsIds = new[] { Goods.Timber, Goods.Ironware },
-                PerDay = 0.008, FunPenalty = 0.3f },
+                PerDay = 0.0187, FunPenalty = 0.3f },
     };
 }
 
-/// <summary>里程碑系统（每日结算）：条件达成即晋级——官库拨款记账、全城成人兴致小涨、广播事件
-/// （建造菜单刷新解锁项、HUD 弹报、被动科技由 TechSystem 顺势解锁）。一日至多晋一级，读档大城逐日补晋。</summary>
+/// <summary>里程碑系统（每旬结算）：条件达成即晋级——官库拨款记账、全城成人兴致小涨、广播事件
+/// （建造菜单刷新解锁项、HUD 弹报、被动科技由 TechSystem 顺势解锁）。一旬至多晋一级，读档大城逐旬补晋。</summary>
 public class MilestoneSystem
 {
     public void TickDay(GameState gs)

@@ -5,7 +5,7 @@ namespace Bianjing;
 /// <summary>
 /// 研习面板（科技树）：逐项展示科技名/说明/效果与状态——
 /// 已研成 / 研习中（进度）/ 可立项（主动，点按钮开研）/ 待条件（被动或未达门槛，标注所需里程碑与前置）。
-/// 主动科技同时只能在研一项，经费由官库逐日拨付；被动科技条件达成自动研成。
+/// 主动科技同时只能在研一项，经费由官库逐旬拨付；被动科技条件达成自动研成。
 /// </summary>
 public partial class TechPanel : PanelContainer
 {
@@ -39,7 +39,7 @@ public partial class TechPanel : PanelContainer
         _rows.AddThemeConstantOverride("separation", 8);
         box.AddChild(_rows);
 
-        var footer = new Label { Text = "被动科技条件达成自动研成；主动科技立项后逐日拨经费" };
+        var footer = new Label { Text = "被动科技条件达成自动研成；主动科技立项后逐旬拨经费" };
         footer.AddThemeFontSizeOverride("font_size", 12);
         footer.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f));
         box.AddChild(footer);
@@ -114,8 +114,8 @@ public partial class TechPanel : PanelContainer
         {
             if (ready && gs.ResearchTechId == "")
             {
-                // 可立项：点按钮开始研习（经费逐日从官库拨付）
-                var btn = new Button { Text = $"立项 {def.CostMoney:F0}文/{def.ResearchDays}日" };
+                // 可立项：点按钮开始研习（经费逐旬从官库拨付）
+                var btn = new Button { Text = $"立项 {def.CostMoney:F0}文/{def.ResearchDays}旬" };
                 string id = def.Id;
                 btn.Pressed += () =>
                 {

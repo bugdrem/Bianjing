@@ -35,7 +35,8 @@ public static class VillagerConfig
     /// <summary>公式：血量 → 柴薪折算（份/血）：一斧 ChopDamage 血恰好一担（LoadUnits 份）。</summary>
     public const double WoodPerHp = EconomyConfig.LoadUnits / ChopDamage;
 
-    /// <summary>家庭储备目标（份/人，约一月用量）：食物 / 柴薪 / 饮水，低于目标一半触发补货/打水。</summary>
+    /// <summary>家庭储备目标（份/人，按 30 天制日耗折算的存量观感；新制日耗 0.2333×3 旬×4.3 月 ≈ 3.0，
+    /// 相对实际月耗比例不变，无需随旬历缩放）：食物 / 柴薪 / 饮水，低于目标一半触发补货/打水。</summary>
     public const double FoodPerResident = 3.0;
     public const double WoodPerResident = 1.0;
     public const double WaterPerResident = 3.0;

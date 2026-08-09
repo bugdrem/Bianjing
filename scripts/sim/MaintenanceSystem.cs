@@ -4,8 +4,8 @@ using System.Collections.Generic;
 namespace Bianjing;
 
 /// <summary>
-/// 建筑老化与修缮系统（每日结算，各量按月值 1/30）：
-/// 人造建筑逐日老化，天然建筑固定不变；
+/// 建筑老化与修缮系统（每旬结算，各量按月值 1/3）：
+/// 人造建筑逐旬老化，天然建筑固定不变；
 /// 公共设施由修缮匠维护（官府出料钱）；住宅/工商建筑由居住者按人头集资修缮（以税养屋）；
 /// 完好度归零则坍塌拆除。
 /// </summary>
@@ -32,7 +32,7 @@ public class MaintenanceSystem
         RepairPrivate(gs);
         Collapse(gs);
 
-        // 批次八十七：完好度逐日变化，每月广播一次供老化变暗渲染刷新（旧版改 Condition 从不广播，
+        // 批次八十七：完好度逐旬变化，每月广播一次供老化变暗渲染刷新（旧版改 Condition 从不广播，
         // 建筑变暗只靠其它事件顺带重建；逐日广播会全量重建建筑层，故取月频）
         if (++_daysSinceRefresh >= Days)
         {

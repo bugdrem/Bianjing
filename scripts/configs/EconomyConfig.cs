@@ -41,37 +41,37 @@ public static class EconomyConfig
 
     // ===== 消耗 =====
 
-    /// <summary>人均日耗官粮（份，官库赈济储备，区别于家中口粮；批次七十八：0.2→0.05——
-    /// 官粮不再是人人每天的口粮，而是官府赈济/公务用度，补给靠朝廷粮饷 + 农田田赋）。</summary>
+    /// <summary>人均旬耗官粮（份，官库赈济储备，区别于家中口粮；批次七十八：0.2→0.05——
+    /// 官粮不再是人人每旬的口粮，而是官府赈济/公务用度，补给靠朝廷粮饷 + 农田田赋）。</summary>
     public const double OfficialFoodPerCapita = 0.05;
 
     /// <summary>朝廷粮饷（批次七十八）：朝廷按人口每月拨入官仓的官粮（份/人/月，凭空生成）——
     /// 官粮从此有稳定补给，不再只靠开局存量耗尽即饥荒；农田田赋为额外增收。</summary>
     public const double CourtFoodAmmoPerCapitaMonth = 3;
 
-    /// <summary>官仓储量上限（份/人，≈ 半年赈济储备：消耗 0.05 份/人/日 × 30 日 × 6 月）：
+    /// <summary>官仓储量上限（份/人，≈ 半年赈济储备：消耗 0.05 份/人/旬 × 3 旬 × 6 月 = 0.9）：
     /// 朝廷粮饷/田赋进官仓按此封顶（批次八十七），超限少拨少收——旧版官粮净流入无限膨胀，
     /// 且需求账本把官粮计入 grain 库存后缺粮判定永不触发。</summary>
-    public const double CourtFoodCapPerCapita = 9;
+    public const double CourtFoodCapPerCapita = 0.9;
 
     /// <summary>田赋（批次七十三/八十五）：农田 grain 收成按此比例入官粮，余下散落田面归村民——
     /// 官粮此前只有开局存量、无任何产出（buildings.json 无 foodOutput 定义），耗尽即永久饥荒、全民早亡；
     /// 批次八十五 0.2→0.1：农田改发固定工资后，种田家庭现金收入大头是工钱而非卖粮，田赋减半补农户收成。</summary>
     public const double GrainTaxShare = 0.1;
 
-    /// <summary>每人每日口粮 / 柴薪 / 饮水消耗（份，家中库存）。</summary>
-    public const double FoodPerDay = 0.1;
-    public const double FuelPerDay = 0.03;
-    public const double WaterPerDay = 0.1;
+    /// <summary>每人每旬口粮 / 柴薪 / 饮水消耗（份，家中库存；批次九十一：日值×7/3 保年耗不变）。</summary>
+    public const double FoodPerDay = 0.2333;
+    public const double FuelPerDay = 0.07;
+    public const double WaterPerDay = 0.2333;
 
-    /// <summary>断炊 / 缺柴时每日兴致扣减。</summary>
+    /// <summary>断炊 / 缺柴时每旬兴致扣减。</summary>
     public const float HungerFunPenalty = 1f;
     public const float ColdFunPenalty = 0.5f;
 
     // ===== 中央需求账本（第 9 项·阶段一）=====
 
-    /// <summary>需求账本：库存可支撑天数低于此值判为短缺（对齐家用「低于半月存量就补」口径）。</summary>
-    public const double DemandShortDays = 15.0;
+    /// <summary>需求账本：库存可支撑旬数低于此值判为短缺（对齐家用「低于半月存量就补」口径；15×3/7≈6.5 旬）。</summary>
+    public const double DemandShortDays = 6.5;
 
     /// <summary>需求账本调试摘要开关（GD.Print，仅开发期排查用，默认关）。
     /// 用 static readonly 而非 const：const false 会使调用处 if 分支被判为不可达代码（CS0162）；改运行时判定即可开发期改 true 重编开启。</summary>
@@ -82,8 +82,8 @@ public static class EconomyConfig
     /// <summary>田面收成最多集中成几堆（防 1m 格下散出上百小堆拖垮拾运与渲染）。</summary>
     public const int HarvestMaxPiles = 8;
 
-    /// <summary>每名在岗工人每日加工产量（份，工坊/商铺）。</summary>
-    public const double CraftPerWorkerDay = 0.8;
+    /// <summary>每名在岗工人每旬加工产量（份，工坊/商铺；批次九十一：日值×7/3 保年产量不变）。</summary>
+    public const double CraftPerWorkerDay = 1.8667;
 
     /// <summary>地面物资堆单堆容量（份），满堆后多余收成烂在地里。</summary>
     public const double PileCapacity = 40;
@@ -107,25 +107,26 @@ public static class EconomyConfig
 
     // ===== 家计与就业（原 JobsConfig 并入）=====
 
-    /// <summary>每人每月生活开销（文，逐日按 1/DaysPerMonth 扣，先扣公产不足再成员分摊）。</summary>
+    /// <summary>每人每月生活开销（文，逐旬按 1/DaysPerMonth 扣，先扣公产不足再成员分摊）。</summary>
     public const long LivingCostPerCapita = 200;
 
-    /// <summary>无岗可寻时转入上山谋生（伐木/采摘/打猎）的概率。</summary>
-    public const float JoblessForageChance = 0.6f;
+    /// <summary>无岗可寻时转入上山谋生（伐木/采摘/打猎）的概率（批次九十一：等比×7/3 超界，
+    /// 改按「不上山」概率等比——闲逛/待业节奏不变：1-(1-0.6)×3/7≈0.83）。</summary>
+    public const float JoblessForageChance = 0.83f;
 
     // ===== 技能系统（需求 §3.3）=====
-    /// <summary>学徒每日经验累积量 / 熟练工匠所需经验 / 高级技工所需经验。</summary>
-    public const float SkillExpPerDay = 2f;
+    /// <summary>学徒每旬经验累积量 / 熟练工匠所需经验 / 高级技工所需经验。</summary>
+    public const float SkillExpPerDay = 4.6667f;
     public const float SkillExpSkilled = 200f;
     public const float SkillExpExpert = 600f;
 
     // ===== 自主创业（批次六十四：技能+家庭资金+市场缺口三条件，缺货越狠门槛越低）=====
 
-    /// <summary>创业基础日概率（无缺口时也保留小额创业可能）。</summary>
-    public const double StartupChancePerDay = 0.01;
+    /// <summary>创业基础旬概率（无缺口时也保留小额创业可能；批次九十一：日值×7/3 保年机会数不变）。</summary>
+    public const double StartupChancePerDay = 0.0233;
 
-    /// <summary>缺口加成系数：缺口每多一分（可支撑天数逼近 0），日概率额外加此值×缺口度。</summary>
-    public const double StartupScarcityBonus = 0.02;
+    /// <summary>缺口加成系数：缺口每多一分（可支撑旬数逼近 0），旬概率额外加此值×缺口度。</summary>
+    public const double StartupScarcityBonus = 0.0467;
 
     /// <summary>创业技能经验基础门槛（文/经验点，随缺口打折，下限 = 基础×（1-MaxDiscount））。</summary>
     public const double StartupSkillExpReq = 120;
@@ -133,13 +134,13 @@ public static class EconomyConfig
     /// <summary>创业家庭公产基础门槛（文，随缺口打折）。</summary>
     public const double StartupAssetsReq = 8_000;
 
-    /// <summary>缺口折扣上限：可支撑天数 0（最缺）时门槛最低打此折扣（0.5 = 五折）。</summary>
+    /// <summary>缺口折扣上限：可支撑旬数 0（最缺）时门槛最低打此折扣（0.5 = 五折）。</summary>
     public const double StartupMaxDiscount = 0.5;
 
     /// <summary>全城专营同货的铺面数上限（防垄断撞车；选品/转业均受此限）。</summary>
     public const int ShopSameGoodsCap = 3;
 
-    // ===== 修缮（原 MaintenanceConfig 并入）：建筑老化与两条修缮线，各量按月值逐日 1/DaysPerMonth 结算 =====
+    // ===== 修缮（原 MaintenanceConfig 并入）：建筑老化与两条修缮线，各量按月值逐旬 1/DaysPerMonth 结算 =====
 
     /// <summary>建筑每月老化量（完好度，天然建筑不老化）。</summary>
     public const float BuildingAgingPerMonth = 0.7f;

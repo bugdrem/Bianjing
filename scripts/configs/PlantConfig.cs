@@ -26,13 +26,13 @@ public static class PlantConfig
     public const float SeedChance = 0.03f;
     public const int SeedRange = 4;
 
-    /// <summary>成树每日挂果增量（份）与挂满后每日落果概率（只有果树挂果）。</summary>
-    public const double FruitPerDay = 0.1;
-    public const double DropChance = 0.1;
+    /// <summary>成树每旬挂果增量（份）与挂满后每旬落果概率（只有果树挂果；批次九十一：日值×7/3）。</summary>
+    public const double FruitPerDay = 0.2333;
+    public const double DropChance = 0.2333;
 
-    /// <summary>砍伐伤恢复：连续无人砍伐达到延迟天数后，每日回血量。</summary>
-    public const int RegenDelayDays = 3;
-    public const float RegenPerDay = 2f;
+    /// <summary>砍伐伤恢复：连续无人砍伐达到延迟旬数后，每旬回血量（延迟 3×3/7≈1.3 取 1 旬）。</summary>
+    public const int RegenDelayDays = 1;
+    public const float RegenPerDay = 4.6667f;
 
     /// <summary>长成大树所需月数。</summary>
     public const int MatureMonths = 12;

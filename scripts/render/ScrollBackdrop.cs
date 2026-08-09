@@ -43,12 +43,13 @@ public partial class ScrollBackdrop : Node3D
             Mesh = new PlaneMesh { Size = new Vector2(tableSide, tableSide) },
             Position = new Vector3(0f, _paperY - 0.5f, 0f),
             Layers = RenderLayers.Scroll,
+            // 批次九十二：卷轴层材质 Unshaded，不受任何光照（光照仅作用于地图内）
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.36f, 0.24f, 0.15f), // 胡桃木色
                 AlbedoTexture = MakeWoodTexture(),
                 Uv1Scale = new Vector3(tableSide / WoodTileSize, tableSide / WoodTileSize, 1f),
-                Roughness = 0.85f,
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             },
         });
 
@@ -62,6 +63,7 @@ public partial class ScrollBackdrop : Node3D
             MaterialOverride = new StandardMaterial3D
             {
                 AlbedoColor = new Color(0.96f, 0.96f, 0.94f), // 白底（略暖白）
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             },
         });
 
@@ -71,6 +73,7 @@ public partial class ScrollBackdrop : Node3D
             AlbedoColor = new Color(0.84f, 0.78f, 0.62f), // 绢帛暖米色（宋画手卷纸面）
             AlbedoTexture = MakeCloudTexture(),
             Uv1Scale = new Vector3(paperX / CloudTileSize, paperZ / CloudTileSize, 1f),
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
         };
         AddChild(new MeshInstance3D
         {
@@ -87,7 +90,11 @@ public partial class ScrollBackdrop : Node3D
             BottomRadius = RollerRadius,
             Height = paperZ + 60f, // 两端微出纸面，像轴头
         };
-        var rollerMat = new StandardMaterial3D { AlbedoColor = new Color(0.30f, 0.20f, 0.12f) }; // 深色漆木
+        var rollerMat = new StandardMaterial3D
+        {
+            AlbedoColor = new Color(0.30f, 0.20f, 0.12f), // 深色漆木
+            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+        };
         foreach (float sx in new[] { -1f, 1f })
         {
             AddChild(new MeshInstance3D
@@ -119,7 +126,11 @@ public partial class ScrollBackdrop : Node3D
         {
             Mesh = new PlaneMesh { Size = new Vector2(16f, 90f) },
             Layers = RenderLayers.Scroll,
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.2f, 0.18f, 0.16f, 0.25f) },
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.2f, 0.18f, 0.16f, 0.25f),
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            },
         });
     }
 
@@ -132,7 +143,11 @@ public partial class ScrollBackdrop : Node3D
             Mesh = new PlaneMesh { Size = new Vector2(18f, 18f) },
             Position = new Vector3(0f, 0.02f, -60f),
             Layers = RenderLayers.Scroll,
-            MaterialOverride = new StandardMaterial3D { AlbedoColor = new Color(0.72f, 0.16f, 0.12f, 0.85f) }, // 印泥朱红
+            MaterialOverride = new StandardMaterial3D
+            {
+                AlbedoColor = new Color(0.72f, 0.16f, 0.12f, 0.85f), // 印泥朱红
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
+            },
         });
     }
 

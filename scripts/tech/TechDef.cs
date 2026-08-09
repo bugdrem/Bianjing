@@ -9,7 +9,7 @@ namespace Bianjing;
 /// 科技静态定义，从 res://data/techs.json 加载（mods/&lt;模组&gt;/techs.json 可覆盖/追加，机制同建筑定义）。
 /// 两种解锁模式：
 ///   passive——条件（里程碑+前置科技）达成后自动研成，不花钱；
-///   active——玩家在研习面板主动立项，逐日从官库拨研习经费，天数攒满研成。
+///   active——玩家在研习面板主动立项，逐旬从官库拨研习经费，旬数攒满研成。
 /// Effects 为效果键→加成值（如 "harvest":0.2 表示收成 +20%），由 GameState.TechFactor 汇总供各系统取用；
 /// mod 新科技可复用现有效果键，新效果键则需代码侧接线。
 /// </summary>
@@ -28,9 +28,9 @@ public class TechDef
     /// <summary>前置科技 id 列表（全部研成才可解锁/立项）。</summary>
     public List<string> Prerequisites { get; set; } = new();
 
-    /// <summary>主动模式：总研习经费（文，逐日均摊拨付）与所需天数。</summary>
+    /// <summary>主动模式：总研习经费（文，逐旬均摊拨付）与所需旬数（techs.json 的 researchDays，单位：旬）。</summary>
     public double CostMoney { get; set; }
-    public int ResearchDays { get; set; } = 30;
+    public int ResearchDays { get; set; } = 13;
 
     /// <summary>效果键→加成值（harvest 收成 / craft 加工 / tax 税收 / mint 铸币）。</summary>
     public Dictionary<string, double> Effects { get; set; } = new();

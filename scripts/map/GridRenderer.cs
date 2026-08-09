@@ -13,7 +13,25 @@ namespace Bianjing;
 /// </summary>
 public partial class GridRenderer : Node3D
 {
-    private static readonly Color RoadColor = new(0.56f, 0.53f, 0.46f); // 浅石板土路（主路提亮近白石街）
+    // ---- 道路砖石路面（参考宋砖石甃砌：主街白石石板错缝铺、坊巷青砖小砖）----
+    /// <summary>路面顶面顶点色：中性近白，砖色/明暗全由砖纹贴图承载（贴图×顶点色）。</summary>
+    private static readonly Color RoadTopColor = new(0.97f, 0.96f, 0.93f);
+    /// <summary>路缘地基立面顶点色：暗灰，乘砖纹后读作台基侧壁。</summary>
+    private static readonly Color RoadSideColor = new(0.30f, 0.29f, 0.27f);
+    /// <summary>主路白石小方砖（错缝）：砖 0.81m 见方、缝 0.026m，两行错半砖（宋御街砖石甃砌的白石街面）。</summary>
+    private static readonly Color MainBrickColor = new(0.91f, 0.90f, 0.86f);
+    /// <summary>辅路青砖长条（错缝）：砖 0.76×0.42m、缝 0.024~0.028m（宋砖淡青灰色，砖长宽约二比一）。</summary>
+    private static readonly Color SideBrickColor = new(0.53f, 0.55f, 0.52f);
+    /// <summary>小路深青砖小方砖（错缝）：砖 0.50m、缝 0.016m（坊巷青砖小砖，色更深）。</summary>
+    private static readonly Color LaneBrickColor = new(0.40f, 0.41f, 0.39f);
+
+    /// <summary>主路砖纹：128×256（两行错缝周期），行周期 128px＝0.84m（砖 124px + 缝 4px）。</summary>
+    private static readonly ImageTexture MainRoadTexture = MakeBrickTexture(MainBrickColor, 0.72f, 124, 124, 4);
+    /// <summary>辅路砖纹：256×256（两行错缝周期），横周期 256px＝0.78m、纵行周期 128px＝0.45m（砖 248×120px + 缝 8px）。</summary>
+    private static readonly ImageTexture SideRoadTexture = MakeBrickTexture(SideBrickColor, 0.72f, 248, 120, 8);
+    /// <summary>小路砖纹：128×256（两行错缝周期），行周期 128px＝0.52m（砖 124px + 缝 4px）。</summary>
+    private static readonly ImageTexture LaneRoadTexture = MakeBrickTexture(LaneBrickColor, 0.72f, 124, 124, 4);
+
     private static readonly Color WaterColor = new(0.45f, 0.49f, 0.40f); // 灰绿浑水（参考宋画运河色，去蓝去艳）
     private static readonly Color BridgeColor = new(0.62f, 0.60f, 0.54f); // 石桥灰白（原木褐偏艳）
     private static readonly Color TreeColor = new(0.30f, 0.40f, 0.26f);   // 灰绿树冠（压饱和度）
@@ -25,8 +43,17 @@ public partial class GridRenderer : Node3D
     /// <summary>耕种区色块：浅黄绿底色（批次七十：修复耕种区不渲染，与建筑区浅蓝区分）。</summary>
     private static readonly Color FarmlandZoneColor = new(0.82f, 0.90f, 0.45f, 0.35f);
 
-    // 地形顶点色：低处淡麦黄绿（参考宋画平原色），高处/陡坡渐变灰褐岩；水下河床泥沙色
-    private static readonly Color TerrainLowColor = new(0.63f, 0.59f, 0.44f); // 同 Main 卷轴画面基色
+    // ---- 平原橄榄色系（批次九十二调整，降饱和：向灰阶靠拢，明度层次保留）----
+    // 参考显示色：常规光照下预期观感（#66793e 橄榄绿·高处 / #6d6d26 橄榄色·中 / #535f3e 暗橄榄绿·低洼）
+    private static readonly Color PlainDarkDisplay  = new(0.324f, 0.371f, 0.242f);
+    private static readonly Color PlainMidDisplay   = new(0.427f, 0.427f, 0.151f);
+    private static readonly Color PlainLightDisplay = new(0.400f, 0.475f, 0.243f);
+    // 拟合顶点色：反向跑完整渲染管线（sRGB→线性→光照增益→Filmic→Adjustment→sRGB）使显示 ≈ 参考色。
+    // 渲染管线是非线性的（线性空间光照 + Filmic 暗部大幅提亮 + 降饱和），解析预补偿不准（曾两版偏黄），
+    // 改静态初始化时逐通道二分拟合；光照参数变更时 SimulatePipeline 内增益公式同步 WorldConfig。
+    private static readonly Color PlainDarkVertex  = FitVertex(PlainDarkDisplay);
+    private static readonly Color PlainMidVertex   = FitVertex(PlainMidDisplay);
+    private static readonly Color PlainLightVertex = FitVertex(PlainLightDisplay);
     private static readonly Color TerrainHighColor = new(0.51f, 0.47f, 0.41f); // 山顶/陡壁灰褐岩
     private static readonly Color BedColor = new(0.47f, 0.43f, 0.33f);         // 水下河床泥沙
 
@@ -56,12 +83,14 @@ public partial class GridRenderer : Node3D
     /// <summary>每帧最多只刷树层的分块数：树层重建（纯 MultiMesh 填充）远轻于整块重建，限额可更宽。</summary>
     private const int MaxTreeRebuildsPerFrame = 32;
 
-    /// <summary>单个地表分块：地形三角网格 + 水面 + 贴地路（各一张 ArrayMesh）、桥面方块与树木 MultiMesh。</summary>
+    /// <summary>单个地表分块：地形三角网格 + 水面 + 三类砖纹道路（各一张 ArrayMesh）、桥面方块与树木 MultiMesh。</summary>
     private class Chunk
     {
         public MeshInstance3D Terrain;   // 地形三角网格（65×65 顶点，含河床）
         public MeshInstance3D Water;     // 水面：顶点插值水位的半透三角网格（同地形模式）
-        public MeshInstance3D Roads;     // 贴地道路：采四角顶点高的四边形，坡道上自然倾斜
+        public MeshInstance3D RoadsMain; // 主路白石砖纹网格（UV 采世界坐标，分块间纹理连续）
+        public MeshInstance3D RoadsSide; // 辅路青砖砖纹网格
+        public MeshInstance3D RoadsLane; // 小路深青砖砖纹网格
         public MeshInstance3D Bridge;    // 桥面：三角化桥面（同道路顶面模式），两端引桥降到岸路高
         public MultiMeshInstance3D Trunks;     // 树干：圆柱
         public MultiMeshInstance3D ConeCrowns; // 圆锥树冠（针叶状）
@@ -92,8 +121,10 @@ public partial class GridRenderer : Node3D
     private SphereMesh _ballCrownMesh;
     private StandardMaterial3D _terrainMat; // 地形：顶点色受光
     private StandardMaterial3D _waterMat;   // 水面：顶点色半透（透见河床）
-    private StandardMaterial3D _roadMat;    // 贴地路：顶点色受光
-    private StandardMaterial3D _bridgeMat;  // 桥面：顶点色受光，双面（低角见桥底）
+    private StandardMaterial3D _roadMainMat; // 主路白石砖纹：纹理×顶点色受光，双面
+    private StandardMaterial3D _roadSideMat; // 辅路青砖砖纹
+    private StandardMaterial3D _roadLaneMat; // 小路深青砖砖纹
+    private StandardMaterial3D _bridgeMat;   // 桥面：顶点色受光，双面（低角见桥底）
 
     public override void _Ready()
     {
@@ -114,10 +145,29 @@ public partial class GridRenderer : Node3D
             Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
             CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
-        _roadMat = new StandardMaterial3D
+        // 三类道路砖纹材质（贴图×顶点色）：主路白石小方砖 / 辅路青砖长条 / 小路深青砖，
+        // 各自 Uv1Scale 把世界坐标 UV 平铺成砖周期（主 0.84m / 辅 0.78×0.45m / 小路 0.52m）；
+        // 双面：地基立面低角内外侧都可见
+        _roadMainMat = new StandardMaterial3D
         {
+            AlbedoTexture = MainRoadTexture,
+            Uv1Scale = new Vector3(1f / 0.84f, 1f / 0.84f, 1f),
             VertexColorUseAsAlbedo = true,
-            CullMode = BaseMaterial3D.CullModeEnum.Disabled, // 双面：地基立面低角内外侧都可见
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        };
+        _roadSideMat = new StandardMaterial3D
+        {
+            AlbedoTexture = SideRoadTexture,
+            Uv1Scale = new Vector3(1f / 0.78f, 1f / 0.45f, 1f),
+            VertexColorUseAsAlbedo = true,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+        };
+        _roadLaneMat = new StandardMaterial3D
+        {
+            AlbedoTexture = LaneRoadTexture,
+            Uv1Scale = new Vector3(1f / 0.52f, 1f / 0.52f, 1f),
+            VertexColorUseAsAlbedo = true,
+            CullMode = BaseMaterial3D.CullModeEnum.Disabled,
         };
         _bridgeMat = new StandardMaterial3D
         {
@@ -134,7 +184,9 @@ public partial class GridRenderer : Node3D
             {
                 Terrain = new MeshInstance3D { MaterialOverride = _terrainMat },
                 Water = new MeshInstance3D { MaterialOverride = _waterMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
-                Roads = new MeshInstance3D { MaterialOverride = _roadMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
+                RoadsMain = new MeshInstance3D { MaterialOverride = _roadMainMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
+                RoadsSide = new MeshInstance3D { MaterialOverride = _roadSideMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
+                RoadsLane = new MeshInstance3D { MaterialOverride = _roadLaneMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
                 Bridge = new MeshInstance3D { MaterialOverride = _bridgeMat, CastShadow = GeometryInstance3D.ShadowCastingSetting.Off },
                 Trunks = MakeMulti(_trunkMesh, useColors: true),
                 ConeCrowns = MakeMulti(_coneCrownMesh, useColors: true),
@@ -142,7 +194,9 @@ public partial class GridRenderer : Node3D
             };
             AddChild(chunk.Terrain);
             AddChild(chunk.Water);
-            AddChild(chunk.Roads);
+            AddChild(chunk.RoadsMain);
+            AddChild(chunk.RoadsSide);
+            AddChild(chunk.RoadsLane);
             AddChild(chunk.Bridge);
             AddChild(chunk.Trunks);
             AddChild(chunk.ConeCrowns);
@@ -208,6 +262,8 @@ public partial class GridRenderer : Node3D
             {
                 VertexColorUseAsAlbedo = true,
                 CullMode = BaseMaterial3D.CullModeEnum.Disabled,
+                // 批次九十二：裙板属卷轴装裱（地图外），材质 Unshaded 不受光照，颜色纯取顶点色
+                ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
             },
             Layers = RenderLayers.Scroll,
             CastShadow = GeometryInstance3D.ShadowCastingSetting.Off,
@@ -353,16 +409,92 @@ public partial class GridRenderer : Node3D
         }
     }
 
+    /// <summary>平原混色高度上限（米）：0~此高度内暗橄榄→橄榄→亮橄榄渐变，其后再渐透岩色。</summary>
+    private const float PlainMixMaxMeters = 12f;
+
+    // ---- 渲染管线模拟（供 FitVertex 反推顶点色）----
+    // 增益：暖阳（1.0/0.96/0.88 ×DaySunEnergy）+ Sky 暖环境（0.78/0.75/0.67 ×DayAmbientEnergy）逐通道累加；
+    // 环境色以地平线暖灰近似（天空半球含顶部蓝，实际略偏蓝，残余偏差可由显示色常量微调吸收）
+    private static float RGain => WorldConfig.DaySunEnergy + WorldConfig.DayAmbientEnergy * 0.78f;
+    private static float GGain => WorldConfig.DaySunEnergy * 0.96f + WorldConfig.DayAmbientEnergy * 0.75f;
+    private static float BGain => WorldConfig.DaySunEnergy * 0.88f + WorldConfig.DayAmbientEnergy * 0.67f;
+
+    /// <summary>sRGB → 线性（顶点色按 sRGB 输入，材质转线性空间做光照）。</summary>
+    private static float SrgbToLinear(float c) =>
+        c <= 0.04045f ? c / 12.92f : Mathf.Pow((c + 0.055f) / 1.055f, 2.4f);
+
+    /// <summary>线性 → sRGB（tonemap 后输出到显示器的还原）。</summary>
+    private static float LinearToSrgb(float c) =>
+        c <= 0.0031308f ? c * 12.92f : 1.055f * Mathf.Pow(c, 1f / 2.4f) - 0.055f;
+
+    /// <summary>Filmic 色调映射（Godot tonemap_filmic，Hejl-Burgess-Dawson 曲线：暗部大幅提亮，
+    /// 是顶点色直出与最终显示差异的主要来源之一）。</summary>
+    private static float Filmic(float x)
+    {
+        x = Mathf.Max(0f, x - 0.004f);
+        return (x * (6.2f * x + 0.5f)) / (x * (6.2f * x + 1.7f) + 0.06f);
+    }
+
+    /// <summary>完整管线模拟：sRGB 顶点色 → 线性 → 光照增益 → Filmic → Adjustment（降饱和 0.85 ×亮度 0.97）→ sRGB 显示。
+    /// 逐通道单调递增，供二分反推。Adjustment 参数同步 Main.SetupEnvironment。</summary>
+    private static Color SimulatePipeline(Color v)
+    {
+        float r = Filmic(SrgbToLinear(v.R) * RGain);
+        float g = Filmic(SrgbToLinear(v.G) * GGain);
+        float b = Filmic(SrgbToLinear(v.B) * BGain);
+        float gray = (r + g + b) / 3f;
+        r = (gray + (r - gray) * 0.85f) * 0.97f;
+        g = (gray + (g - gray) * 0.85f) * 0.97f;
+        b = (gray + (b - gray) * 0.85f) * 0.97f;
+        return new Color(LinearToSrgb(Mathf.Clamp(r, 0f, 1f)),
+            LinearToSrgb(Mathf.Clamp(g, 0f, 1f)), LinearToSrgb(Mathf.Clamp(b, 0f, 1f)));
+    }
+
+    /// <summary>反推顶点色：逐通道二分（24 次迭代，收敛精度 2⁻²⁴），使 SimulatePipeline(顶点色) ≈ 目标显示色。</summary>
+    private static Color FitVertex(Color target)
+    {
+        var lo = new Color(0f, 0f, 0f);
+        var hi = new Color(1f, 1f, 1f);
+        for (int it = 0; it < 24; it++)
+        {
+            var mid = (lo + hi) / 2f;
+            var sim = SimulatePipeline(mid);
+            if (sim.R < target.R) lo.R = mid.R; else hi.R = mid.R;
+            if (sim.G < target.G) lo.G = mid.G; else hi.G = mid.G;
+            if (sim.B < target.B) lo.B = mid.B; else hi.B = mid.B;
+        }
+        return (lo + hi) / 2f;
+    }
+
     /// <summary>地形顶点色：水下（低于本地水面 localWater）→河床泥沙（越深越暗）；
-    /// 陆上取「海拔显岩」与「陡坡显岩」的较大者，低平处草绿、高处/陡壁渐变岩褐。
+    /// 陆上平原区按海拔三色橄榄混色（批次九十二：参考 #6b8e23/#808000/#556b2f 经 FitVertex 反推
+    /// 顶点色，常规光照下显示 ≈ 色值直出；顶点伪随机抖动出草地斑驳），高处/陡壁再渐透岩褐。
     /// localWater 取自共享该顶点的水格最高水位（无水邻格为 -∞，不走河床色）。</summary>
-    private static Color TerrainVertexColor(float h, Vector3 normal, float localWater)
+    private static Color TerrainVertexColor(float h, Vector3 normal, float localWater, int gx, int gy)
     {
         if (h < localWater)
             return BedColor.Darkened(Mathf.Clamp((localWater - h) * 0.25f, 0f, 0.35f));
         float byHeight = Mathf.Clamp(h / TerrainConfig.MaxTerrainHeight, 0f, 1f);
         float bySlope = Mathf.Clamp((1f - normal.Y) * 2.4f, 0f, 1f); // 30°坡时约 0.32，开始透岩色
-        return TerrainLowColor.Lerp(TerrainHighColor, Mathf.Max(byHeight, bySlope));
+
+        // 平原混色：0~12m 内暗橄榄→橄榄→亮橄榄（拟合顶点色，显示 ≈ 参考色），叠加稳定伪随机抖动（±6%）显斑驳
+        float plainK = Mathf.Clamp(byHeight / (PlainMixMaxMeters / TerrainConfig.MaxTerrainHeight), 0f, 1f);
+        plainK = Mathf.Clamp(plainK + (VertexJitter(gx, gy) - 0.5f) * 0.12f, 0f, 1f);
+        Color plain = plainK < 0.5f
+            ? PlainDarkVertex.Lerp(PlainMidVertex, plainK * 2f)
+            : PlainMidVertex.Lerp(PlainLightVertex, (plainK - 0.5f) * 2f);
+
+        // 显岩：陡坡优先，其次高海拔（12m 起渐透，52m 全岩）
+        float rock = Mathf.Max(bySlope, Mathf.Clamp((h - PlainMixMaxMeters) / 40f, 0f, 1f));
+        return plain.Lerp(TerrainHighColor, rock);
+    }
+
+    /// <summary>顶点伪随机（0~1）：固定坐标的稳定整数 hash，供草地斑驳混色抖动（同顶点永不闪变）。</summary>
+    private static float VertexJitter(int x, int y)
+    {
+        uint n = (uint)(x * 374761393 + y * 668265263);
+        n = (n ^ (n >> 13)) * 1274126177;
+        return ((n ^ (n >> 16)) & 0xFFFFFF) / (float)0x1000000;
     }
 
     /// <summary>顶点处的局部水面高：共享该顶点的 ≤4 个水格中的最高水位（无水邻格返回负无穷）：
@@ -420,7 +552,7 @@ public partial class GridRenderer : Node3D
                 int vi = vy * vw + vx;
                 tVerts[vi] = new Vector3(gvx * cs - half, h, gvy * cs - half);
                 tNormals[vi] = n;
-                tColors[vi] = TerrainVertexColor(h, n, LocalWaterAtVertex(gs, gvx, gvy));
+                tColors[vi] = TerrainVertexColor(h, n, LocalWaterAtVertex(gs, gvx, gvy), gvx, gvy);
             }
         }
         var tIdx = new int[nx * nz * 6];
@@ -447,7 +579,10 @@ public partial class GridRenderer : Node3D
 
         // ---- 水面/贴地路/桥面/树木：逐格收集 ----
         var waterV = new List<Vector3>(); var waterN = new List<Vector3>(); var waterC = new List<Color>(); var waterI = new List<int>();
-        var roadV = new List<Vector3>(); var roadN = new List<Vector3>(); var roadC = new List<Color>(); var roadI = new List<int>();
+        // 三类道路各一组网格数组（按 RoadKind 分网格，各贴各的砖纹材质）
+        var roadMainV = new List<Vector3>(); var roadMainN = new List<Vector3>(); var roadMainC = new List<Color>(); var roadMainUv = new List<Vector2>(); var roadMainI = new List<int>();
+        var roadSideV = new List<Vector3>(); var roadSideN = new List<Vector3>(); var roadSideC = new List<Color>(); var roadSideUv = new List<Vector2>(); var roadSideI = new List<int>();
+        var roadLaneV = new List<Vector3>(); var roadLaneN = new List<Vector3>(); var roadLaneC = new List<Color>(); var roadLaneUv = new List<Vector2>(); var roadLaneI = new List<int>();
         var bridgeV = new List<Vector3>(); var bridgeN = new List<Vector3>(); var bridgeC = new List<Color>(); var bridgeI = new List<int>();
         var trunkXf = new List<Transform3D>();
         var trunkColor = new List<Color>();
@@ -487,16 +622,18 @@ public partial class GridRenderer : Node3D
                     }
                     else
                     {
-                        // 三类道路按种类区分明度（主路最亮、小路最暗），抬升统一取 RoadSurfaceLift；
-                        // 四角采地形顶点高，坡道上路面自然倾斜贴地；外边缘垂一圈地基立面
-                        Color rc = cell.RoadKind switch
+                        // 三类道路按种类分进不同砖纹网格（主路白石 / 辅路青砖 / 小路深青砖），
+                        // 抬升统一取 RoadSurfaceLift；四角采地形顶点高，坡道上路面自然倾斜贴地；
+                        // 外边缘垂一圈地基立面（暗顶点色乘砖纹）
+                        List<Vector3> rv = roadSideV; List<Vector3> rn = roadSideN;
+                        List<Color> rcol = roadSideC; List<Vector2> ruv = roadSideUv; List<int> ridx = roadSideI;
+                        switch (cell.RoadKind)
                         {
-                            RoadKind.Main => RoadColor.Lightened(0.25f),
-                            RoadKind.Lane => RoadColor.Darkened(0.2f),
-                            _ => RoadColor, // Side
-                        };
-                        AddDrapedQuad(hf, roadV, roadN, roadC, roadI, x, y, WorldConfig.RoadSurfaceLift, rc);
-                        AddRoadFoundation(gs, hf, roadV, roadN, roadC, roadI, x, y, rc.Darkened(0.35f));
+                            case RoadKind.Main: rv = roadMainV; rn = roadMainN; rcol = roadMainC; ruv = roadMainUv; ridx = roadMainI; break;
+                            case RoadKind.Lane: rv = roadLaneV; rn = roadLaneN; rcol = roadLaneC; ruv = roadLaneUv; ridx = roadLaneI; break;
+                        }
+                        AddDrapedQuad(hf, rv, rn, rcol, ruv, ridx, x, y, WorldConfig.RoadSurfaceLift, RoadTopColor);
+                        AddRoadFoundation(gs, hf, rv, rn, rcol, ruv, ridx, x, y, RoadSideColor);
                     }
                 }
                 else if (cell.BuildingId < 0)
@@ -527,9 +664,11 @@ public partial class GridRenderer : Node3D
             }
         }
 
-        chunk.Water.Mesh = MeshFrom(waterV, waterN, waterC, waterI);
-        chunk.Roads.Mesh = MeshFrom(roadV, roadN, roadC, roadI);
-        chunk.Bridge.Mesh = MeshFrom(bridgeV, bridgeN, bridgeC, bridgeI);
+        chunk.Water.Mesh = MeshFrom(waterV, waterN, waterC, null, waterI);
+        chunk.RoadsMain.Mesh = MeshFrom(roadMainV, roadMainN, roadMainC, roadMainUv, roadMainI);
+        chunk.RoadsSide.Mesh = MeshFrom(roadSideV, roadSideN, roadSideC, roadSideUv, roadSideI);
+        chunk.RoadsLane.Mesh = MeshFrom(roadLaneV, roadLaneN, roadLaneC, roadLaneUv, roadLaneI);
+        chunk.Bridge.Mesh = MeshFrom(bridgeV, bridgeN, bridgeC, null, bridgeI);
         FillMultiMesh(chunk.Trunks.Multimesh, trunkXf, trunkColor);
         FillMultiMesh(chunk.ConeCrowns.Multimesh, coneXf, coneColor);
         FillMultiMesh(chunk.BallCrowns.Multimesh, ballXf, ballColor);
@@ -649,8 +788,9 @@ public partial class GridRenderer : Node3D
         idx.Add(b + 1); idx.Add(b + 3); idx.Add(b + 2);
     }
 
-    /// <summary>往网格数组追加一格贴地四边形（道路用）：四角采地形顶点高 + 抬升，坡道上自然倾斜。</summary>
-    private static void AddDrapedQuad(HeightField hf, List<Vector3> v, List<Vector3> n, List<Color> c, List<int> idx,
+    /// <summary>往网格数组追加一格贴地四边形（道路用）：四角采地形顶点高 + 抬升，坡道上自然倾斜；
+    /// UV 采世界坐标（米），材质 Uv1Scale 按砖周期缩放——全图连续平铺，分块边界纹理不错位。</summary>
+    private static void AddDrapedQuad(HeightField hf, List<Vector3> v, List<Vector3> n, List<Color> c, List<Vector2> uv, List<int> idx,
         int x, int y, float lift, Color col)
     {
         float half = MapGrid.Size * MapGrid.CellSize / 2f;
@@ -665,6 +805,10 @@ public partial class GridRenderer : Node3D
         n.Add(VertexNormal(hf, x + 1, y + 1));
         for (int i = 0; i < 4; i++)
             c.Add(col);
+        uv.Add(new Vector2(x - half, y - half));
+        uv.Add(new Vector2(x + 1 - half, y - half));
+        uv.Add(new Vector2(x - half, y + 1 - half));
+        uv.Add(new Vector2(x + 1 - half, y + 1 - half));
         idx.Add(b); idx.Add(b + 1); idx.Add(b + 2);
         idx.Add(b + 1); idx.Add(b + 3); idx.Add(b + 2);
     }
@@ -713,20 +857,23 @@ public partial class GridRenderer : Node3D
             new Vector3(x1, t10 - thick, z0), new Vector3(x1, t11 - thick, z1), new Vector3(1, 0, 0), side);
     }
 
-    /// <summary>以四顶点（a=左上 b=右上 c=左下 d=右下）拼一四边形（两三角），统一法线/色。</summary>
+    /// <summary>以四顶点（a=左上 b=右上 c=左下 d=右下）拼一四边形（两三角），统一法线/色；
+    /// uv 非空时按 uvA~uvD 补纹理坐标（道路地基立面采世界坐标，砖缝竖线如砌墙侧壁）。</summary>
     private static void AddQuad(List<Vector3> v, List<Vector3> nl, List<Color> cl, List<int> idx,
-        Vector3 a, Vector3 b, Vector3 cc, Vector3 d, Vector3 nrm, Color col)
+        Vector3 a, Vector3 b, Vector3 cc, Vector3 d, Vector3 nrm, Color col,
+        List<Vector2> uv = null, Vector2 uvA = default, Vector2 uvB = default, Vector2 uvC = default, Vector2 uvD = default)
     {
         int bi = v.Count;
         v.Add(a); v.Add(b); v.Add(cc); v.Add(d);
         for (int i = 0; i < 4; i++) { nl.Add(nrm); cl.Add(col); }
+        if (uv != null) { uv.Add(uvA); uv.Add(uvB); uv.Add(uvC); uv.Add(uvD); }
         idx.Add(bi); idx.Add(bi + 1); idx.Add(bi + 2);
         idx.Add(bi + 1); idx.Add(bi + 3); idx.Add(bi + 2);
     }
 
     /// <summary>道路地基立面：本路格四边中邻格非路且非桥的边，垂一面从路面顶下到 −RoadFoundationDepth，
-    /// 路面读作坐在高台基上（内部路-路边隐藏，只在路网轮廓垂基）。</summary>
-    private static void AddRoadFoundation(GameState gs, HeightField hf, List<Vector3> v, List<Vector3> n, List<Color> c, List<int> idx,
+    /// 路面读作坐在高台基上（内部路-路边隐藏，只在路网轮廓垂基）；UV 采世界坐标，侧壁砖缝竖线如砌墙。</summary>
+    private static void AddRoadFoundation(GameState gs, HeightField hf, List<Vector3> v, List<Vector3> n, List<Color> c, List<Vector2> uv, List<int> idx,
         int x, int y, Color col)
     {
         float half = MapGrid.Size * MapGrid.CellSize / 2f;
@@ -748,20 +895,24 @@ public partial class GridRenderer : Node3D
         // 南边 z0（y-1）/ 北边 z1（y+1）/ 西边 x0（x-1）/ 东边 x1（x+1）
         if (!RoadLike(x, y - 1))
             AddQuad(v, n, c, idx, new Vector3(x0, h00, z0), new Vector3(x1, h10, z0),
-                new Vector3(x0, h00 - depth, z0), new Vector3(x1, h10 - depth, z0), new Vector3(0, 0, -1), col);
+                new Vector3(x0, h00 - depth, z0), new Vector3(x1, h10 - depth, z0), new Vector3(0, 0, -1), col,
+                uv, new Vector2(x0, z0), new Vector2(x1, z0), new Vector2(x0, z0), new Vector2(x1, z0));
         if (!RoadLike(x, y + 1))
             AddQuad(v, n, c, idx, new Vector3(x1, h11, z1), new Vector3(x0, h01, z1),
-                new Vector3(x1, h11 - depth, z1), new Vector3(x0, h01 - depth, z1), new Vector3(0, 0, 1), col);
+                new Vector3(x1, h11 - depth, z1), new Vector3(x0, h01 - depth, z1), new Vector3(0, 0, 1), col,
+                uv, new Vector2(x1, z1), new Vector2(x0, z1), new Vector2(x1, z1), new Vector2(x0, z1));
         if (!RoadLike(x - 1, y))
             AddQuad(v, n, c, idx, new Vector3(x0, h01, z1), new Vector3(x0, h00, z0),
-                new Vector3(x0, h01 - depth, z1), new Vector3(x0, h00 - depth, z0), new Vector3(-1, 0, 0), col);
+                new Vector3(x0, h01 - depth, z1), new Vector3(x0, h00 - depth, z0), new Vector3(-1, 0, 0), col,
+                uv, new Vector2(x0, z1), new Vector2(x0, z0), new Vector2(x0, z1), new Vector2(x0, z0));
         if (!RoadLike(x + 1, y))
             AddQuad(v, n, c, idx, new Vector3(x1, h10, z0), new Vector3(x1, h11, z1),
-                new Vector3(x1, h10 - depth, z0), new Vector3(x1, h11 - depth, z1), new Vector3(1, 0, 0), col);
+                new Vector3(x1, h10 - depth, z0), new Vector3(x1, h11 - depth, z1), new Vector3(1, 0, 0), col,
+                uv, new Vector2(x1, z0), new Vector2(x1, z1), new Vector2(x1, z0), new Vector2(x1, z1));
     }
 
-    /// <summary>三角面数组 → ArrayMesh（空集返回 null，节点不挂网格）。</summary>
-    private static ArrayMesh MeshFrom(List<Vector3> v, List<Vector3> n, List<Color> c, List<int> idx)
+    /// <summary>三角面数组 → ArrayMesh（空集返回 null，节点不挂网格）；uv 可空（地形/水面/桥面无纹理）。</summary>
+    private static ArrayMesh MeshFrom(List<Vector3> v, List<Vector3> n, List<Color> c, List<Vector2> uv, List<int> idx)
     {
         if (v.Count == 0)
             return null;
@@ -770,10 +921,60 @@ public partial class GridRenderer : Node3D
         arrays[(int)Mesh.ArrayType.Vertex] = v.ToArray();
         arrays[(int)Mesh.ArrayType.Normal] = n.ToArray();
         arrays[(int)Mesh.ArrayType.Color] = c.ToArray();
+        if (uv != null)
+            arrays[(int)Mesh.ArrayType.TexUV] = uv.ToArray();
         arrays[(int)Mesh.ArrayType.Index] = idx.ToArray();
         var mesh = new ArrayMesh();
         mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Triangles, arrays);
         return mesh;
+    }
+
+    /// <summary>程序化生成错缝砖纹（宋砖石路面用，免外部贴图）：纹理宽=一行砖周期、高=两行
+    /// （偶数行错半砖，平铺后砖缝交错如砌墙）；砖缝不另配色，取砖色×mortarDarken 加深（刻痕感）；
+    /// 砖面按砖格伪随机微扰明度（±3% 石色不均），砖内四宫格再微扰（±2.5% 磨面质感）。
+    /// 世界尺度由材质 Uv1Scale 给定，纹理像素只定图案。</summary>
+    private static ImageTexture MakeBrickTexture(Color brick, float mortarDarken, int brickPxW, int brickPxH, int mortarPx)
+    {
+        int rowPxW = brickPxW + mortarPx, rowPxH = brickPxH + mortarPx;
+        int w = rowPxW, h = rowPxH * 2;
+        var img = Image.CreateEmpty(w, h, false, Image.Format.Rgb8);
+        int halfOffset = rowPxW / 2; // 偶数行错半砖
+        for (int py = 0; py < h; py++)
+        {
+            bool inMortarRow = py % rowPxH >= brickPxH;
+            int row = py / rowPxH; // 0/1：两行错缝周期
+            int offset = row == 1 ? halfOffset : 0;
+            int by = py / rowPxH;
+            int qy = (py % brickPxH) / (brickPxH / 2);
+            for (int px = 0; px < w; px++)
+            {
+                int sx = (px + rowPxW - offset) % rowPxW; // 行内错缝后的水平位置
+                bool inMortar = inMortarRow || sx % rowPxW >= brickPxW;
+                Color col;
+                if (inMortar)
+                {
+                    col = brick * mortarDarken;
+                }
+                else
+                {
+                    int bx = sx / rowPxW; // 逻辑砖格
+                    int qx = (sx % brickPxW) / (brickPxW / 2);
+                    float brickShade = 0.97f + 0.06f * Hash01(bx, by);                     // 砖级 ±3%
+                    float grain = 1f + (Hash01(bx * 7 + qx, by * 13 + qy) - 0.5f) * 0.05f; // 砖内四宫格 ±2.5%
+                    col = brick * Mathf.Clamp(brickShade * grain, 0.85f, 1.08f);
+                }
+                img.SetPixel(px, py, col);
+            }
+        }
+        return ImageTexture.CreateFromImage(img);
+    }
+
+    /// <summary>整数哈希 → [0,1)：砖格级伪随机，同砖同值（避免逐像素噪声的闪烁观感）。</summary>
+    private static float Hash01(int a, int b)
+    {
+        int h = a * 73856093 ^ b * 19349663;
+        h = (h ^ (h >> 13)) * 1274126177;
+        return ((h & 0x7fffffff) % 1000) / 1000f;
     }
 
     /// <summary>重建坊区色块层：建筑区（浅蓝）与耕种区（浅黄绿）两个候选集分开上色，
@@ -1006,7 +1207,7 @@ public partial class GridRenderer : Node3D
                 idx.Add(b0 + 1); idx.Add(b0 + 3); idx.Add(b0 + 2);
             }
         }
-        _skirt.Mesh = MeshFrom(v, norm, col, idx);
+        _skirt.Mesh = MeshFrom(v, norm, col, null, idx);
     }
 
     private void BuildGridLines()

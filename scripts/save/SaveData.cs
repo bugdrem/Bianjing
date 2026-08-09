@@ -51,7 +51,7 @@ public class WorldSave
     /// <summary>v10：城市里程碑等级。</summary>
     public int MilestoneLevel;
 
-    /// <summary>v10：已研成科技 id 列表与在研项目（id + 已投入天数）。</summary>
+    /// <summary>v10：已研成科技 id 列表与在研项目（id + 已投入旬数；批次九十一：日改旬）。</summary>
     public List<string> Techs = new();
     public string ResearchTechId = "";
     public double ResearchDays;

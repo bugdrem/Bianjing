@@ -3,9 +3,9 @@ using Godot;
 
 namespace Bianjing;
 
-/// <summary>游戏时钟：暂停/1x/2x/4x。日历与流速取自 TimeConfig（每月 7 天、每天 24 时、每年 12 月；
-/// 面板按 30 天制映射显示日期，昼夜两态替代十二时辰）；
-/// 日常事务按「日」结算，人口老化等大事按「月」结算；金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
+/// <summary>游戏时钟：暂停/0.5x/1x/2x/4x。日历与流速取自 TimeConfig（每月 3 旬、每天 24 时、每年 12 月；
+/// 旬名以上旬/中旬/下旬显示，昼夜两态替代十二时辰）；
+/// 日常事务按「旬」结算，人口老化等大事按「月」结算；金钱与货品不走时钟，由居民动作完成时即时结算。</summary>
 public partial class GameClock : Node
 {
     /// <summary>日历常量转发自 TimeConfig（调参集中在 configs 目录）。</summary>
@@ -24,18 +24,17 @@ public partial class GameClock : Node
     public int Day { get; private set; } = 1;
     public int Hour { get; private set; } = 6;
 
-    /// <summary>面板日期（批次七十五，30 天制）：后台 7 天/月映射到 30 日制——第 1 天=1 日、
-    /// 第 2~7 天=5/10/15/20/25/30 日，玩家视角一年 360 天，为正月十五等节日预留（正月十五 = 1 月第 4 后台天）。</summary>
-    public int DisplayDay => Day == 1 ? 1 : (Day - 1) * 5;
+    /// <summary>旬名（批次九十一：每月 3 旬）：第 1 旬=上旬、第 2 旬=中旬、第 3 旬=下旬（顶栏展示）。</summary>
+    public string DayName => Day switch { 1 => "上旬", 2 => "中旬", _ => "下旬" };
 
     /// <summary>是否夜晚（批次七十四）：白天 = [DayStartHour, NightStartHour)，其余为夜。
     /// 顶栏显示与光照联动共用；上下工作息沿用 WorkStartHour/WorkEndHour（与昼夜边界一致）。</summary>
     public bool IsNight => Hour < TimeConfig.DayStartHour || Hour >= TimeConfig.NightStartHour;
 
-    /// <summary>开局以来的绝对天数（从 0 起）：供轮休等周期作息计算。</summary>
+    /// <summary>开局以来的绝对旬数（从 0 起）：供轮休等周期作息计算。</summary>
     public int AbsoluteDay => ((Year - 1) * MonthsPerYear + (Month - 1)) * DaysPerMonth + (Day - 1);
 
-    /// <summary>每过一游戏日触发（日常结算：生长/求职/税赋/物品等）。</summary>
+    /// <summary>每过一游戏旬触发（日常结算：生长/求职/税赋/物品等）。</summary>
     public event Action DayPassed;
 
     /// <summary>每过一游戏月触发（大事结算：老化/生死/动物繁育等）。</summary>

@@ -5,14 +5,14 @@ namespace Bianjing;
 
 /// <summary>
 /// 货品系统：
-/// 日结——各户消耗口粮/柴薪 → 家中无存自动上市购买（钱货当场两讫）→ 买不到则记短缺天数并扣兴致，
-/// 并对全部库存（建筑/背包/地面堆）计龄一天（为变质铺垫）；
+/// 旬结——各户消耗口粮/柴薪 → 家中无存自动上市购买（钱货当场两讫）→ 买不到则记短缺旬数并扣兴致，
+/// 并对全部库存（建筑/背包/地面堆）计龄一旬（为变质铺垫）；
 /// 月结——农田按收获周期产粮，收成散落在田格上化为物资堆，由农夫拾运入仓。
 /// 货款优先分给铺面雇工，无雇工的官营铺面收入入官库。只动库存/Money/短缺计数，不做任何雇佣与生死决策。
 /// </summary>
 public class GoodsSystem
 {
-    /// <summary>每人每日口粮 / 柴薪 / 饮水消耗（份）：转发自 EconomyConfig。</summary>
+    /// <summary>每人每旬口粮 / 柴薪 / 饮水消耗（份）：转发自 EconomyConfig。</summary>
     private static double FoodPerDay => EconomyConfig.FoodPerDay;
     private static double FuelPerDay => EconomyConfig.FuelPerDay;
     private static double WaterPerDay => EconomyConfig.WaterPerDay;

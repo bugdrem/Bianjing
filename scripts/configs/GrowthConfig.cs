@@ -69,13 +69,14 @@ public static class GrowthConfig
 
     // ---- 升级 ----
 
-    /// <summary>建筑每日升级概率 / 失修不升门槛（完好度）/ 每级所需吸引力系数。</summary>
-    public const float LevelUpChancePerDay = 0.02f;
+    /// <summary>建筑每旬升级概率 / 失修不升门槛（完好度）/ 每级所需吸引力系数（批次九十一：日值×7/3）。</summary>
+    public const float LevelUpChancePerDay = 0.0467f;
     public const float LevelUpMinCondition = 60f;
     public const float LevelUpDesirPerLevel = 1.2f;
 
-    /// <summary>全城自发工商户占比封顶（约十间住宅出两三家）。</summary>
-    public const float BizRatioCap = 0.3f;
+    /// <summary>全城自发工商户占比封顶（批次九十二 0.3→0.55：工商 5 : 民居 4，对应中后期
+    /// 职业比例士1商2工3民4；0.3 时商铺先占满封顶，工坊被挤出）。</summary>
+    public const float BizRatioCap = 0.55f;
 
     /// <summary>住宅扩建边长上限（米）：初始建房尺寸与拥挤扩建均不超此限（批次六十六 8→6）。</summary>
     public const int ExpandMaxSide = 6;

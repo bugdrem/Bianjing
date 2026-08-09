@@ -487,7 +487,7 @@ public partial class CitizenAgent : Node3D
 
     // ---- 作息：固定上下班 + 轮休 ----
 
-    /// <summary>今日是否为本人的休息日：按绝对天数每 RestCycleDays 天休一天，叠加个体 Id 错峰（不全城同日停工）。</summary>
+    /// <summary>今日是否为本人的休息日：按绝对旬数每 RestCycleDays 旬休一天，叠加个体 Id 错峰（不全城同日停工）。</summary>
     private bool IsRestDayToday()
         => (_clock.AbsoluteDay + C.Id) % TimeConfig.RestCycleDays == 0;
 
@@ -1163,7 +1163,7 @@ public partial class CitizenAgent : Node3D
                 _haulBuildingId = -1;
                 break;
             case ActivityType.Working:
-                // 下工记账（批次七十四工钱月结）：官营岗位当班工钱（月俸/月天数）记入应发，月底统一发放；
+                // 下工记账（批次七十四工钱月结）：官营岗位当班工钱（月俸/月旬数）记入应发，月底统一发放；
                 // 工商自营岗位不发固定工钱（收入来自售货分账与寄卖货款，钱不凭空生）；
                 // 农夫田仓有存粮就挑一担带走（回家或上市，视作官仓实物俸的一部分）
                 if (gs.Buildings.TryGetValue(C.WorkplaceId, out var work))
@@ -1684,7 +1684,8 @@ public partial class CitizenAgent : Node3D
     {
         _lookAgeYears = C.AgeYears;
         // 体型随年龄线性生长：新生儿 ChildMinScale → 成年门槛达满值 1.0，再乘全局村民模型缩放
-        float grow = Mathf.Min(1f, C.AgeMonths / (LifeConfig.AdultAgeYears * 12f));
+        // 批次九十一：岁数改独立字段后直接用 AgeYears（一年两岁，16 岁成年 ≈ 8 游戏年 ≈ 4.8 现实小时）
+        float grow = Mathf.Min(1f, C.AgeYears / (float)LifeConfig.AdultAgeYears);
         float bodyScale = (VillagerConfig.ChildMinScale + (1f - VillagerConfig.ChildMinScale) * grow)
             * VillagerConfig.ModelScale;
         _body.Scale = Vector3.One * bodyScale;

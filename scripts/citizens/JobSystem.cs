@@ -4,10 +4,10 @@ using System.Collections.Generic;
 namespace Bianjing;
 
 /// <summary>
-/// 就业系统（每日结算）：
+/// 就业系统（每旬结算）：
 /// 岗位失效清理 → 退休（家产充裕的老人才退）→ 适龄求职（无岗位则伐木自谋生路）→ 家庭开销；
 /// 修缮匠并入受雇体系（岗位在修缮房，俸禄由官库在下工时结算）。
-/// 工钱不在此处发放——由表现层 CitizenAgent 在每班下工时按动作即时结算（月俸/30 一班）。
+/// 工钱不在此处发放——由表现层 CitizenAgent 在每班下工时按动作即时结算（月俸/DaysPerMonth 一班）。
 /// 工商业「一直营业只退休」，作息疲劳由表现层 CitizenAgent 实时驱动。
 /// </summary>
 public class JobSystem
@@ -27,7 +27,7 @@ public class JobSystem
         HouseholdSpending(gs);
     }
 
-    /// <summary>技能经验积累（按日结算，表现层只管动作）：有技能方向者每日涨点，无技能者不涨（先有方向才谈精进）；
+    /// <summary>技能经验积累（按旬结算，表现层只管动作）：有技能方向者每旬涨点，无技能者不涨（先有方向才谈精进）；
     /// 在岗全速，无职谋生（含伐木采猎）半速——批次八十三：创业者不必先就业，解除“就业涨经验/无职可创业”的互斥；
     /// 经验驱动等级（SkillExpSkilled/Expert）与求职/创业门槛（见 SeekJobs/ZoneGrowthSystem.Startups）。</summary>
     private static void SkillGrowth(GameState gs)
@@ -212,7 +212,7 @@ public class JobSystem
         return null;
     }
 
-    /// <summary>家庭生活开销（月值 1/7 逐日扣）：统一扣家庭公产（批次六十八：个人私产停流通），公产不足即告罄；
+    /// <summary>家庭生活开销（月值 1/3 逐旬扣）：统一扣家庭公产（批次六十八：个人私产停流通），公产不足即告罄；
     /// 批次七十八：开销入官库（柴米官营——家庭日常用度向官府采买），旧版扣款凭空消失，是总资产黑洞之一。</summary>
     private static void HouseholdSpending(GameState gs)
     {

@@ -5,6 +5,8 @@
     <EnableDynamicLoading>true</EnableDynamicLoading>
   </PropertyGroup>
   <ItemGroup>
+    <!-- 批次九十一：LMDB 升级 0.23.0（用户要求）——0.23.0 改变文件布局（meta 偏移 +8、版本 01→03），
+         0.22.0 旧档（含 saves/quick）全部 MDB_INVALID 不可读；早期开发版不考虑历史兼容，旧档作废 -->
     <PackageReference Include="LightningDB" Version="0.23.0" />
   </ItemGroup>
 </Project>

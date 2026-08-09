@@ -85,13 +85,15 @@ public class DemandSystem
         AddDemand(ledger, Goods.Wood, pop * EconomyConfig.FuelPerDay);
         AddDemand(ledger, Goods.Water, pop * EconomyConfig.WaterPerDay);
 
-        // 分级需求（仅成人，镜像 GoodsSystem.ConsumeTierNeeds 口径）：记于首选候选货
+        // 分级需求（仅成人，镜像 GoodsSystem.ConsumeTierNeeds 口径）：全部候选货都记账
+        // （批次九十二：旧版只记 GoodsIds[0]，Wine/Cured、Timber/Ironware 等任选候选里
+        // 只有首选有需求项，其余永远不短缺——高级货无需求信号，工坊/商铺选品认领不到）
         foreach (var need in Milestones.TierNeeds)
         {
             if (gs.MilestoneLevel < need.MilestoneRequired)
                 break; // TierNeeds 按里程碑升序排列，后面的更不满足
-            if (need.GoodsIds.Length > 0)
-                AddDemand(ledger, need.GoodsIds[0], adults * need.PerDay);
+            foreach (var id in need.GoodsIds)
+                AddDemand(ledger, id, adults * need.PerDay);
         }
 
         // 结算库存与可支撑天数
