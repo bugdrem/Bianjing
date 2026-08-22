@@ -30,11 +30,21 @@ public static class WorldGenerator
     /// <summary>生成是否完成（LoadingScreen 轮询到 true 即回调收尾）。</summary>
     public static volatile bool Done;
 
-    /// <summary>后台异步生成：Task.Run 包一层，异常兜底记日志后仍置 Done（避免加载画面卡死）。
+    /// <summary>生成是否失败（生成异常吞没后置真）：LoadingScreen 据此报错而非收尾进世界，
+    /// 避免半成品地图被当成新世界装配（修复前异常被 catch 吞掉、Done 仍置真 → 残缺地图直接进游戏）。</summary>
+    public static volatile bool Failed;
+
+    /// <summary>生成失败原因（主线程展示用；随 Failed 一起写入，Done 置真后主线程读取即稳定）。</summary>
+    public static string Error = "";
+
+    /// <summary>后台异步生成：Task.Run 包一层，异常兜底置失败标志后仍置 Done（避免加载画面卡死），
+    /// 由 LoadingScreen 区分「成功 / 失败」决定收尾方式。
     /// 种子由调用方提供（新游戏地图预览页掷定）：同种子从头重跑草图 → 与预览完全一致。</summary>
     public static void GenerateAsync(GameState gs, int seed)
     {
         Done = false;
+        Failed = false;
+        Error = "";
         Progress = 0f;
         Task.Run(() =>
         {
@@ -44,6 +54,8 @@ public static class WorldGenerator
             }
             catch (Exception e)
             {
+                Failed = true;
+                Error = e.ToString();
                 GD.PushError($"世界生成异常：{e}");
             }
             finally

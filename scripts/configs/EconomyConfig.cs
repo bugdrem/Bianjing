@@ -2,7 +2,7 @@ namespace Bianjing;
 
 /// <summary>
 /// 经济配置（批次五十六全面重写：单位由「贯」切换为「文」，增月俸/安家银/朝廷采购/技能/新税制）。
-/// 货币：铜钱（文）为唯一内部单位；白银/黄金仅用于 UI 展示（见 CurrencyConfig/CurrencyHelper）。
+/// 货币：铜钱（文）为唯一内部单位；大额以白银（两 / 万两）展示（见 CurrencyConfig/CurrencyHelper，黄金单位已废除）。
 /// （业务归属：Goods 定价、GoodsSystem 消耗、CraftingSystem 加工、EconomySystem 官粮/月俸/采购、
 /// ItemPileObj 堆容量、CitizenAgent 供货/采买、JobSystem 家计/技能匹配、MaintenanceSystem 修缮、
 /// TaxSystem 三税种、ZoneGrowthSystem 建筑生长）。

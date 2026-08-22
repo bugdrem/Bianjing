@@ -16,7 +16,12 @@ public class MapGrid
     public MapGrid()
     {
         for (int i = 0; i < _cells.Length; i++)
+        {
+            // struct 数组零初始化：字段初值（LaneOwnerId=-1）对数组元素不生效，须显式设哨兵，
+            // 否则无主小路默认 0 会被误判归属 building 0（半价补偿错主 / KeyNotFoundException）
             _cells[i].BuildingId = -1;
+            _cells[i].LaneOwnerId = -1;
+        }
     }
 
     public ref Cell CellAt(int x, int y) => ref _cells[y * Size + x];

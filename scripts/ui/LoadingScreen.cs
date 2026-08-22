@@ -14,6 +14,9 @@ public partial class LoadingScreen : CanvasLayer
     /// <summary>加载完成回调（在主线程 _Process 中触发，可安全操作场景树）。</summary>
     public System.Action OnFinished;
 
+    /// <summary>加载失败回调（仅默认源 WorldGenerator 生成失败时触发；自定义源如读档自行处理失败）。</summary>
+    public System.Action OnError;
+
     /// <summary>自定义完成轮询源（null 时读 WorldGenerator.Done）：读档等非生成任务可注入。</summary>
     private readonly Func<bool> _isDone;
 
@@ -91,7 +94,11 @@ public partial class LoadingScreen : CanvasLayer
         if (_isDone?.Invoke() ?? WorldGenerator.Done)
         {
             _finished = true;
-            OnFinished?.Invoke(); // 主线程回调：装配世界节点/恢复暂停
+            // 默认源（世界生成）失败：走错误回调，不再装配半成品世界
+            if (_isDone == null && WorldGenerator.Failed)
+                OnError?.Invoke();
+            else
+                OnFinished?.Invoke(); // 主线程回调：装配世界节点/恢复暂停
             QueueFree();
         }
     }

@@ -603,7 +603,6 @@ public partial class BuildController : Node
         var queue = new Queue<Vector2I>();
         queue.Enqueue(start);
         bool closed = true;
-        int changed = 0;
         while (queue.Count > 0)
         {
             var c = queue.Dequeue();
@@ -623,8 +622,6 @@ public partial class BuildController : Node
             // 边界墙：道路（不含小路）与河流——只作围合线，不扩散不填充
             if ((cell.HasRoad && cell.RoadKind != RoadKind.Lane) || cell.HasWater)
                 continue;
-            if (ApplyZoneStamp(c))
-                changed++;
             queue.Enqueue(c + new Vector2I(1, 0));
             queue.Enqueue(c + new Vector2I(-1, 0));
             queue.Enqueue(c + new Vector2I(0, 1));
@@ -632,9 +629,16 @@ public partial class BuildController : Node
         }
         if (!closed)
         {
+            // 未封闭：尚未落区即返回（修复前 BFS 边扩散边 ApplyZoneStamp，出图后已改部分未回滚，
+            // 玩家看到"未生效"提示却已有部分分区被静默写入）
             Hud?.ShowCellInfo("油漆桶未生效：区域未封闭（道路/河流未围拢）");
             return;
         }
+        // 封闭确认后再统一落区（visited 均在地图内；边界墙/不可规划格由 ApplyZoneStamp 自行跳过）
+        int changed = 0;
+        foreach (var c in visited)
+            if (ApplyZoneStamp(c))
+                changed++;
         if (changed > 0)
             FlushZoneDirty();
         else

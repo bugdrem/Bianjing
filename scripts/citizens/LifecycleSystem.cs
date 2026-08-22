@@ -421,6 +421,7 @@ public class LifecycleSystem
         long portion = DetachFromFamily(gs, man);  // 男方分得的家产份额
         long dowry = DetachFromFamily(gs, woman);   // 妻子嫁妝
         long pooled = Math.Max(0, portion + dowry - cost); // 公产抵房款，余作新家底（预算已按份额估，正常够付）
+        LandSaleToPlayer(gs, cost); // 地价交玩家 + 3 成工钱发无业者（与 MoveFamilyToNewHouse 同口径，修复前房款凭空蒸发）
         var fam = gs.AddFamily(new Family { HomeId = newHome.Id, SharedAssets = pooled });
         man.FamilyId = fam.Id;
         woman.FamilyId = fam.Id;
@@ -831,6 +832,7 @@ public class LifecycleSystem
             occupancy[c.HomeId]--;
 
         long pooled = Math.Max(0, portion - cost); // 分产抵房款，余作新家底
+        LandSaleToPlayer(gs, cost); // 地价交玩家 + 3 成工钱发无业者（与 MoveFamilyToNewHouse 同口径，修复前房款凭空蒸发）
         var fam = gs.AddFamily(new Family { HomeId = newHome.Id, SharedAssets = PopulationConfig.SplitFamilyAssets + pooled });
         c.FamilyId = fam.Id;
         fam.MemberIds.Add(c.Id);

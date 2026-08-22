@@ -239,6 +239,13 @@ public partial class Main : Node3D
                 EventBus.RaiseGameLoaded();
                 GetTree().Paused = false;
             },
+            OnError = () =>
+            {
+                // 世界生成失败：不再装配世界，回到标题菜单并提示原因（GameState 保持未建，下次新建重来）
+                GameState.I = null;
+                GetTree().Paused = false;
+                _menu.NotifyLoadFailed($"世界生成失败，已回到主菜单：{WorldGenerator.Error}");
+            },
         };
         AddChild(loading);
         WorldGenerator.GenerateAsync(GameState.I, seed);

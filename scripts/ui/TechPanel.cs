@@ -115,7 +115,7 @@ public partial class TechPanel : PanelContainer
             if (ready && gs.ResearchTechId == "")
             {
                 // 可立项：点按钮开始研习（经费逐旬从官库拨付）
-                var btn = new Button { Text = $"立项 {def.CostMoney:F0}文/{def.ResearchDays}旬" };
+                var btn = new Button { Text = $"立项 {CurrencyHelper.FormatWen((long)def.CostMoney)}/{def.ResearchDays}旬" };
                 string id = def.Id;
                 btn.Pressed += () =>
                 {
