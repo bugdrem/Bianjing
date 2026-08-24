@@ -4,7 +4,7 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>顶栏：钱/粮/人口/里程碑/日期 + 时间控制、政策与研习、存读档按钮。数据每帧轮询刷新；点击钱可查收支明细。</summary>
-public partial class TopBar : PanelContainer
+public partial class TopBar : FrostedPanel
 {
     private readonly GameClock _clock;
     private readonly Action _onSave;
@@ -60,6 +60,7 @@ public partial class TopBar : PanelContainer
         _speedBox.Selected = 2; // 默认 1x
         _speedBox.ItemSelected += idx => _clock.Speed = _speeds[idx];
         box.AddChild(_speedBox);
+        UiTheme.StyleOptionPopup(_speedBox);
 
         box.AddChild(new VSeparator());
         AddActionButton(box, "政策", _onPolicy);
@@ -94,7 +95,8 @@ public partial class TopBar : PanelContainer
 
         var gs = GameState.I;
         _money.Text = CurrencyHelper.FormatWen(gs.Money);
-        _money.AddThemeColorOverride("font_color", gs.Money < 0 ? new Color(1f, 0.3f, 0.3f) : new Color(1f, 0.9f, 0.5f));
+        // 新中式：钱款用墨字（书法黑），欠债转朱红点睛（同告警色），不再用金色
+        _money.AddThemeColorOverride("font_color", gs.Money < 0 ? UiTheme.Seal : UiTheme.Ink);
         long cityTotal = gs.Money;
         foreach (var f in gs.Families.Values)
             cityTotal += Math.Max(0, f.SharedAssets);

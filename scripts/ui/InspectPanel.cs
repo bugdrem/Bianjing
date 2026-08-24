@@ -9,7 +9,7 @@ namespace Bianjing;
 /// 另支持树木（树龄/长势/挂果）、野物（月龄）与地面物资堆（堆内明细）。
 /// 面板常驻刷新（每 0.5s 重读数据层），目标消失（死亡/拆除/砍倒/拾空）自动关闭。
 /// </summary>
-public partial class InspectPanel : PanelContainer
+public partial class InspectPanel : FrostedPanel
 {
     private const float RefreshInterval = 0.5f;
 
@@ -38,6 +38,7 @@ public partial class InspectPanel : PanelContainer
     private int _plantCell = -1; // 植物/地面堆均以格索引为键（见 GameState.Plants/Piles）
     private int _pileCell = -1;
     private int _animalId = -1;
+    private ForeignVisitor _visitor; // 外城来人页（瞬态 Node 引用，靠 IsInstanceValid 判存活）
 
     public override void _Ready()
     {
@@ -173,6 +174,17 @@ public partial class InspectPanel : PanelContainer
         _animalId = a.Id;
         Visible = true;
         EventBus.RaiseCitizenSelected(-1);
+        Refresh();
+    }
+
+    /// <summary>展示外城来人页：显示所属城池（国家）+ 个人信息；访客离场被回收后自动关闭。</summary>
+    public void ShowVisitor(ForeignVisitor v)
+    {
+        ClearTargets();
+        ClearBack(); // 外部入口（点选世界目标）：无返回目标
+        _visitor = v;
+        Visible = true;
+        EventBus.RaiseCitizenSelected(-1); // 隐藏市民选中路线
         Refresh();
     }
 
@@ -339,6 +351,7 @@ public partial class InspectPanel : PanelContainer
         _plantCell = -1;
         _pileCell = -1;
         _animalId = -1;
+        _visitor = null;
     }
 
     public void Close()
@@ -405,6 +418,13 @@ public partial class InspectPanel : PanelContainer
                 RenderPile(pile);
             else
                 Close(); // 已拾空
+        }
+        else if (_visitor != null)
+        {
+            if (GodotObject.IsInstanceValid(_visitor))
+                RenderVisitor(_visitor);
+            else
+                Close(); // 已离场/被回收
         }
     }
 
@@ -793,6 +813,44 @@ public partial class InspectPanel : PanelContainer
             sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日）");
         _body.Text = sb.ToString().TrimEnd();
     }
+
+    // ---- 外城来人页：所属城池 + 个人信息 ----
+
+    /// <summary>外城来人详情：标题为姓名；展示所属城池（国家）+ 方位、身份、性别年龄、携带货物、当前状态。</summary>
+    private void RenderVisitor(ForeignVisitor v)
+    {
+        _title.Text = v.VisitorName;
+        _bioToggle.Visible = false;
+        _bioBody.Visible = false;
+        _locateRow.Visible = false; // 批次七十：定位按钮仅居民页显示
+        _familyLocateRow.Visible = false; // 批次七十一：家庭页专属定位行
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"来自：{v.Origin.Name}（{DirName(v.FromDir)}）");
+        sb.AppendLine($"身份：{VisitorKindName(v.Kind)}");
+        sb.AppendLine($"{(v.Gender == Gender.Female ? "女" : "男")}  {v.AgeYears}岁");
+        sb.AppendLine($"携带：{(v.Inv.IsEmpty ? "无" : string.Join("、", v.Inv.Stacks.Select(s => $"{Goods.NameOf(s.GoodsId)} {s.Amount:F0}份")))}");
+        sb.AppendLine($"当前：{v.StateText}");
+        _body.Text = sb.ToString().TrimEnd();
+    }
+
+    /// <summary>方位汉字（MapDir 序：北/东/南/西）。</summary>
+    private static string DirName(MapDir d) => d switch
+    {
+        MapDir.North => "城北",
+        MapDir.East => "城东",
+        MapDir.South => "城南",
+        MapDir.West => "城西",
+        _ => "",
+    };
+
+    private static string VisitorKindName(ForeignVisitor.VisitorKind k) => k switch
+    {
+        ForeignVisitor.VisitorKind.Merchant => "商人",
+        ForeignVisitor.VisitorKind.Peddler => "货郎",
+        ForeignVisitor.VisitorKind.Tourist => "游客",
+        _ => "来客",
+    };
 
     private static string SkillName(SkillType s) => s switch
     {

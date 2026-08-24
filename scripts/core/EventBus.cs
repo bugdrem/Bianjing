@@ -44,6 +44,9 @@ public static class EventBus
     /// <summary>玩家/村民新放置一座建筑（仅实时放置触发，读档重建不发）：供王爷府建成钩子、菜单刷新等响应。</summary>
     public static event Action<BuildingInstance> BuildingPlaced;
 
+    /// <summary>某方向道路首次通到地图边缘（参数 = 该边对应的邻城方向）：供「通边即播报」响应。</summary>
+    public static event Action<MapDir> RoadReachedEdge;
+
     public static void RaiseMapChanged() => MapChanged?.Invoke();
     public static void RaiseZonesChanged() => ZonesChanged?.Invoke();
     public static void RaiseStatsChanged() => StatsChanged?.Invoke();
@@ -60,6 +63,7 @@ public static class EventBus
     public static void RaiseTechUnlocked(string techId) => TechUnlocked?.Invoke(techId);
     public static void RaiseNewsPosted() => NewsPosted?.Invoke();
     public static void RaiseBuildingPlaced(BuildingInstance b) => BuildingPlaced?.Invoke(b);
+    public static void RaiseRoadReachedEdge(MapDir dir) => RoadReachedEdge?.Invoke(dir);
 
     /// <summary>重开一局时清空所有订阅，避免编辑器内重启后重复订阅。</summary>
     public static void Reset()
@@ -80,5 +84,6 @@ public static class EventBus
         TechUnlocked = null;
         NewsPosted = null;
         BuildingPlaced = null;
+        RoadReachedEdge = null;
     }
 }

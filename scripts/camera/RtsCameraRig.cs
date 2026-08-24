@@ -75,15 +75,18 @@ public partial class RtsCameraRig : Node3D
         if (Input.IsKeyPressed(Key.A)) move.X -= 1;
         if (Input.IsKeyPressed(Key.D)) move.X += 1;
 
-        var vp = GetViewport();
-        var mouse = vp.GetMousePosition();
-        var size = vp.GetVisibleRect().Size;
-        if (mouse.X >= 0 && mouse.Y >= 0 && mouse.X <= size.X && mouse.Y <= size.Y)
+        if (GameSettings.EdgePanEnabled)
         {
-            if (mouse.X < EdgeMargin) move.X -= 1;
-            else if (mouse.X > size.X - EdgeMargin) move.X += 1;
-            if (mouse.Y < EdgeMargin) move.Y -= 1;
-            else if (mouse.Y > size.Y - EdgeMargin) move.Y += 1;
+            var vp = GetViewport();
+            var mouse = vp.GetMousePosition();
+            var size = vp.GetVisibleRect().Size;
+            if (mouse.X >= 0 && mouse.Y >= 0 && mouse.X <= size.X && mouse.Y <= size.Y)
+            {
+                if (mouse.X < EdgeMargin) move.X -= 1;
+                else if (mouse.X > size.X - EdgeMargin) move.X += 1;
+                if (mouse.Y < EdgeMargin) move.Y -= 1;
+                else if (mouse.Y > size.Y - EdgeMargin) move.Y += 1;
+            }
         }
 
         if (move != Vector2.Zero)

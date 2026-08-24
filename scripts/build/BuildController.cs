@@ -47,6 +47,9 @@ public partial class BuildController : Node
     /// <summary>居民代理管理器（点选拾取 NPC 用）。</summary>
     public AgentManager Agents { get; set; }
 
+    /// <summary>外来访客系统（点选拾取外城来人用）。</summary>
+    public VisitorSystem Visitors { get; set; }
+
     /// <summary>相机云台（供点选面板定位镜头用）。</summary>
     public RtsCameraRig Rig => _rig;
 
@@ -82,6 +85,12 @@ public partial class BuildController : Node
     private MeshInstance3D _preview;
     private StandardMaterial3D _previewMat;
 
+    // 阶段 D：建筑放置预览用「真实宋代轮廓」装配（同源 BuildingModelFactory.MakePreview），
+    // 取代单一方块，避免预览误导实际造型。
+    private Node3D _previewAssembly;
+    private MultiMeshInstance3D _paFound, _paBody, _paRoof, _paRoofEnd, _paEave, _paRidge, _paPillar, _paBanner, _paLantern;
+    private StandardMaterial3D _previewVcMat, _previewBodyMat;
+
     public BuildController(RtsCameraRig rig, GridRenderer renderer)
     {
         _rig = rig;
@@ -107,6 +116,25 @@ public partial class BuildController : Node
         // 父节点若在帧末前释放（返回标题重载场景）会 AddChild 到已释放节点；
         // BuildController 自身无变换，预览用局部坐标与挂父等价）
         AddChild(_preview);
+
+        // 阶段 D：建筑预览装配（9 角色 MultiMesh，顶点色受光；房体半透），默认隐藏
+        _previewVcMat = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+        _previewBodyMat = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = true,
+            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+        };
+        _previewAssembly = new Node3D { Visible = false };
+        AddChild(_previewAssembly);
+        MakePreviewMulti(ref _paFound, new BoxMesh { Size = Vector3.One, Material = _previewVcMat });
+        MakePreviewMulti(ref _paBody, new BoxMesh { Size = Vector3.One, Material = _previewBodyMat });
+        MakePreviewMulti(ref _paRoof, new PrismMesh { Size = Vector3.One, Material = _previewVcMat });
+        MakePreviewMulti(ref _paRoofEnd, new PrismMesh { Size = Vector3.One, Material = _previewVcMat });
+        MakePreviewMulti(ref _paEave, new BoxMesh { Size = Vector3.One, Material = _previewVcMat });
+        MakePreviewMulti(ref _paRidge, new BoxMesh { Size = Vector3.One, Material = _previewVcMat });
+        MakePreviewMulti(ref _paPillar, new CylinderMesh { TopRadius = 0.13f, BottomRadius = 0.13f, Height = 1f, Material = _previewVcMat });
+        MakePreviewMulti(ref _paBanner, new BoxMesh { Size = Vector3.One, Material = _previewVcMat });
+        MakePreviewMulti(ref _paLantern, new SphereMesh { Radius = 0.5f, Height = 1f, Material = _previewVcMat });
 
         // 路径预览（批次八十）：直线/曲线拖动中整条线半透明显示，材质与单格预览同款
         _pathMesh = new ImmediateMesh();
@@ -695,6 +723,7 @@ public partial class BuildController : Node
         const float cs = MapGrid.CellSize;
         float groundY = gs.Map.GroundY(_hover); // 预览框叠加悬停格地形海拔，免在台地上半埋
         _preview.Visible = true;
+        _previewAssembly.Visible = false; // 默认隐藏，仅建筑预览显示轮廓装配
 
         switch (Mode)
         {
@@ -720,12 +749,10 @@ public partial class BuildController : Node
 
             case BuildMode.Building:
             {
-                // 占地以鼠标为中心（而非鼠标在左上角格）：预览与实际放置用同一原点
+                // 阶段 D：用真实宋代轮廓装配预览（同源 BuildingModelFactory.MakePreview），取代方块
                 var originCell = BuildingOrigin();
-                var origin = MapGrid.CellToWorld(originCell);
-                var center = origin + new Vector3((_def.SizeX - 1) * cs / 2f, groundY + _def.Height / 2f, (_def.SizeY - 1) * cs / 2f);
-                SetPreviewBox(center, new Vector3(_def.SizeX * cs, _def.Height, _def.SizeY * cs),
-                    PlacementValidator.CanPlaceBuilding(gs, _def, originCell) ? ValidColor : InvalidColor);
+                ShowBuildingPreviewDef(_def, originCell, groundY,
+                    PlacementValidator.CanPlaceBuilding(gs, _def, originCell));
                 break;
             }
 
@@ -771,6 +798,57 @@ public partial class BuildController : Node
         _previewMat.AlbedoColor = color;
     }
 
+    // ---- 阶段 D：建筑预览轮廓装配 ----
+
+    private void MakePreviewMulti(ref MultiMeshInstance3D field, Mesh mesh)
+    {
+        field = new MultiMeshInstance3D
+        {
+            Multimesh = new MultiMesh
+            {
+                TransformFormat = MultiMesh.TransformFormatEnum.Transform3D,
+                UseColors = true,
+                Mesh = mesh,
+            },
+        };
+        _previewAssembly.AddChild(field);
+    }
+
+    private static void FillPreviewMulti(MultiMesh mm, List<Transform3D> xforms, List<Color> colors)
+    {
+        mm.InstanceCount = xforms.Count;
+        for (int i = 0; i < xforms.Count; i++)
+        {
+            mm.SetInstanceTransform(i, xforms[i]);
+            mm.SetInstanceColor(i, colors[i]);
+        }
+    }
+
+    /// <summary>用真实宋代轮廓装配预览：同源 BuildingModelFactory.MakePreview 填 9 角色 MultiMesh，
+    /// 装配挂到占地原点世界位置（MakePreview 返回局部坐标已含地面/层高）；另用薄方块作占地/合法性指示。</summary>
+    private void ShowBuildingPreviewDef(BuildingDef def, Vector2I originCell, float groundY, bool valid)
+    {
+        _previewAssembly.Visible = true;
+        _previewAssembly.Position = MapGrid.CellToWorld(originCell);
+
+        var pv = BuildingModelFactory.MakePreview(def, groundY, 1);
+        FillPreviewMulti(_paFound.Multimesh, pv.Found.X, pv.Found.C);
+        FillPreviewMulti(_paBody.Multimesh, pv.Body.X, pv.Body.C);
+        FillPreviewMulti(_paRoof.Multimesh, pv.Roof.X, pv.Roof.C);
+        FillPreviewMulti(_paRoofEnd.Multimesh, pv.RoofEnd.X, pv.RoofEnd.C);
+        FillPreviewMulti(_paEave.Multimesh, pv.Eave.X, pv.Eave.C);
+        FillPreviewMulti(_paRidge.Multimesh, pv.Ridge.X, pv.Ridge.C);
+        FillPreviewMulti(_paPillar.Multimesh, pv.Pillar.X, pv.Pillar.C);
+        FillPreviewMulti(_paBanner.Multimesh, pv.Banner.X, pv.Banner.C);
+        FillPreviewMulti(_paLantern.Multimesh, pv.Lantern.X, pv.Lantern.C);
+
+        // 薄方块作占地/合法性指示（绿=可放 红=不可放），不抢轮廓
+        const float cs = MapGrid.CellSize;
+        var origin = MapGrid.CellToWorld(originCell);
+        var center = origin + new Vector3((def.SizeX - 1) * cs / 2f, groundY + 0.05f, (def.SizeY - 1) * cs / 2f);
+        SetPreviewBox(center, new Vector3(def.SizeX * cs, 0.1f, def.SizeY * cs), valid ? ValidColor : InvalidColor);
+    }
+
     /// <summary>方形画笔预览中心：宽度偏移范围 -(w-1)/2..w/2 非对称，中心沿两轴各偏移半步。</summary>
     private Vector3 StampCenter(int w)
     {
@@ -806,6 +884,14 @@ public partial class BuildController : Node
         if (animal != null)
         {
             Hud?.ShowAnimal(animal);
+            return;
+        }
+
+        // 外城来人：优先级低于市民/野物、高于建筑（与 PickCitizen 同款屏幕投影就近法）
+        var visitor = PickVisitor();
+        if (visitor != null)
+        {
+            Hud?.ShowVisitor(visitor);
             return;
         }
 
@@ -909,6 +995,32 @@ public partial class BuildController : Node
                     continue;
                 bestDist = d;
                 best = agent.C;
+            }
+        }
+        return best;
+    }
+
+    /// <summary>外来访客拾取：与居民同款屏幕投影就近法（模型已缩小，命中圈收紧到 12px）；
+    /// 被建筑遮挡的访客让位给视线拾取（免点房子误选屋后的人）。</summary>
+    private ForeignVisitor PickVisitor()
+    {
+        if (Visitors == null)
+            return null;
+
+        var cam = _rig.Cam;
+        var mouse = GetViewport().GetMousePosition();
+        ForeignVisitor best = null;
+        float bestDist = 12f;
+        foreach (var v in Visitors.ActiveVisitors)
+        {
+            var world = v.Position + Vector3.Up * (VillagerConfig.ModelScale * 1.1f);
+            if (cam.IsPositionBehind(world))
+                continue;
+            float d = cam.UnprojectPosition(world).DistanceTo(mouse);
+            if (d < bestDist && !RayBlockedByBuilding(world))
+            {
+                bestDist = d;
+                best = v;
             }
         }
         return best;

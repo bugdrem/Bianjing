@@ -1,11 +1,13 @@
 # 汴京盛卷（Bianjing: The Grand Scroll）业务与技术设计文档
 
-> 本文档由代码全量走查（scripts/ 全部 C# 源码、data/buildings.json、configs/、CHANGELOG.md）综合生成，
-> 描述截至批次五十五的实现状态。定位为「面向开发者的业务 + 技术总览」，与 `CHANGELOG.md`（逐批次调整日志）互补。
+> 本文档由代码全量走查（scripts/ 全部 C# 源码、data/*.json、configs/、CHANGELOG.md）综合生成，
+> 定位为「面向开发者的业务 + 技术总览」，与 `CHANGELOG.md`（逐批次迭代记录）、`CODEMAP.md`（业务↔代码速查）、`ECONOMY.md`（经济专项）、`GAME_DESIGN.md`（玩法框架原案）、`RULES.md`（开发规范）互补。
 >
-> **文档对齐说明（最近一次复核）：** 已根据当前代码修正若干与实现脱节的结论，重点包括——货币内部单位由「贯」统一为**铜钱「文」**（1 两 = 1000 文、1 万两 = 10000 两 = 10,000,000 文，见 `CurrencyConfig`；**黄金单位已废除**，大额仅用白银「两/万两」展示）；里程碑体系由 5 级扩展为 **8 级**；税制重写为**三税种模型**（土地/商/人口，旧版四税种注册表已废弃）；王爷府开基拨款 = **100000 文**；存档 `FormatVersion = 25`；建筑目录扩至 **23 项**（新增流民营/农田/林场/采石场/酒曲司/柴炭司/市易务/宅邸等）；货品基价改为整数文并扩至 **23 种**（含板材/皮革/铁锭/家具/衣物/成药等完整加工链）。
+> **当前状态（截至批次九十一，2026-08）：** 已实现宋风建筑原语造型（`BuildingModelFactory`）、**骨骼村民**（Godot 4.7 索引式 `Skeleton3D` + `BoneAttachment3D`，`CitizenAnim` 四套代码驱动动画）、**glb 建筑资产管线**（`BuildingAssetLoader` + `BuildingDef.ModelPath`，加载失败回落原语）、建造预览与实际剪影同步（`BuildController` 复用 `BuildingModelFactory.MakePreview`）。货币内部单位已统一为**铜钱「文」**（1 两 = 1000 文、1 万两 = 10000 两 = 10,000,000 文，见 `CurrencyConfig`；**黄金单位已废除**）；税制为**三税种模型**（土地/商/人口）；里程碑 **8 级**；存档 `FormatVersion = 25`；建筑目录 **23 项**；货品 **23 种**。
 >
-> **结算口径变更：** 原「每日 / 每月」结算已改为**「每旬 / 每月」**（一游戏旬 ≈ 1 现实分钟，每月 3 旬）；原日频概率已整体 ×7/3 折算为旬频（年流入量不变）。文中 §7 等涉及频率处已同步更新，其余章节的「每日」措辞若未逐条改，均按此口径理解。
+> **结算口径：** 实际为**「每旬 / 每月」**（一游戏旬 ≈ 1 现实分钟，每月 3 旬，批次九十一定稿）；原日频概率已整体 ×7/3 折算为旬频。文中涉及频率处按此口径理解。
+>
+> **⚠️ 开发约束（用户明确，务必遵守）：** 当前为**早期开发版本**，**功能实现或重构无需考虑旧版本兼容**——枚举新值尾部追加、存档 `FormatVersion` 不符直接拒读即可，不要为兼容旧档做额外工作。
 
 ---
 
@@ -77,19 +79,20 @@
 |---|---|
 | `scripts/core/` | 骨架：`GameState`（状态与地图修改入口）、`EventBus`、`GameClock`、`GamePaths`、`GameSettings`、`Ledger`、`NewsItem`、`Milestones` |
 | `scripts/configs/` | 全部常量与公式（WorldConfig/TerrainConfig/WaterConfig/TimeConfig/EconomyConfig/PopulationConfig/LifeConfig/GrowthConfig/MovementConfig/VillagerConfig/CameraConfig/PlantConfig/WildlifeConfig/PrinceMansionConfig） |
-| `scripts/map/` | 网格与地形：`MapGrid`、`HeightField`、`Cell`、`GridRenderer`、`WorldGenerator`、`WorldSketch`、`HydraulicEroder`、`RiverGenerator`、`RoadNetwork`、`TreeGenerator`、`ValueNoise`、`AnimalRenderer`、`PileRenderer`、`BuildingStockRenderer`、`GoodsColors` |
-| `scripts/build/` | 建造：`BuildingDef`+`BuildingInstance`+`Door`、`BuildController`、`PlacementValidator` |
+| `scripts/map/` | 网格与地形渲染：`MapGrid`、`HeightField`、`Cell`、`GridRenderer`、`WorldGenerator`、`WorldSketch`、`HydraulicEroder`、`RiverGenerator`、`RoadNetwork`、`TreeGenerator`、`ValueNoise`、`AnimalRenderer`、`PileRenderer`、`BuildingStockRenderer`、`GoodsColors` |
+| `scripts/render/` | 宋风美术与卷轴：`BuildingModelFactory`（原语造型 + `MakePreview`）、`ScrollBackdrop`、`RenderLayers` |
+| `scripts/build/` | 建造：`BuildingDef`+`BuildingInstance`+`Door`、`BuildController`、`PlacementValidator`、`BuildingAssetLoader`（glb 管线） |
 | `scripts/citizens/` | 人口模型与系统：`Citizen`、`Family`、`LifecycleSystem`、`JobSystem`、`NameGenerator` |
-| `scripts/agents/` | 居民 3D 表现：`AgentManager`、`CitizenAgent` |
-| `scripts/sim/` | 经济与自然：`Goods`、`GoodsSystem`、`CraftingSystem`、`EconomySystem`、`MaintenanceSystem`、`DesirabilitySystem`、`PlantGrowthSystem`、`WildlifeSystem`、`Inventory`、`Obj` 相关实体 |
+| `scripts/agents/` | 居民 3D 表现：`AgentManager`、`CitizenAgent`（骨骼村民）、`CitizenAnim`（四套代码驱动姿态） |
+| `scripts/sim/` | 经济与自然：`Goods`、`GoodsSystem`、`CraftingSystem`、`EconomySystem`、`MaintenanceSystem`、`DesirabilitySystem`、`PlantGrowthSystem`、`WildlifeSystem`、`Inventory`、`RecipeDef`、`DemandLedger`、`FarmlandSystem`、`Obj` 相关实体 |
 | `scripts/zone/` | `ZoneGrowthSystem`（坊区自发生长） |
 | `scripts/policy/` | `TaxPolicy`（税档数据）、`TaxSystem`（月度征税） |
 | `scripts/tech/` | `TechDef`、`TechSystem`（科技） |
-| `scripts/save/` | `SaveData`、`SaveService`（LMDB 异步原子存档） |
+| `scripts/save/` | `SaveData`、`SaveService`（LMDB 异步原子存档，依赖 LightningDB 0.22.0） |
 | `scripts/camera/` | `RtsCameraRig`（RTS 轨道相机） |
 | `scripts/ui/` | 全部界面：`Hud`、`TopBar`、`BuildMenu`、`InspectPanel`、`FinancePanel`、`PolicyPanel`、`NewsPanel`、`TechPanel`、`GameMenu`、`LoadingScreen` |
 | `scripts/objects/` | `Obj`（世界实体基类，含 `PlantObj`/`AnimalObj`/`ItemPileObj`） |
-| `data/` | `buildings.json`（建筑静态定义） |
+| `data/` | `buildings.json`（建筑静态定义）、`techs.json`（科技定义） |
 | `specs/` | 设计文档与变更日志 |
 
 ### 2.3 全局事件总线 EventBus
@@ -767,9 +770,45 @@
 
 ---
 
-## 18. 附录
+## 17.5 当前实现补充（批次五十五之后新增 / 调整）
 
-### 18.1 实体关系概览
+> 以下为「截至批次五十五」冻结快照之后的关键演进，与 §1–§17 互补。逐批次细节见 `CHANGELOG.md`。
+
+### 17.5.1 美术进阶：宋风原语 + 骨骼村民 + glb 资产管线
+
+- **宋风建筑原语**（`scripts/render/BuildingModelFactory.cs`）：用 `MultiMeshInstance3D` + 基础几何（Box/Prism/Cylinder/Sphere）程序化拼装亭台楼阁剪影，替代早期纯色方块；`MakePreview(def, groundY, scale)` 同时供建造预览复用，保证「预览 = 实际剪影」。
+- **骨骼村民**（`scripts/agents/CitizenAgent.cs` + `CitizenAnim.cs`）：
+  - **关键事实：Godot 4.7 的 C# 没有 `Bone3D` 类**。骨骼全部走 `Skeleton3D` 索引 API——`AddBone(name)`/`SetBoneParent`/`SetBoneRest(idx,T)`/`SetBonePose(idx,T)`/`FindBone(name)`；网格部件经 `BoneAttachment3D`（`BoneName`）挂到骨头，其 Transform 跟随骨头（含 pose）。
+  - 层级：`root → spine → { head, armL, armR }`；rest 纯平移（腰/颈/臂位置）、pose 纯旋转 → 绕骨头原点旋转即理想关节枢轴。
+  - `CitizenAnim.ApplyPose(state, phase, skel, 5 个骨索引)` 纯函数姿态库，每帧 `SetBonePose` 驱动（**逐帧代码驱动，非 AnimationPlayer**，便于 300 个 agent 的性能）；4 态：`Idle` / `Walk` / `Carry` / `Working`。
+- **glb 建筑资产管线**（`scripts/build/BuildingAssetLoader.cs` + `BuildingDef.ModelPath`/`HasModel`）：
+  - 静态缓存 `Dictionary<string,PackedScene>`；`LoadScene(path)` 空路径/失败返回 null；`FitAndPlace` 递归遍历 `VisualInstance3D` 子节点取 `GetAabb()`（Node3D 无 GetAabb）+ 父链 `RelativeTo` 合成局部 AABB，按 `Min(sx, Min(sy, sz))` 均匀缩放、底座落 `baseY`。
+  - `GridRenderer.RebuildBuildings` 优先加载 glb，失败自动回落 `BuildingModelFactory` 原语；`CleanupStaleAssetInstances` 回收过期实例。
+
+### 17.5.2 经济与平衡关键修复（摘要）
+
+- **钱流闭环**（批次七十六–七十九、八十七）：除朝廷直属机构外，所有金钱在官库↔村民家庭公产间循环；建造费/铺路架桥费/修缮料钱发当日无业者（营造工钱），生活开销/土地税/修缮摊派入官库，绝户公产折入官库；官营售货入官库、商税落地。
+- **官粮补给链**（批次七十八）：日耗 0.2→0.05 份/人/旬（赈济定位）；新增朝廷粮饷 3 份/人/月入官仓，农田田赋 `GrainTaxShare=0.1` 为额外增收，饥荒不再必然。
+- **农田收入修复**（批次八十五）：farmland 加 `salary:800`、`yieldPerWorker` 30→50；农民发固定工钱（`official||field`）。
+- **民居转业卡点**（批次八十三）：`ConvertMinArea` 6→4；在业者可创业、无职谋生半速涨经验；烧饼需求里程碑 3→2。
+- **空房低价继承**（批次八十六）：`InheritVacantHomes`，空置 house/mansion 由寄居家庭低价过户（house 1000/600、mansion 3000/1500）。
+
+### 17.5.3 时间体系定稿（批次九十一）
+
+- 日历：每月 **3 旬**（上/中/下旬），一旬 ≈ 1 现实分钟，一游戏年 = 36 旬 = 36 分钟；`DaysPerMonth` 7→3、日频概率整体 ×7/3（年流入量不变）。
+- NPC 一年两岁：`Citizen.AgeYears` 独立字段，1 月/7 月各 +1；grow 动画改用 `AgeYears/AdultAgeYears`（16 岁成年 ≈ 8 游戏年 ≈ 4.8 现实小时）。
+- 存档 `FormatVersion` 24→25（旬历语义 + AgeYears 新字段）。
+
+### 17.5.4 存档依赖回退（批次九十）
+
+- LightningDB 0.23.0 改变文件布局致旧档不可读 → 回退 **0.22.0**（勿再升级，升级前须验证旧档兼容性）。
+
+### 17.5.5 模块增减（相对冻结快照）
+
+- 新增：`agents/CitizenAnim.cs`（骨骼姿态库）、`build/BuildingAssetLoader.cs`（glb 管线）、`render/BuildingModelFactory.cs`（宋风原语）、`render/ScrollBackdrop.cs`/`RenderLayers.cs`、`sim/RecipeDef.cs`（配方三级化）、`configs/GeneticsConfig.cs`（技能遗传）。
+- 目录调整：`objects/` 自 `Obj` 派生的实体，`render/` 收纳宋风/卷轴表现；`map/` 仍含各 `MultiMesh` 渲染器。
+
+## 18. 附录
 
 ```
 GameState（唯一真源）
@@ -803,6 +842,9 @@ configs/*（只读参数） + data/*.json + mods/*（静态定义）
 
 | 文档 | 内容 |
 |---|---|
-| [CHANGELOG.md](CHANGELOG.md) | 逐批次开发调整日志（与本文档互补，本文档描述截至批次五十五的实现状态） |
-| `.qoder/rules/Rules.md` | 开发约束（全英文开发/常量集中/不引入依赖/变更记录） |
+| [CHANGELOG.md](CHANGELOG.md) | 单一权威迭代记录（批次 25→91，逐批次调整要点） |
+| [CODEMAP.md](CODEMAP.md) | 业务 ↔ 代码对照表（系统/概念 → 文件/类/方法/configs，AI 快速寻址） |
+| [ECONOMY.md](ECONOMY.md) | 经济系统专项规格（货币/注入/就业/税收/交易链/物价，合并自 `.qoder` 需求文档） |
+| [GAME_DESIGN.md](GAME_DESIGN.md) | 玩法设计与第一阶段开发计划原案（汴京盛卷框架） |
+| [RULES.md](RULES.md) | 项目开发规范（技术栈/阶段兼容/注释率/全英文/停问规则/常量归口） |
 | `README.md` | 项目入口说明 |

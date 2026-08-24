@@ -4,6 +4,22 @@ using Godot;
 
 namespace Bianjing;
 
+/// <summary>地图四向（ batches：道路通边 → 外城来人）。每条边对应一座邻城，
+/// 后期可据 Specialties 拓展互市/特产/任务。</summary>
+public enum MapDir { North, East, South, West }
+
+/// <summary>邻城信息（道路延伸到对应边即解锁）：供外来访客系统选出生点、取主营货类，
+/// 并记录连通状态供后期拓展。</summary>
+public sealed class NeighborCity
+{
+    public string Name = "";
+    public bool Connected;
+    /// <summary>该方向已连通的道路边格（出生/离场锚点）。</summary>
+    public readonly List<Vector2I> EdgeCells = new();
+    /// <summary>该城主营货类（Goods.CategoryOf 取值）；既作 NPC 带货偏向，也留待后期拓展。</summary>
+    public List<int> Specialties = new();
+}
+
 /// <summary>一局游戏的全部运行时状态与地图修改入口。</summary>
 public class GameState
 {
@@ -117,10 +133,12 @@ public class GameState
             return;
         _roadIndex[c] = RoadCells.Count;
         RoadCells.Add(c);
+        RegisterEdgeCell(c);
     }
 
     public void UnregisterRoadCell(Vector2I c)
     {
+        UnregisterEdgeCell(c);
         if (!_roadIndex.Remove(c, out int i))
             return;
         var last = RoadCells[^1];
@@ -130,6 +148,68 @@ public class GameState
             RoadCells[i] = last;
             _roadIndex[last] = i;
         }
+    }
+
+    // ---- 四向邻城：道路边格增量维护（O(1)，免全图扫描）----
+
+    /// <summary>四向邻城（索引对应 MapDir 枚举序：0 北 / 1 东 / 2 南 / 3 西）。</summary>
+    public readonly NeighborCity[] Neighbors =
+    {
+        new() { Name = "北邙镇", Specialties = { 0 } },  // 北：粮作（食物类）
+        new() { Name = "东津渡", Specialties = { 2 } },  // 东：木作
+        new() { Name = "南湖庄", Specialties = { 0, 5 } },// 南：果品+药材
+        new() { Name = "西山市", Specialties = { 3 } },  // 西：金工
+    };
+
+    /// <summary>是否任一邻城已连通（道路延伸到地图边缘）。</summary>
+    public bool AnyNeighborConnected
+    {
+        get { foreach (var n in Neighbors) if (n.Connected) return true; return false; }
+    }
+
+    /// <summary>取某格所属的边向（x/y 落在最外圈）；非边格返回 null。</summary>
+    private static MapDir? EdgeDirOf(Vector2I c)
+    {
+        int s = MapGrid.Size - 1;
+        if (c.X == 0) return MapDir.West;
+        if (c.X == s) return MapDir.East;
+        if (c.Y == 0) return MapDir.North;
+        if (c.Y == s) return MapDir.South;
+        return null;
+    }
+
+    private void RegisterEdgeCell(Vector2I c)
+    {
+        var dir = EdgeDirOf(c);
+        if (dir == null)
+            return;
+        var nb = Neighbors[(int)dir.Value];
+        bool wasConnected = nb.Connected;
+        nb.EdgeCells.Add(c);
+        if (!wasConnected)
+        {
+            nb.Connected = true;
+            EventBus.RaiseRoadReachedEdge(dir.Value);
+        }
+    }
+
+    private void UnregisterEdgeCell(Vector2I c)
+    {
+        var dir = EdgeDirOf(c);
+        if (dir == null)
+            return;
+        var nb = Neighbors[(int)dir.Value];
+        nb.EdgeCells.Remove(c);
+        if (nb.EdgeCells.Count == 0 && nb.Connected)
+            nb.Connected = false;
+    }
+
+    /// <summary>按建筑 id 取城内全部该类建筑实例（外来访客选交易场所用）。</summary>
+    public IEnumerable<BuildingInstance> BuildingsOfType(string id)
+    {
+        foreach (var b in Buildings.Values)
+            if (b.Def.Id == id)
+                yield return b;
     }
 
     /// <summary>全部「可建设区」格：坊区生长只在此集内挑建房点，免每日全图扫描。</summary>

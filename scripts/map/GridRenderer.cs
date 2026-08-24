@@ -37,7 +37,6 @@ public partial class GridRenderer : Node3D
     private static readonly Color TreeColor = new(0.30f, 0.40f, 0.26f);   // 灰绿树冠（压饱和度）
     private static readonly Color FruitTreeColor = new(0.46f, 0.47f, 0.24f); // 果树：暖黄绿树冠，一眼可辨
     private static readonly Color TrunkColor = new(0.38f, 0.30f, 0.22f); // 树干木褐
-    private static readonly Color EdgeColor = new(0.12f, 0.12f, 0.14f);
     /// <summary>建筑区色块：浅蓝底色（批次七十：原绿色改浅蓝，与耕种区浅黄绿区分；仅分区模式显示）。</summary>
     private static readonly Color BuildableZoneColor = new(0.45f, 0.68f, 0.95f, 0.35f);
     /// <summary>耕种区色块：浅黄绿底色（批次七十：修复耕种区不渲染，与建筑区浅蓝区分）。</summary>
@@ -57,18 +56,8 @@ public partial class GridRenderer : Node3D
     private static readonly Color TerrainHighColor = new(0.51f, 0.47f, 0.41f); // 山顶/陡壁灰褐岩
     private static readonly Color BedColor = new(0.47f, 0.43f, 0.33f);         // 水下河床泥沙
 
-    /// <summary>建筑地基色：夯土石基灰褐，斜坡上露出的基座侧面读作台基。</summary>
-    private static readonly Color FoundationColor = new(0.52f, 0.48f, 0.42f);
-
     /// <summary>图缘裙板色：比卷轴纸面略深的纸色，地形断面读作「画的厚度」。</summary>
     private static readonly Color SkirtColor = new(0.74f, 0.68f, 0.54f);
-
-    /// <summary>门标记颜色：大门亮金（显眼），后门暗木色（低调）。</summary>
-    private static readonly Color MainDoorColor = new(0.85f, 0.7f, 0.35f);
-    private static readonly Color BackDoorColor = new(0.45f, 0.32f, 0.2f);
-
-    /// <summary>建筑主体透明度（能看清屋内居民）。</summary>
-    private const float BodyAlpha = 0.55f;
 
     /// <summary>水面透明度：微浑而仍透见河床。</summary>
     private const float WaterAlpha = 0.85f;
@@ -102,11 +91,23 @@ public partial class GridRenderer : Node3D
     private int _chunksPerSide;
     private Chunk[] _chunks;
 
-    private MultiMeshInstance3D _bldgFounds; // 地基：房体下不透明基座，斜坡上遮悬空
-    private MultiMeshInstance3D _bldgBodies;
-    private MultiMeshInstance3D _bldgRoofs;
-    private MultiMeshInstance3D _bldgEdges;
-    private MultiMeshInstance3D _doors;
+    private MultiMeshInstance3D _bldgFounds;  // 地基：房体下不透明基座
+    private MultiMeshInstance3D _bldgBodies;   // 主体：半透 Box，可透视屋内
+    private MultiMeshInstance3D _bldgRoofs;    // 主坡屋顶：三棱柱
+    private MultiMeshInstance3D _bldgRoofEnds; // 庑殿端坡：垂直三棱柱（威仪建筑）
+    private MultiMeshInstance3D _bldgEaves;    // 檐口：薄 Box 环
+    private MultiMeshInstance3D _bldgRidges;   // 屋脊：细 Box
+    private MultiMeshInstance3D _bldgPillars;  // 立柱：圆柱
+    private MultiMeshInstance3D _bldgBanners;  // 招幌：薄竖 Box（商铺）
+    private MultiMeshInstance3D _bldgLanterns; // 灯笼：小球
+    private MultiMeshInstance3D _doors;        // 门：小方块（大门金/后门暗木）
+    private MultiMeshInstance3D _bldgSteps;    // 台基石阶：房体下方基座
+    private MultiMeshInstance3D _bldgWindows;  // 门窗：大门亮金 + 窗半透灰玻
+    private MultiMeshInstance3D _bldgWalls;    // 院墙：民居大院夯土围墙
+
+    // 阶段 C：外部 glb 资产建筑挂载点（HasModel 的建筑实例统一挂这里，原始体层只画无模型建筑）
+    private Node3D _assetRoot;
+    private readonly Dictionary<int, Node3D> _assetInstances = new();
     private MultiMeshInstance3D _zones;
     private MeshInstance3D _gridLines;
     private MeshInstance3D _skirt; // 图缘裙板：周长带状网格，从图缘顶点垂到卷轴画布面，遮住侧向镂空
@@ -204,40 +205,83 @@ public partial class GridRenderer : Node3D
             _chunks[i] = chunk;
         }
 
-        // 建筑地基：不透明基座，从房体底面向下延伸 FoundationDepth，斜坡上建造时遮住悬空底部
-        var foundMesh = new BoxMesh { Size = Vector3.One };
-        foundMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
-        _bldgFounds = MakeMulti(foundMesh, useColors: true);
+        // 建筑各角色：每角色独立 MultiMesh（共享单一原始体），由 BuildingModelFactory 产出变换+颜色。
+        // 顶点色受光材质共用一份；主体额外半透以透视屋内居民。
+        var vcMat = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+
+        // 地基：不透明基座
+        _bldgFounds = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
         AddChild(_bldgFounds);
 
-        // 建筑主体：半透明方块，可透视屋内居民
+        // 主体：半透明方块，可透视屋内居民。AlphaHash + alpha-to-coverage 自动深度修正，
+        // 免 Alpha 排序穿模；alpha=1 的威严建筑（王府/官署/宫殿）按 opaque 走，无视觉副作用。
         var bodyMesh = new BoxMesh { Size = Vector3.One };
         bodyMesh.Material = new StandardMaterial3D
         {
             VertexColorUseAsAlbedo = true,
-            Transparency = BaseMaterial3D.TransparencyEnum.Alpha,
+            Transparency = BaseMaterial3D.TransparencyEnum.AlphaHash,
+            AlphaHashScale = 1.0f,
         };
         _bldgBodies = MakeMulti(bodyMesh, useColors: true);
         _bldgBodies.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_bldgBodies);
 
-        // 斜屋顶：不透明三棱柱，脊线沿建筑长边
-        var roofMesh = new PrismMesh { Size = Vector3.One };
-        roofMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
-        _bldgRoofs = MakeMulti(roofMesh, useColors: true);
+        // 主坡屋顶：不透明三棱柱
+        _bldgRoofs = MakeMulti(new PrismMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
         AddChild(_bldgRoofs);
 
-        // 建筑边框：单位立方体 12 条棱线，随主体同变换缩放
-        _bldgEdges = MakeMulti(BuildUnitCubeEdges(), useColors: false);
-        _bldgEdges.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
-        AddChild(_bldgEdges);
+        // 庑殿端坡：垂直三棱柱（仅威仪建筑用，做歇山/四坡感）
+        _bldgRoofEnds = MakeMulti(new PrismMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
+        AddChild(_bldgRoofEnds);
 
-        // 建筑的门：小方块标记（大门大而亮金，后门小而暗木），朝向由门内外方向决定
-        var doorMesh = new BoxMesh { Size = Vector3.One };
-        doorMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
-        _doors = MakeMulti(doorMesh, useColors: true);
+        // 檐口：薄 Box 环
+        _bldgEaves = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
+        AddChild(_bldgEaves);
+
+        // 屋脊：细 Box
+        _bldgRidges = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
+        AddChild(_bldgRidges);
+
+        // 立柱：圆柱（半径固定，实例仅缩放高度）
+        _bldgPillars = MakeMulti(new CylinderMesh { TopRadius = 0.13f, BottomRadius = 0.13f, Height = 1f, Material = vcMat }, useColors: true);
+        AddChild(_bldgPillars);
+
+        // 招幌：薄竖 Box（仅商铺）
+        _bldgBanners = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
+        AddChild(_bldgBanners);
+
+        // 灯笼：小球
+        _bldgLanterns = MakeMulti(new SphereMesh { Radius = 0.5f, Height = 1f, Material = vcMat }, useColors: true);
+        AddChild(_bldgLanterns);
+
+        // 门：小方块标记（大门亮金，后门暗木），朝向由门内外方向决定
+        _doors = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
         _doors.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
         AddChild(_doors);
+
+        // 台基：房体下方石阶基座（不透明，比房体略大）
+        _bldgSteps = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
+        AddChild(_bldgSteps);
+
+        // 门窗：大门亮金 + 窗半透灰玻（窗走 Alpha，与主体同处理免穿模）
+        var winMesh = new BoxMesh { Size = Vector3.One };
+        winMesh.Material = new StandardMaterial3D
+        {
+            VertexColorUseAsAlbedo = true,
+            Transparency = BaseMaterial3D.TransparencyEnum.AlphaHash,
+            AlphaHashScale = 1.0f,
+        };
+        _bldgWindows = MakeMulti(winMesh, useColors: true);
+        _bldgWindows.CastShadow = GeometryInstance3D.ShadowCastingSetting.Off;
+        AddChild(_bldgWindows);
+
+        // 院墙：夯土围墙（不透明）
+        _bldgWalls = MakeMulti(new BoxMesh { Size = Vector3.One, Material = vcMat }, useColors: true);
+        AddChild(_bldgWalls);
+
+        // 阶段 C：外部 glb 资产建筑挂载层（与原始体建筑层并列；内部按建筑 Id 缓存实例）
+        _assetRoot = new Node3D { Name = "AssetBuildings" };
+        AddChild(_assetRoot);
 
         // 坊区色块（半透明，无光照）
         var zoneMesh = new BoxMesh { Size = Vector3.One };
@@ -1013,66 +1057,35 @@ public partial class GridRenderer : Node3D
     private void RebuildBuildings()
     {
         var gs = GameState.I;
-        var foundXf = new List<Transform3D>();
-        var foundColor = new List<Color>();
-        var bodyXf = new List<Transform3D>();
-        var bodyColor = new List<Color>();
-        var roofXf = new List<Transform3D>();
-        var roofColor = new List<Color>();
+        var ctx = new BuildingModelFactory.BuildRoleLists();
         var doorXf = new List<Transform3D>();
         var doorColor = new List<Color>();
         const float cs = MapGrid.CellSize;
 
+        var modelIds = new HashSet<int>();
+
         foreach (var b in gs.Buildings.Values)
         {
-            // 等级越高楼越高；年久失修则发暗
-            float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
-
-            // 房体范围：grown 与官营统一按占地 ~0.9 缩放整块绘制（房体=占地）；
-            // 底面 = 垫基台面 + BuildingBaseLift（整体抬起免与地表穿插）
-            float w, d;
-            var center = MapGrid.CellToWorld(b.Origin);
-            float groundY = gs.Map.GroundY(b.Origin); // 地形高度基准（建筑要求平地，整块同高）
-            float baseY = groundY + WorldConfig.BuildingBaseLift; // 房体底面海拔
-            w = b.FootX * cs * 0.9f;
-            d = b.FootY * cs * 0.9f;
-            center += new Vector3((b.FootX - 1) * cs / 2f, baseY + height / 2f, (b.FootY - 1) * cs / 2f);
-
-            var color = b.Def.GodotColor;
-            if (b.Condition < 50f)
-                color = color.Darkened(0.35f * (1f - b.Condition / 50f));
-
-            // 地基：不透明基座从房体底面向下延伸 FoundationDepth，斜坡上建造时遮住悬空的底部
-            foundXf.Add(new Transform3D(
-                Basis.FromScale(new Vector3(w, WorldConfig.FoundationDepth, d)),
-                new Vector3(center.X, baseY - WorldConfig.FoundationDepth / 2f, center.Z)));
-            foundColor.Add(FoundationColor);
-
-            // 半透明主体 + 同变换边框
-            var bodyTransform = new Transform3D(Basis.FromScale(new Vector3(w, height, d)), center);
-            var bodyCol = color;
-            bodyCol.A = BodyAlpha;
-            bodyXf.Add(bodyTransform);
-            bodyColor.Add(bodyCol);
-
-            // 斜屋顶：脊线沿长边，稍出檐（跟随房体尺寸与中心）；农田等 NoRoof 地块只有地面不盖顶
-            if (!b.Def.NoRoof)
+            // 阶段 C：有 ModelPath 的建筑优先走 glb 资产路径；资源不可用则降级回原始体造型
+            if (b.Def.HasModel)
             {
-                float roofH = Mathf.Clamp(height * 0.3f, 0.5f, 1.8f);
-                var roofBasis = w >= d
-                    ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * 1.06f, roofH, w * 1.06f))
-                    : Basis.FromScale(new Vector3(w * 1.06f, roofH, d * 1.06f));
-                var roofCenter = new Vector3(center.X, baseY + height + roofH / 2f, center.Z);
-                roofXf.Add(new Transform3D(roofBasis, roofCenter));
-                roofColor.Add(color.Darkened(0.45f)); // 灰瓦感
+                var scene = BuildingAssetLoader.LoadScene(b.Def.ModelPath);
+                if (scene != null)
+                {
+                    EnsureAssetInstance(b, scene, gs, cs, modelIds);
+                    continue;
+                }
             }
 
-            // 门标记：沿占地边界贴墙放置，朝向由门内→门外方向决定；
-            // 门高比成年村民（约 0.46m，见 VillagerConfig.ModelScale）略高，
-            // 前后门同高，靠颜色（亮金/暗木）与宽度（宽/窄）区分
+            // 各角色（地基/房体/屋顶/端坡/檐口/屋脊/立柱/招幌/灯笼）由工厂产出变换+颜色
+            BuildingModelFactory.AppendAssembly(gs, b, ctx);
+
+            // 门标记（保留原逻辑：沿占地边界贴墙，大门金/后门暗木；需 gs.EnsureDoors）
             gs.EnsureDoors(b);
             if (b.Doors != null)
             {
+                var ccenter = MapGrid.CellToWorld(b.Origin)
+                    + new Vector3((b.FootX - 1) * cs / 2f, 0f, (b.FootY - 1) * cs / 2f);
                 foreach (var door in b.Doors)
                 {
                     var dir = new Vector2I(door.Outside.X - door.Inside.X, door.Outside.Y - door.Inside.Y);
@@ -1080,35 +1093,71 @@ public partial class GridRenderer : Node3D
                     const float doorH = 0.55f;
                     float wide = (door.IsMain ? 0.5f : 0.28f) * cs;
                     const float thick = 0.12f;
-                    // 门面宽度沿墙面（垂直于 dir），厚度沿 dir；门底与房体底面同高
                     var scale = dir.X != 0 ? new Vector3(thick, doorH, wide) : new Vector3(wide, doorH, thick);
                     var pos = MapGrid.CellToWorld(door.Inside) + dirW * (cs * 0.5f)
                         + Vector3.Up * (gs.Map.GroundY(door.Inside) + WorldConfig.BuildingBaseLift + doorH / 2f);
-                    // 大门居中：沿墙面方向对齐到占地几何中心（偶数宽建筑旧版会因卡格偏向一侧），
-                    // 后门保持偏侧位（错落感）
+                    // 大门沿墙面居中到占地几何中心（后门保持偏侧错落）
                     if (door.IsMain)
                     {
-                        if (dir.X != 0)
-                            pos.Z = center.Z; // 东西墙：沿南北居中
-                        else
-                            pos.X = center.X; // 南北墙：沿东西居中
+                        if (dir.X != 0) pos.Z = ccenter.Z;
+                        else pos.X = ccenter.X;
                     }
                     doorXf.Add(new Transform3D(Basis.FromScale(scale), pos));
-                    doorColor.Add(door.IsMain ? MainDoorColor : BackDoorColor);
+                    doorColor.Add(door.IsMain ? BuildingModelFactory.MainDoorColor : BuildingModelFactory.BackDoorColor);
                 }
             }
         }
 
-        FillMultiMesh(_bldgFounds.Multimesh, foundXf, foundColor);
-        FillMultiMesh(_bldgBodies.Multimesh, bodyXf, bodyColor);
-        FillMultiMesh(_bldgRoofs.Multimesh, roofXf, roofColor);
+        FillMultiMesh(_bldgFounds.Multimesh, ctx.Found.X, ctx.Found.C);
+        FillMultiMesh(_bldgBodies.Multimesh, ctx.Body.X, ctx.Body.C);
+        FillMultiMesh(_bldgRoofs.Multimesh, ctx.Roof.X, ctx.Roof.C);
+        FillMultiMesh(_bldgRoofEnds.Multimesh, ctx.RoofEnd.X, ctx.RoofEnd.C);
+        FillMultiMesh(_bldgEaves.Multimesh, ctx.Eave.X, ctx.Eave.C);
+        FillMultiMesh(_bldgRidges.Multimesh, ctx.Ridge.X, ctx.Ridge.C);
+        FillMultiMesh(_bldgPillars.Multimesh, ctx.Pillar.X, ctx.Pillar.C);
+        FillMultiMesh(_bldgBanners.Multimesh, ctx.Banner.X, ctx.Banner.C);
+        FillMultiMesh(_bldgLanterns.Multimesh, ctx.Lantern.X, ctx.Lantern.C);
+        FillMultiMesh(_bldgSteps.Multimesh, ctx.Step.X, ctx.Step.C);
+        FillMultiMesh(_bldgWindows.Multimesh, ctx.Window.X, ctx.Window.C);
+        FillMultiMesh(_bldgWalls.Multimesh, ctx.Wall.X, ctx.Wall.C);
         FillMultiMesh(_doors.Multimesh, doorXf, doorColor);
 
-        // 边框与主体同变换（固定深色，无逐实例颜色）
-        var mmEdges = _bldgEdges.Multimesh;
-        mmEdges.InstanceCount = bodyXf.Count;
-        for (int i = 0; i < bodyXf.Count; i++)
-            mmEdges.SetInstanceTransform(i, bodyXf[i]);
+        // 释放已拆除或不再走资产路径的实例
+        CleanupStaleAssetInstances(modelIds);
+    }
+
+    /// <summary>阶段 C：为走资产路径的建筑实例化/复用 glb 节点，贴合占地与层高；记录其 Id 供清理。</summary>
+    private void EnsureAssetInstance(BuildingInstance b, PackedScene scene, GameState gs, float cs, HashSet<int> modelIds)
+    {
+        modelIds.Add(b.Id);
+        if (!_assetInstances.TryGetValue(b.Id, out var inst) || inst == null || inst.GetParent() != _assetRoot)
+        {
+            inst = scene.Instantiate<Node3D>();
+            _assetRoot.AddChild(inst);
+            _assetInstances[b.Id] = inst;
+        }
+        float groundY = gs.Map.GroundY(b.Origin);
+        float baseY = groundY + WorldConfig.BuildingBaseLift;
+        float w = b.FootX * cs * 0.9f;
+        float d = b.FootY * cs * 0.9f;
+        float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
+        var center = MapGrid.CellToWorld(b.Origin)
+            + new Vector3((b.FootX - 1) * cs / 2f, 0f, (b.FootY - 1) * cs / 2f);
+        BuildingAssetLoader.FitAndPlace(inst, w, d, height, baseY, center.X, center.Z);
+    }
+
+    /// <summary>释放已拆除或不再走资产路径（如资产缺失转回原始体）的建筑实例。</summary>
+    private void CleanupStaleAssetInstances(HashSet<int> modelIds)
+    {
+        var stale = new List<int>();
+        foreach (var kv in _assetInstances)
+            if (!modelIds.Contains(kv.Key))
+                stale.Add(kv.Key);
+        foreach (var id in stale)
+        {
+            _assetInstances[id]?.QueueFree();
+            _assetInstances.Remove(id);
+        }
     }
 
     private static void FillMultiMesh(MultiMesh mm, List<Transform3D> xforms, List<Color> colors)
@@ -1119,39 +1168,6 @@ public partial class GridRenderer : Node3D
             mm.SetInstanceTransform(i, xforms[i]);
             mm.SetInstanceColor(i, colors[i]);
         }
-    }
-
-    /// <summary>单位立方体（边长 1，原点居中）的 12 条棱线，供建筑边框 MultiMesh 缩放复用。</summary>
-    private static ArrayMesh BuildUnitCubeEdges()
-    {
-        const float h = 0.5f;
-        var pts = new List<Vector3>();
-        for (int s = -1; s <= 1; s += 2)
-        {
-            float y = h * s;
-            pts.Add(new Vector3(-h, y, -h)); pts.Add(new Vector3(h, y, -h));
-            pts.Add(new Vector3(h, y, -h)); pts.Add(new Vector3(h, y, h));
-            pts.Add(new Vector3(h, y, h)); pts.Add(new Vector3(-h, y, h));
-            pts.Add(new Vector3(-h, y, h)); pts.Add(new Vector3(-h, y, -h));
-        }
-        for (int i = 0; i < 4; i++)
-        {
-            float x = (i & 1) == 0 ? -h : h;
-            float z = (i & 2) == 0 ? -h : h;
-            pts.Add(new Vector3(x, -h, z)); pts.Add(new Vector3(x, h, z));
-        }
-
-        var arrays = new Godot.Collections.Array();
-        arrays.Resize((int)Mesh.ArrayType.Max);
-        arrays[(int)Mesh.ArrayType.Vertex] = pts.ToArray();
-        var mesh = new ArrayMesh();
-        mesh.AddSurfaceFromArrays(Mesh.PrimitiveType.Lines, arrays);
-        mesh.SurfaceSetMaterial(0, new StandardMaterial3D
-        {
-            ShadingMode = BaseMaterial3D.ShadingModeEnum.Unshaded,
-            AlbedoColor = EdgeColor,
-        });
-        return mesh;
     }
 
     /// <summary>重建图缘裙板：沿四条图缘逐顶点拉一圈竖直带状网格——上沿贴图缘地形顶点、

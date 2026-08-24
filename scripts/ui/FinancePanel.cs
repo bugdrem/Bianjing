@@ -3,7 +3,7 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>财政面板：官库本月/上月分类收支流水（点顶栏钱数呼出）。</summary>
-public partial class FinancePanel : PanelContainer
+public partial class FinancePanel : FrostedPanel
 {
     private const float RefreshInterval = 0.5f;
 

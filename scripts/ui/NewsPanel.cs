@@ -39,7 +39,7 @@ public partial class NewsPanel : VBoxContainer
         Position -= new Vector2(12, 96);
         AddThemeConstantOverride("separation", 6);
 
-        _panel = new PanelContainer { Visible = false };
+        _panel = new FrostedPanel { Visible = false };
         AddChild(_panel);
 
         var margin = new MarginContainer();

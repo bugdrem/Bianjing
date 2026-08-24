@@ -7,7 +7,7 @@ namespace Bianjing;
 /// 土地税/商税各有四档（免征/轻税/中税/重税），人口税为开关。
 /// 实时预估月入并展示税率。
 /// </summary>
-public partial class PolicyPanel : PanelContainer
+public partial class PolicyPanel : FrostedPanel
 {
     private const float RefreshInterval = 0.5f;
 
@@ -92,6 +92,7 @@ public partial class PolicyPanel : PanelContainer
     private static OptionButton MakeLevelOption(string[] names, int selected)
     {
         var opt = new OptionButton();
+        UiTheme.StyleOptionPopup(opt);
         foreach (string n in names)
             opt.AddItem(n);
         opt.Selected = selected;

@@ -71,7 +71,7 @@ public partial class GameMenu : CanvasLayer
         center.SetAnchorsPreset(Control.LayoutPreset.FullRect);
         AddChild(center);
 
-        var panel = new PanelContainer();
+        var panel = new FrostedPanel();
         center.AddChild(panel);
 
         var margin = new MarginContainer();
@@ -88,6 +88,7 @@ public partial class GameMenu : CanvasLayer
         margin.AddChild(BuildQuitBox());
         _allBoxes = new[] { _titleBox, _pauseBox, _newGameBox, _saveBox, _loadBox, _settingsBox, _quitBox };
 
+        UiTheme.Apply(this); // 根 Window 主题不穿透 CanvasLayer，需手动挂到本子树
         Open();
     }
 
@@ -97,9 +98,12 @@ public partial class GameMenu : CanvasLayer
     {
         _titleBox = NewBox();
 
+        var titleRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         var title = new Label { Text = "汴 京", HorizontalAlignment = HorizontalAlignment.Center };
         title.AddThemeFontSizeOverride("font_size", 36);
-        _titleBox.AddChild(title);
+        titleRow.AddChild(title);
+        titleRow.AddChild(UiTheme.MakeSeal("汴")); // 红印章点睛（城印）
+        _titleBox.AddChild(titleRow);
 
         AddButton(_titleBox, "新游戏", () => ShowBox(_newGameBox));
         AddButton(_titleBox, "读取存档", () => OpenLoadBox(_titleBox));
@@ -112,9 +116,12 @@ public partial class GameMenu : CanvasLayer
     {
         _pauseBox = NewBox();
 
+        var titleRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         var title = new Label { Text = "汴 京", HorizontalAlignment = HorizontalAlignment.Center };
         title.AddThemeFontSizeOverride("font_size", 36);
-        _pauseBox.AddChild(title);
+        titleRow.AddChild(title);
+        titleRow.AddChild(UiTheme.MakeSeal("汴")); // 红印章点睛（城印）
+        _pauseBox.AddChild(titleRow);
 
         AddButton(_pauseBox, "继续游戏", Resume);
         AddButton(_pauseBox, "保存存档", OpenSaveBox);
@@ -323,6 +330,7 @@ public partial class GameMenu : CanvasLayer
         var resRow = new HBoxContainer();
         resRow.AddChild(new Label { Text = "分辨率：" });
         var resOpt = new OptionButton();
+        UiTheme.StyleOptionPopup(resOpt);
         Vector2I[] resolutions =
         {
             new(1280, 720), new(1366, 768), new(1600, 900), new(1920, 1080), new(2560, 1440),
@@ -364,6 +372,14 @@ public partial class GameMenu : CanvasLayer
         };
         _settingsBox.AddChild(vsync);
 
+        var edgePan = new CheckButton { Text = "鼠标移至屏幕边缘自动移动视角", ButtonPressed = GameSettings.EdgePanEnabled };
+        edgePan.Toggled += on =>
+        {
+            GameSettings.EdgePanEnabled = on;
+            GameSettings.Save();
+        };
+        _settingsBox.AddChild(edgePan);
+
         var infMoney = new CheckButton { Text = "无限钱（可负债建造）", ButtonPressed = GameSettings.InfiniteMoney };
         infMoney.Toggled += on =>
         {
@@ -375,6 +391,7 @@ public partial class GameMenu : CanvasLayer
         var autoRow = new HBoxContainer();
         autoRow.AddChild(new Label { Text = "自动保存：" });
         var autoOpt = new OptionButton();
+        UiTheme.StyleOptionPopup(autoOpt);
         int[] minutes = { 0, 5, 10, 20 };
         string[] labels = { "关闭", "每5分钟", "每10分钟", "每20分钟" };
         for (int i = 0; i < minutes.Length; i++)

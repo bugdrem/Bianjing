@@ -57,6 +57,7 @@ public partial class LoadingScreen : CanvasLayer
         box.AddThemeConstantOverride("separation", 18);
         AddChild(box);
 
+        var titleRow = new HBoxContainer { Alignment = BoxContainer.AlignmentMode.Center };
         var title = new Label
         {
             Text = _cityName,
@@ -64,7 +65,9 @@ public partial class LoadingScreen : CanvasLayer
         };
         title.AddThemeFontSizeOverride("font_size", 40);
         title.AddThemeColorOverride("font_color", new Color(0.88f, 0.82f, 0.68f));
-        box.AddChild(title);
+        titleRow.AddChild(title);
+        titleRow.AddChild(UiTheme.MakeSeal("印")); // 朱红印章点睛
+        box.AddChild(titleRow);
 
         _stageLabel = new Label
         {
@@ -81,6 +84,8 @@ public partial class LoadingScreen : CanvasLayer
             CustomMinimumSize = new Vector2(360, 10),
         };
         box.AddChild(_bar);
+
+        UiTheme.Apply(this); // 根 Window 主题不穿透 CanvasLayer，需手动挂到本子树
     }
 
     public override void _Process(double delta)

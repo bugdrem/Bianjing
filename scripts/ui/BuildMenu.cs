@@ -11,7 +11,7 @@ namespace Bianjing;
 /// 首建门槛：未落成王爷府前，基础设施整组置灰、其余分类建筑折叠提示，落成后自动点亮。
 /// mod 只需在 mods/&lt;模组&gt;/buildings.json 给建筑填 menuGroup/menuOrder 即自动出现在对应分类，
 /// 填未知组名会自动新增一个分类页——四类同样支持 mod 式扩展。</summary>
-public partial class BuildMenu : PanelContainer
+public partial class BuildMenu : FrostedPanel
 {
     /// <summary>基础分组的固定顺序与中文名（mod 自定义组按其最小 MenuOrder 追加在其后）。</summary>
     private static readonly (string Key, string Label)[] BaseGroups =

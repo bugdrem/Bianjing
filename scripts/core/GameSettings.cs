@@ -18,6 +18,10 @@ public static class GameSettings
     /// 目前可在设置里随时开关，后期拟改为仅建局时选定。</summary>
     public static bool InfiniteMoney;
 
+    /// <summary>鼠标移至屏幕边缘自动平移视野：光标贴边即推镜头，默认开启；
+    /// 关闭后仅保留 WASD 平移，边缘不再触发（防菜单/拖拽误触）。</summary>
+    public static bool EdgePanEnabled = true;
+
     /// <summary>窗口模式下的分辨率（全屏时忽略，沿用显示器分辨率）。</summary>
     public static int WindowWidth = 1280;
     public static int WindowHeight = 720;
@@ -31,6 +35,7 @@ public static class GameSettings
         Fullscreen = (bool)cfg.GetValue("general", "fullscreen", false);
         VSync = (bool)cfg.GetValue("general", "vsync", true);
         InfiniteMoney = (bool)cfg.GetValue("general", "infinite_money", false);
+        EdgePanEnabled = (bool)cfg.GetValue("general", "edge_pan_enabled", true);
         WindowWidth = (int)cfg.GetValue("display", "window_width", 1280);
         WindowHeight = (int)cfg.GetValue("display", "window_height", 720);
     }
@@ -42,6 +47,7 @@ public static class GameSettings
         cfg.SetValue("general", "fullscreen", Fullscreen);
         cfg.SetValue("general", "vsync", VSync);
         cfg.SetValue("general", "infinite_money", InfiniteMoney);
+        cfg.SetValue("general", "edge_pan_enabled", EdgePanEnabled);
         cfg.SetValue("display", "window_width", WindowWidth);
         cfg.SetValue("display", "window_height", WindowHeight);
         cfg.Save(CfgPath);

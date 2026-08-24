@@ -7,7 +7,7 @@ namespace Bianjing;
 /// 已研成 / 研习中（进度）/ 可立项（主动，点按钮开研）/ 待条件（被动或未达门槛，标注所需里程碑与前置）。
 /// 主动科技同时只能在研一项，经费由官库逐旬拨付；被动科技条件达成自动研成。
 /// </summary>
-public partial class TechPanel : PanelContainer
+public partial class TechPanel : FrostedPanel
 {
     private const float RefreshInterval = 0.5f;
 

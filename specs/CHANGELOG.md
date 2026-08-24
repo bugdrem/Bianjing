@@ -1,6 +1,81 @@
 # 变更日志（specs）
 
-按批次记录每次调整的要点（新规则起始于批次二十五；更早批次的详情见计划文档归档）。
+按批次记录每次调整的要点，为项目的**单一权威迭代记录**（合并自原 `ADJUSTMENT_LOG.md`，现后者已并入本文）。
+
+- 覆盖区间：批次二十五 → 批次九十一（倒序，最新在前）。
+- 更早批次（<25）的详情见计划文档归档。
+- 当前代码状态以 `DESIGN.md` 为准；业务↔代码寻址见 `CODEMAP.md`。
+- 早期开发阶段：**功能实现或重构无需考虑旧版本兼容**（枚举新值尾部追加、存档 `FormatVersion` 不符直接拒读）。
+
+---
+
+## 批次九十一（2026-08-09）旬历重构（月=3 旬、旬=1 分钟）+ NPC 一年两岁 + LMDB 升 0.23.0
+
+需求：LMDB 升级 0.23；一个月改 3 天（上/中/下旬），一天（旬）=1 现实分钟；NPC 一年两岁（1 月、7 月各 +1 岁）。
+
+- **时间模型**（TimeConfig/GameClock）：`DaysPerMonth` 7→3（一月三旬）；`SecondsPerGameHour=2.5`（一旬=1 分钟，一年=36 分钟）；`RestCycleDays` 5→2；`DisplayDay` 废弃 → `DayName`（上/中/下旬）；顶栏 `第X年 X月X旬`。
+- **日频 ×7/3**（年事件次数不变）：迁入 0.2333、婚配/交友 0.0233、生育 0.007、口粮/饮水 0.2333、柴薪 0.07、加工 1.8667、技能 4.6667、创业 0.0233、缺口 0.0467、升级 0.0467、开垦 0.5833、挂落果 0.2333、回血 4.6667；上山概率按「不上山」等比 ≈0.83；时长类 ×3/7（短缺阈值 6.5 旬、科技 13/19/26 旬、官仓 0.9）；工资/税/维护/开销/老化/修缮随分母自动同步。
+- **NPC 一年两岁**（Citizen/LifecycleSystem）：`AgeYears` 独立字段，月龄每月 +1、岁数 1/7 月各 +1；造人处同步初始化；grow 动画改用 `AgeYears/AdultAgeYears`。
+- **存档/依赖**：`FormatVersion` 24→25；`Bianjing.csproj` LightningDB 0.22.0→0.23.0（用户要求；0.23 改文件布局，旧档不可读，用户确认删旧档）。
+- 验证：`dotnet build` 0 警告 0 错误。
+
+## 批次九十（2026-08-09）LightningDB 0.23.0 旧档不兼容——回退 0.22.0
+
+- 探针复现：0.22.0 打开 quick 成功；0.23.0 同目录报 `MDB_INVALID`（magic 偏移 16→24、版本 01→03，文件布局变更）。
+- `Bianjing.csproj` LightningDB 回退 0.22.0（注释勿再升级）。
+- 教训：升级数据库依赖前必须验证旧档兼容性，依赖版本变更应写入本日志。
+
+## 批次八十九（2026-08-09）LightningEnvironment 泄漏致终结器崩溃——Open 失败路径补释放
+
+- 根因：`LightningEnvironment` 带终结器且 `Dispose(false)` 硬性抛异常，`SaveService.OpenEnv` 内 `env.Open()` 抛异常时局部环境未释放即泄漏，GC 终结崩溃进程。
+- 修复：`Open()` 包 try/catch，失败时 `env.Dispose()` 后原样 rethrow。
+
+## 批次八十八（2026-08-09）随机地图预览右下角深绿色块——预览色阶误导
+
+- 根因：`GameMenu.HeightColor` 的 `h≤0` 档返回深青绿（形似深水），而右下角是趋势场最低端、部分格 ≤0 读成「水」；成品 ≤0 实为干地（水只由河流/湖盆生成），预览色阶与成品低地脱节。
+- 修复：`h≤0` 档改为深草绿（草地色系），预览所见即所得。
+
+## 批次八十七（2026-08-09）全项目 Review——崩溃修复 / 经济漏洞 / 表现层清理
+
+严重：① `ResolveHousing` 枚举字典中建房插入 → `ToList()` 快照；② `LandSaleToPlayer` 凭空造钱 30% → 工钱从地价出（`PayBuildWages` 返回实发额）。
+中等：缺粮机制静默失效（官粮不计入需求账本 + 官仓 `CourtFoodCapPerCapita=9`）；修缮按实收回血；土地税按实记账；商税/土地税四舍五入；铺路总价先校验防负官库；分账余数末位承担；无维护不发钱；购物加「够一份含税价」门槛；老化每月广播 `BuildingsChanged`。
+表现层：空间哈希桶复用、`UpdatePathLine` 仅隐藏、`TopBar` 0.5s 节流、预览节点直挂自身；`Hud`/`TechPanel` 单位「贯」→「文」；注释口径统一引 `TimeConfig`/`EconomyConfig`/`WealthEase`。
+
+## 批次八十六（2026-08-09）空房堆积排查——空置民居低价继承
+
+- 空房来源（正常生命周期）：绝户 / 分家迁离；缺陷：`Abandoned` 标志无实现，迁入者只找店坊寄居、寄居者攒 5000 一律自建，空房只增不减。
+- 修复：`LifecycleSystem.InheritVacantHomes`——空置 house/mansion 由无自有住所的寄居家庭低价过户（house 1000/600、mansion 3000/1500，Ledger「空房过户」），先继承后自建；`PopulationConfig` 新增 `InheritHouse*`。
+
+## 批次八十五（2026-08-09）家庭 0 存款排查——农田收入修复
+
+- 排查（非 bug）：工商自营无固定工资、农民无工资（卖粮 ≈40 文/人/月不足 1/5 开销）、农田曾无限开垦、朝廷收购额度小。
+- 修复（用户选定农田收入修复）：`buildings.json` farmland 加 `salary:800`、`yieldPerWorker` 30→50；`CitizenAgent` 农田岗发固定工钱（`official||field`）；`EconomyConfig.GrainTaxShare` 0.2→0.1；`FarmlandConfig` 注释修正。
+
+## 批次八十四（2026-08-09）工坊技能来源缺失 / 商铺角色收敛 / 农田重叠与荒废继承
+
+- 工坊不出现：`SkillOf` 迁入映射无 Craft → 全城无手艺者。商铺呈工坊性质：转业随机重置专营、商铺收售原料、`InspectPanel` 误显生产。
+- 农田重叠：开垦未传尺寸恒放 6×6 压盖旧田；无限增加：开垦无上限。
+- 修复：`FarmlandSystem` 按尺寸阶梯落块 + 荒田 0 投入继承；`PopulationConfig.SettlerCraftChance=0.25`；`Goods.ShopSpecialties` 收敛为工坊产出（剔除粮/柴/果/野味）；`InspectPanel` 生产段限定 workshop。
+
+## 批次八十三（2026-08-08）民居转业卡点修复——占地放宽 / 创业者资格放宽 / 烧饼需求前置
+
+- 卡点：占地门槛 6（主流 2×2 不达标）；创业者要求无职与「就业涨经验」互斥；烧饼需求里程碑 3 才出现。
+- 修复：`GrowthConfig.ConvertMinArea` 6→4；创业者删 `||c.HasJob`（在业者可创业、辞工回店）；无职谋生半速涨经验；`Milestones` 烧饼需求 3→2。
+
+## 批次八十二（2026-08-08）进入地图视角——新图中心 / 读档王爷府，动画一致
+
+- `RtsCameraRig` 进场落点参数化（`_introTarget`，默认地图中心），新增 `RestartIntro(target)`；`Main` 读档回调 `FocusEnterView()` 落王爷府中心（缺失兜底中心），读档同样播放完整进场动画。
+
+## 批次八十一（2026-08-08）王爷府开局手动选位 + 恢复首建锁定
+
+- `Main` 删自动落成，新增 `StartFirstMansionPlacement()`（加载完成进放置模式）；`BuildController` 放置成功退模式 + `SwitchMode` 首建门槛拦截；`BuildMenu` 首建置灰（`ShowGroup` 读 `PrinceMansionBuilt`）。
+
+## 批次八十（补记）王爷府地标化 + 道路绘制工具与覆盖升级
+
+- 王爷府移出建造栏、不老化、禁拆；官府未解锁项折叠为一按钮。
+- 道路面板新增绘制工具：直线（Bresenham）/ 贝塞尔曲线 / 手绘，主路辅路桥梁通用；`GameState.RoadRank`（主2>辅1>小0），`PlaceRoadStamp` 升级分支 + `UpgradeRoadCell`，`PlacementValidator.CanPlaceRoad` 允许升级格。
+
+---
 
 ## 批次七十九（2026-08-08）漏网黑洞全清：维护费闭环 + 营造工钱按实发放
 

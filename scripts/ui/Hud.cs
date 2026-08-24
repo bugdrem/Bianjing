@@ -47,6 +47,8 @@ public partial class Hud : CanvasLayer
         AddChild(_inspect);
         AddChild(news);
 
+        UiTheme.Apply(this); // 根 Window 主题不穿透 CanvasLayer，需手动挂到本子树
+
         // 里程碑晋级与科技研成：右下角弹报（复用格子信息条）
         EventBus.MilestoneReached += OnMilestone;
         EventBus.TechUnlocked += OnTechUnlocked;
@@ -100,6 +102,8 @@ public partial class Hud : CanvasLayer
     }
 
     public void ShowCitizen(Citizen c) => _inspect.ShowCitizen(c);
+
+    public void ShowVisitor(ForeignVisitor v) => _inspect.ShowVisitor(v);
 
     public void ShowBuilding(BuildingInstance b) => _inspect.ShowBuilding(b);
 

@@ -19,6 +19,7 @@ config/icon="res://icon.svg"
 
 window/stretch/mode="canvas_items"
 window/stretch/aspect="expand"
+window/handling/allow_hidpi=true
 
 [dotnet]
 

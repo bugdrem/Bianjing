@@ -7,8 +7,10 @@ namespace Bianjing;
 /// </summary>
 public static class VillagerConfig
 {
-    /// <summary>成年人模型整体缩放（1.0 为原始大小；儿童在此基础上再按年龄折算）。</summary>
-    public const float ModelScale = 0.25f;
+    /// <summary>成年人模型整体缩放（1.0 为原始大小；儿童在此基础上再按年龄折算）。
+    /// 阶段九十四改 0.85→0.42：之前 0.85 让人 ≈1.45m，对 2m 高民居只矮 25%，看着人比房子大。
+    /// 0.42 让成年男性 ≈0.74m，相当于房高 1/3，宋画参考图里的小人就是这个比例。</summary>
+    public const float ModelScale = 0.42f;
 
     /// <summary>新生儿体型占成人的比例（体型从此值线性生长到成年门槛处的 1.0）。</summary>
     public const float ChildMinScale = 0.4f;

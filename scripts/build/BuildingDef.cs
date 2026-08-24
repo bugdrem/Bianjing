@@ -23,6 +23,14 @@ public class BuildingDef
     public string Color { get; set; } = "#ffffff";
     public float Height { get; set; } = 2f;
 
+    /// <summary>可选 3D 模型资产路径（如 "res://assets/buildings/palace.glb"）。非空则优先用该 glb 渲染，
+    /// 空字符串回退到 BuildingModelFactory 的原始体宋代造型；多实例共享同一 PackedScene 仅 Instantiate。</summary>
+    public string ModelPath { get; set; } = "";
+
+    /// <summary>是否挂了外部模型资产（走 glb 路径）。</summary>
+    [JsonIgnore]
+    public bool HasModel => !string.IsNullOrEmpty(ModelPath);
+
     /// <summary>不绘制斜屋顶（如农田等开阔地块，只有地面无房顶）；默认 false 照常盖顶。</summary>
     public bool NoRoof { get; set; }
 

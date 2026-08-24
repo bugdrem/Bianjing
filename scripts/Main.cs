@@ -24,6 +24,7 @@ public partial class Main : Node3D
     private MilestoneSystem _milestones;
     private TechSystem _techs;
     private DemandSystem _demand;
+    private VisitorSystem _visitors; // 道路通边 → 四向邻城来人
     private Hud _hud;
     private BuildController _build; // 建造交互控制器：开局王爷府选位放置用
     private GameMenu _menu;
@@ -49,6 +50,11 @@ public partial class Main : Node3D
         EventBus.Reset();
         GameSettings.Load();
         GameSettings.Apply();
+
+        // 全局挂载新中式 UI 主题（宣纸白毛玻璃 + 书法黑字 + 青辅 + 红印章）：
+        // 根 Window 的 Theme 向下传播到所有 Control 子节点（含 Hud/GameMenu/LoadingScreen），
+        // 无需逐文件改样式（设计见 .workbuddy/artifacts/UI评审与优化方案.md）。
+        GetTree().Root.Theme = UiTheme.Build();
 
         // 启动直进标题菜单：不建 GameState、不生成世界（地图只在新建/读档时生成并挂加载面板）
         _defs = BuildingDef.LoadAll();
@@ -96,6 +102,9 @@ public partial class Main : Node3D
         _milestones = new MilestoneSystem();
         _techs = new TechSystem();
         _demand = new DemandSystem();
+        _visitors = new VisitorSystem();
+        AddChild(_visitors);
+        _visitors.Setup(_clock, GameState.I);
 
         _build = new BuildController(cameraRig, renderer);
         AddChild(_build);
@@ -107,9 +116,12 @@ public partial class Main : Node3D
         _hud = new Hud(_build, _clock, SaveGame, LoadGame);
         AddChild(_hud);
         _build.Hud = _hud;
+        _build.Visitors = _visitors; // 点选外城来人
 
         // 王爷府建成钩子：实时放置才触发（读档重建不经 PlaceBuilding，不会重复拨款/重生夫妻）
         EventBus.BuildingPlaced += OnBuildingPlaced;
+        // 道路通边 → 四向邻城来人：首次通边播报
+        EventBus.RoadReachedEdge += OnRoadReachedEdge;
     }
 
     /// <summary>建筑建成钩子：王爷府落成时一次性拨给开基资源（官库钱/粮 + 府库货品），
@@ -134,6 +146,13 @@ public partial class Main : Node3D
         EventBus.RaiseStatsChanged();
     }
 
+    /// <summary>道路首次通到某方向地图边缘：播报对应邻城商旅往来。</summary>
+    private void OnRoadReachedEdge(MapDir dir)
+    {
+        var gs = GameState.I;
+        gs.PostNews("trade", $"{gs.Neighbors[(int)dir].Name} 道路已通，商旅往来渐多");
+    }
+
     /// <summary>每日结算：日常事务（生长/民生/财政/物产/动物游走）。</summary>
     private void OnDayPassed()
     {
@@ -156,6 +175,7 @@ public partial class Main : Node3D
         _milestones.TickDay(gs); // 人口达标即晋级（解锁建筑/需求/限级）
         _techs.TickDay(gs); // 被动科技自动研成 + 主动项目逐日推进
         _demand.TickDay(gs); // 中央需求账本：城市级供需统计 + 内部广播（置于日结末，捕获当日终态）
+        _visitors.TickDay(gs); // 外来访客：四向邻城来人调度（置于日结末，读取当日需求终态）
     }
 
     /// <summary>每月结算：大事（老化生死/重税民怨/植物生长/动物繁育）、月结工钱与账本轮转。</summary>
