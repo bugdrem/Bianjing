@@ -105,7 +105,7 @@ public partial class TopBar : FrostedPanel
         _pop.Text = $"人口 {gs.Population}";
         string speedText = _clock.Speed == 0 ? "已暂停" : $"{_clock.Speed:0.#}x";
         string rank = Milestones.NameOf(gs.MilestoneLevel); // 当前城市里程碑称号
-        _date.Text = $"{gs.CityName}【{rank}】 第{_clock.Year}年 {_clock.Month}月{_clock.DayName} {(_clock.IsNight ? "夜晚" : "白天")}  [{speedText}]";
+        _date.Text = $"{gs.CityName}【{rank}】 第{_clock.Year}年 {_clock.Month}月{_clock.DayName} {_clock.DayPeriodName}  [{speedText}]";
         // 键盘快捷键/暂停改速后同步下拉选中项（未知速率不强制选中，仅文本展示）
         for (int i = 0; i < _speeds.Length; i++)
             if (Math.Abs(_clock.Speed - _speeds[i]) < 0.001f && _speedBox.Selected != i)

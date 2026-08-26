@@ -161,27 +161,34 @@ public partial class VisitorSystem : Node
         }
     }
 
-    /// <summary>商人：双向贸易——先买走城里有余的货（城市赚钱），再把所带货售入库存（城市付钱给外城）。</summary>
+    /// <summary>商人：双向贸易——先买走城市最过剩的货（城市赚钱），再把所带货（城市短缺货）售入库存（城市付钱给外城）。</summary>
     private void SettleVenueTrade(GameState gs, ForeignVisitor vv)
     {
         var venue = PickVenue(gs);
         if (venue == null)
             return;
 
-        // 出口：外城顺带买走城里有余（不短缺）的货，城市收入
-        if (venue.Inv.Total > 0)
+        // 出口：外城收购城市最过剩的货（可支撑天数最高且高于阈值），从持有该货最多的贸易节点扣除，城市收入
+        var surplus = gs.Demand.Entries.Values
+            .Where(e => e.Stock > 0 && e.DaysOfStock > VisitorConfig.SurplusDaysThreshold)
+            .OrderByDescending(e => e.DaysOfStock)
+            .FirstOrDefault();
+        if (surplus != null)
         {
-            string exportGood = null;
-            double avail = 0;
-            foreach (var s in venue.Inv.Stacks)
+            BuildingInstance holder = null;
+            double best = 0;
+            foreach (var b in gs.Buildings.Values)
             {
-                if (!gs.Demand.IsShort(s.GoodsId)) { exportGood = s.GoodsId; avail = s.Amount; break; }
+                if (!IsTradeNode(b))
+                    continue; // 只从贸易/生产节点清库存，不扣居民家用
+                double a = b.Inv.AmountOf(surplus.GoodsId);
+                if (a > best) { best = a; holder = b; }
             }
-            if (exportGood != null)
+            if (holder != null)
             {
-                double qty = System.Math.Min(avail, 8 + _rng.Next(0, 17)); // 8–24 份
-                double taken = venue.TakeGoods(exportGood, qty);
-                long revenue = (long)(taken * Goods.PriceOf(exportGood));
+                double qty = Math.Min(best * VisitorConfig.ExportStockShare, VisitorConfig.ExportMaxQty);
+                double taken = holder.TakeGoods(surplus.GoodsId, qty);
+                long revenue = (long)(taken * Goods.PriceOf(surplus.GoodsId));
                 if (revenue > 0)
                 {
                     gs.Money += revenue;
@@ -190,10 +197,12 @@ public partial class VisitorSystem : Node
             }
         }
 
-        // 进口：把所带货售入库存，城市付钱给外城
+        // 进口：把所带货（城市短缺货）售入 venue 库存，仅当城市仍短缺才买（已补够则不强行塞，防积压）
         long cost = 0;
         foreach (var s in new List<GoodsStack>(vv.Inv.Stacks))
         {
+            if (!gs.Demand.IsShort(s.GoodsId))
+                continue; // 城市已不缺此货 → 跳过，不买
             double amt = venue.StoreGoodsForce(s.GoodsId, s.Amount);
             cost += (long)(amt * Goods.PriceOf(s.GoodsId));
         }
@@ -203,6 +212,13 @@ public partial class VisitorSystem : Node
             gs.Ledger?.Add("外来商队", -cost);
         }
         vv.Inv = new Inventory(); // 售罄
+    }
+
+    /// <summary>是否贸易/生产节点（商铺、驿站、工坊、官营）：可参与进出口库存调度；民居不计入。</summary>
+    private static bool IsTradeNode(BuildingInstance b)
+    {
+        var c = b.Def.Category;
+        return c == "shop" || c == "inn" || c == "workshop" || c == "official";
     }
 
     /// <summary>游客：在驿站下榻，城市收住宿费。</summary>
@@ -223,9 +239,29 @@ public partial class VisitorSystem : Node
         return ForeignVisitor.VisitorKind.Tourist;
     }
 
-    /// <summary>取 1–2 种同大类货作为带货（偏向该城 Specialties）。</summary>
+    /// <summary>取 1–2 种货作为带货：城市有缺口时大概率带「城市短缺货」补货，否则带邻城特产地货（维持多样性）。</summary>
     private Inventory MakeCargo(GameState gs, NeighborCity nb)
     {
+        // 互市闭环（待办B）：城市有缺口 → 大部分访客带短缺货补货（进口响应需求）
+        var shorts = gs.Demand.Entries.Values
+            .Where(e => e.IsShort)
+            .Select(e => e.GoodsId)
+            .ToList();
+        if (shorts.Count > 0 && _rng.NextDouble() < VisitorConfig.ImportBias)
+        {
+            Shuffle(shorts, _rng);
+            int n = Math.Min(shorts.Count, 1 + _rng.Next(0, 2)); // 1–2 种短缺货
+            var cargo = new Inventory();
+            for (int i = 0; i < n; i++)
+            {
+                double qty = VisitorConfig.ShortageCargoMin
+                           + _rng.NextDouble() * (VisitorConfig.ShortageCargoMax - VisitorConfig.ShortageCargoMin);
+                cargo.StoreForce(shorts[i], Math.Round(qty));
+            }
+            return cargo;
+        }
+
+        // 无短缺（或本次不响应缺口）→ 邻城特产地逻辑（维持多样性）
         int cat = VisitorConfig.PrimarySpecialty(nb);
         if (cat < 0 || !VisitorConfig.GoodsOfCategory(cat).Any())
         {
@@ -237,15 +273,24 @@ public partial class VisitorSystem : Node
         var goods = VisitorConfig.GoodsOfCategory(cat).ToList();
         if (goods.Count == 0)
             return new Inventory();
-        int n = Math.Min(goods.Count, _rng.Next(1, 3)); // 1–2 种同大类
+        int m = Math.Min(goods.Count, _rng.Next(1, 3));
         var inv = new Inventory();
-        for (int i = 0; i < n; i++)
+        for (int i = 0; i < m; i++)
         {
             string g = goods[_rng.Next(goods.Count)];
             double qty = 10 + _rng.Next(0, 31); // 10–40 份
             inv.StoreForce(g, qty);
         }
         return inv;
+    }
+
+    private static void Shuffle<T>(List<T> list, Random rng)
+    {
+        for (int i = list.Count - 1; i > 0; i--)
+        {
+            int j = rng.Next(i + 1);
+            (list[i], list[j]) = (list[j], list[i]);
+        }
     }
 
     private BuildingInstance PickVenue(GameState gs)

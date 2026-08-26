@@ -1,3 +1,5 @@
+using Godot;
+
 namespace Bianjing;
 
 /// <summary>
@@ -58,14 +60,45 @@ public static class WorldConfig
 
     /// <summary>白天/夜晚主光能量（DirectionalLight.LightEnergy）。</summary>
     public const float DaySunEnergy = 0.95f;
-    public const float NightSunEnergy = 0.4f;
+    public const float NightSunEnergy = 0.15f;
 
     /// <summary>白天/夜晚环境光能量（Environment.AmbientLightEnergy）。</summary>
-    public const float DayAmbientEnergy = 0.55f;
+    public const float DayAmbientEnergy = 0.5f;
     public const float NightAmbientEnergy = 0.3f;
 
-    /// <summary>昼夜过渡速率（1/秒，指数逼近系数；约 2 秒完成大半过渡）。</summary>
-    public const float DayNightSmoothPerSec = 1.5f;
+    /// <summary>晨昏（地平线附近）主光/环境光能量：用于随太阳高度角插值。
+    /// 主光弱、环境光强 → 晨昏阴影“浅”（长而柔）；正午主光强、环境光弱 → 阴影“深”（短而硬）。</summary>
+    public const float DawnSunEnergy = 0.5f;
+    public const float DawnAmbientEnergy = 0.68f;
+
+    /// <summary>夜晚环境光改为固定中性色（而非采样蓝天），避免地图泛蓝。
+    /// 取低饱和的冷灰，能量低、不抢月光主光。</summary>
+    public static readonly Color NightAmbientColor = new(0.50f, 0.52f, 0.55f);
+
+    // ---- 天空色（白天淡灰蓝 / 夜晚蓝黑），由 Main 在昼夜间平滑插值 ----
+    public static readonly Color DaySkyTop = new(0.40f, 0.50f, 0.66f);
+    public static readonly Color DaySkyHorizon = new(0.68f, 0.74f, 0.82f);
+    public static readonly Color DaySkyGround = new(0.64f, 0.70f, 0.76f);
+    public static readonly Color NightSkyTop = new(0.04f, 0.06f, 0.12f);
+    public static readonly Color NightSkyHorizon = new(0.10f, 0.14f, 0.22f);
+    public static readonly Color NightSkyGround = new(0.08f, 0.10f, 0.14f);
+
+    /// <summary>昼夜过渡速率（1/秒，指数逼近系数；取值越小过渡越平缓，约 5–6 秒完成大半过渡）。</summary>
+    public const float DayNightSmoothPerSec = 0.5f;
+
+    // ---- 天空天体（太阳/月亮）：配色与参数，集中此处便于微调 ----
+
+    /// <summary>太阳颜色：地平（早/黄昏）红黄，正午转白。同步作用于太阳精灵与平行光，营造早晚金辉。</summary>
+    public static readonly Color SunWarmColor = new(1.0f, 0.45f, 0.16f);
+    public static readonly Color SunNoonColor = new(1.0f, 0.97f, 0.90f);
+    /// <summary>月盘冷白 / 月照冷蓝。</summary>
+    public static readonly Color MoonTintColor = new(0.82f, 0.86f, 1.0f);
+    public static readonly Color MoonLightColor = new(0.55f, 0.65f, 0.95f);
+    /// <summary>满月且完全可见时的月光能量（DirectionalLight.LightEnergy）；实际能量再乘可见度与相位受光比例，
+    /// 故夜晚阴影深浅随月亮亮度变化（满月硬、弦月软）。</summary>
+    public const float MoonBaseEnergy = 0.7f;
+    /// <summary>月相周期（天）：与月份挂扣——一个游戏月走完一次朔望循环（新月→满月→新月）。</summary>
+    public static readonly float MoonCycleDays = TimeConfig.DaysPerMonth;
 
     /// <summary>居民履历条数上限 / 全城公告条数上限（超出移除最旧）。</summary>
     public const int LifeEventCap = 40;

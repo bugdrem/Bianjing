@@ -31,6 +31,24 @@ public partial class GameClock : Node
     /// 顶栏显示与光照联动共用；上下工作息沿用 WorkStartHour/WorkEndHour（与昼夜边界一致）。</summary>
     public bool IsNight => Hour < TimeConfig.DayStartHour || Hour >= TimeConfig.NightStartHour;
 
+    /// <summary>一日六时显示（替代“白天/夜晚”），按真实时段边界划分：
+    /// 平旦 5–9（清晨）/ 隅中 9–12（上午）/ 日中 12–15（正午）/ 晡时 15–19（下午）/ 黄昏 19–23（夜晚）/ 夜半 23–次日5（深夜）。
+    /// 光照昼夜联动共用 IsNight（黄昏=夜、夜半=深夜）。</summary>
+    public string DayPeriodName
+    {
+        get
+        {
+            int h = Hour;
+            if (h < 5) return "夜半";   // 深夜 23–次日5
+            if (h < 9) return "平旦";   // 清晨 5–9
+            if (h < 12) return "隅中";  // 上午 9–12
+            if (h < 15) return "日中";  // 正午 12–15
+            if (h < 19) return "晡时";  // 下午 15–19
+            if (h < 23) return "黄昏";  // 夜晚 19–23
+            return "夜半";              // 深夜 23–次日5
+        }
+    }
+
     /// <summary>开局以来的绝对旬数（从 0 起）：供轮休等周期作息计算。</summary>
     public int AbsoluteDay => ((Year - 1) * MonthsPerYear + (Month - 1)) * DaysPerMonth + (Day - 1);
 

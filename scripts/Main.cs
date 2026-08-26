@@ -40,8 +40,11 @@ public partial class Main : Node3D
     private (GameState gs, SaveMeta meta)? _loadResult;
 
     private Godot.Environment _env;   // 世界环境：按相机拉距动态开关深度雾化
-    private DirectionalLight3D _sun;  // 主光源（批次七十四）：夜间联动变暗
+    private ProceduralSkyMaterial _skyMat; // 天空材质：昼夜间平滑插值配色（蓝黑夜空）
+    private DirectionalLight3D _sun;  // 主光源（批次七十四）：随一日六时转动、夜间变暗
+    private Vector3 _sunDir = new Vector3(0.2f, 1f, 0.2f).Normalized(); // 平滑后的“指向太阳”方向（避免整点跳变）
     private RtsCameraRig _cameraRig;  // 相机云台：取拉距判定视角是否在地图内
+    private SkyBodies _sky;           // 天空天体：太阳（带光晕）/ 月亮（相位）/ 月光平行光
 
     private float _autoSaveTimer;
 
@@ -60,6 +63,8 @@ public partial class Main : Node3D
         _defs = BuildingDef.LoadAll();
         _menu = new GameMenu(NewGame, SaveNamed, LoadSlotAsync, ReturnToTitle);
         AddChild(_menu); // 标题菜单自行暂停全树
+
+        SetupTitleBackground(); // 标题阶段主视口给个天空背景：菜单玻璃才有内容可虚化（进世界后复用，不重复建）
     }
 
     /// <summary>进入世界（主线程）：装配环境/渲染器/相机/时钟/系统/HUD。
@@ -72,6 +77,9 @@ public partial class Main : Node3D
         _inWorld = true;
 
         SetupEnvironment();
+
+        _sky = new SkyBodies();
+        AddChild(_sky);
 
         var renderer = new GridRenderer();
         AddChild(renderer);
@@ -209,18 +217,74 @@ public partial class Main : Node3D
             Callable.From(() => _hud.ShowCellInfo(ok ? "已自动保存" : "自动保存失败（详见日志）")).CallDeferred());
     }
 
-    /// <summary>昼夜光照联动（批次七十四）：夜晚主光与环境光调暗（保持可操作），平滑过渡；
-    /// 白天/夜晚边界见 TimeConfig（DayStartHour=6 天亮 / NightStartHour=18 天黑）。</summary>
+    /// <summary>昼夜光照联动：太阳随一日六时走“东（地平）→ 南（正午顶）→ 西（地平）”弧线，
+    /// 阴影方向随之从西扫向东（晨昏长软、正午短硬）；太阳高度角驱动阴影“浅→深→浅”；
+    /// 夜间太阳沉到地平线下并关阴影。天空与光照均按 DayNightSmoothPerSec 平缓过渡。
+    /// 昼夜边界见 TimeConfig（DayStartHour=5 天亮 / NightStartHour=19 天黑）。</summary>
     private void UpdateDayNight(float delta)
     {
-        if (_sun == null || _env == null)
+        if (_sun == null || _env == null || _clock == null)
             return;
-        bool night = _clock != null && _clock.IsNight;
-        float targetSun = night ? WorldConfig.NightSunEnergy : WorldConfig.DaySunEnergy;
-        float targetAmb = night ? WorldConfig.NightAmbientEnergy : WorldConfig.DayAmbientEnergy;
+        int dayStart = TimeConfig.DayStartHour;     // 5（平旦，日出东方）
+        int nightStart = TimeConfig.NightStartHour; // 19（黄昏，日入西方）
+        int dayLen = nightStart - dayStart;         // 14 个白天时
+        float h = _clock.Hour;
+        bool night = h < dayStart || h >= nightStart;
+
+        float targetSun, targetAmb;
+        Vector3 targetDir;
+        bool targetShadow;
+        if (!night)
+        {
+            // theta: 0(东地平) → π(西地平)，正午 = π/2 在顶
+            float theta = (h - dayStart) / (float)dayLen * Mathf.Pi;
+            float elev = Mathf.Sin(theta); // 0(地平) .. 1(正午)
+            // 指向太阳的方向：水平分量朝东(cos>0)→西(cos<0)，垂直分量=elev；z 给一点南偏，阴影主沿东西
+            targetDir = new Vector3(Mathf.Cos(theta), elev, 0.2f).Normalized();
+            // 主光：正午强、晨昏弱；环境光反相 → 晨昏阴影“浅”（长而柔）、正午“深”（短而硬）
+            targetSun = Mathf.Lerp(WorldConfig.DawnSunEnergy, WorldConfig.DaySunEnergy, elev);
+            targetAmb = Mathf.Lerp(WorldConfig.DawnAmbientEnergy, WorldConfig.DayAmbientEnergy, elev);
+            targetShadow = true;
+        }
+        else
+        {
+            targetDir = new Vector3(0f, -1f, 0.2f).Normalized(); // 太阳沉到地平线下
+            targetSun = WorldConfig.NightSunEnergy;
+            targetAmb = WorldConfig.NightAmbientEnergy;
+            targetShadow = false; // 夜晚不显示阴影
+        }
+
         float k = 1f - Mathf.Exp(-delta * WorldConfig.DayNightSmoothPerSec);
+        // 太阳方向平滑（避免整点跳变）；用指向太阳的方向摆位并 LookAt 原点，阴影自然落在背光侧
+        _sunDir = _sunDir.Lerp(targetDir, k).Normalized();
+        _sun.GlobalPosition = _sunDir * 100f;
+        _sun.LookAt(Vector3.Zero);
         _sun.LightEnergy = Mathf.Lerp(_sun.LightEnergy, targetSun, k);
         _env.AmbientLightEnergy = Mathf.Lerp(_env.AmbientLightEnergy, targetAmb, k);
+        _sun.ShadowEnabled = targetShadow;
+        // 夜晚环境光改用固定中性色，避免采样蓝天导致地图泛蓝；白天回归天空采样（自然天光）
+        _env.AmbientLightSource = night ? Godot.Environment.AmbientSource.Color : Godot.Environment.AmbientSource.Sky;
+        if (night)
+            _env.AmbientLightColor = WorldConfig.NightAmbientColor;
+        // 天空配色昼夜平滑插值：白天淡灰蓝 → 夜晚蓝黑
+        if (_skyMat != null)
+        {
+            Color top = night ? WorldConfig.NightSkyTop : WorldConfig.DaySkyTop;
+            Color hor = night ? WorldConfig.NightSkyHorizon : WorldConfig.DaySkyHorizon;
+            Color gnd = night ? WorldConfig.NightSkyGround : WorldConfig.DaySkyGround;
+            _skyMat.SkyTopColor = _skyMat.SkyTopColor.Lerp(top, k);
+            _skyMat.SkyHorizonColor = _skyMat.SkyHorizonColor.Lerp(hor, k);
+            _skyMat.GroundHorizonColor = _skyMat.GroundHorizonColor.Lerp(gnd, k);
+        }
+
+        // 太阳颜色：地平红黄 → 正午白（同步照亮场景，营造早晚金辉）；夜间沉到地平线下、能量极低
+        float sunColT = Mathf.Clamp(_sunDir.Y / 0.5f, 0f, 1f);
+        _sun.LightColor = WorldConfig.SunWarmColor.Lerp(WorldConfig.SunNoonColor, sunColT);
+
+        // 月相：随月份周期（MoonCycleDays=一个月朔望循环），连续推进；太阳方向驱动月亮升落与亮度反相
+        float moonPhase = ((_clock.AbsoluteDay + _clock.Hour / 24f) / WorldConfig.MoonCycleDays) % 1f;
+        if (moonPhase < 0f) moonPhase += 1f;
+        _sky?.UpdateSky(_sunDir, moonPhase);
     }
 
     /// <summary>深度雾化当前已关闭：每帧确保 FogEnabled=false（保留按拉距开关的骨架，后续如需重启用回下方逻辑）。
@@ -398,42 +462,80 @@ public partial class Main : Node3D
         }
     }
 
-    private void SetupEnvironment()
+    /// <summary>标题阶段背景：主视口先挂一个天空环境（无光照/无卷轴），让标题菜单的 FrostedPanel 有内容可虚化，
+    /// 否则背后是空视口、玻璃面板采到的是纯白。进世界后 EnterWorld.SetupEnvironment 复用同一 _env，不重复建 WorldEnvironment。</summary>
+    private void SetupTitleBackground()
     {
-        _sun = new DirectionalLight3D
-        {
-            RotationDegrees = new Vector3(-55f, -35f, 0f),
-            ShadowEnabled = true,
-            LightColor = new Color(1f, 0.96f, 0.88f), // 微暖阳光，去冷白感
-            LightEnergy = WorldConfig.DaySunEnergy,
-            // 批次九十二：卷轴装裱层材质一律 Unshaded（不受光照），光照效果仅作用于地图内
-        };
-        AddChild(_sun);
-
+        if (_env != null)
+            return;
         var env = new Godot.Environment
         {
             BackgroundMode = Godot.Environment.BGMode.Sky,
             Sky = new Sky { SkyMaterial = new ProceduralSkyMaterial
             {
-                // 地平线暖灰（参考宋画素净色调），降低天空蓝对环境光的染色
-                SkyHorizonColor = new Color(0.78f, 0.75f, 0.67f),
-                GroundHorizonColor = new Color(0.78f, 0.75f, 0.67f),
+                // 白天淡灰蓝（夜间由 UpdateDayNight 平滑插值到蓝黑）
+                SkyTopColor = WorldConfig.DaySkyTop,
+                SkyHorizonColor = WorldConfig.DaySkyHorizon,
+                GroundHorizonColor = WorldConfig.DaySkyGround,
             } },
             AmbientLightSource = Godot.Environment.AmbientSource.Sky,
             AmbientLightEnergy = 0.55f,
-            // Filmic 色调映射压高光 + 全局降饱和：整体去卡通鲜艳、归素雅
             TonemapMode = Godot.Environment.ToneMapper.Filmic,
             AdjustmentEnabled = true,
-            AdjustmentSaturation = 0.85f,
+            AdjustmentSaturation = 0.82f,
             AdjustmentBrightness = 0.97f,
-            // 深度雾化：拉远看卷轴/桌面外缘时远端融入暖雾（默认关，由 _Process 按相机拉距动态开关，性能优先）
-            FogEnabled = false,
-            FogLightColor = new Color(0.80f, 0.77f, 0.70f), // 暖米雾色，融入卷轴纸调与天际
-            FogDensity = 0.001f,
-            FogAerialPerspective = 0.4f,
         };
         _env = env;
+        _skyMat = (ProceduralSkyMaterial)env.Sky.SkyMaterial;
         AddChild(new WorldEnvironment { Environment = env });
+    }
+
+    private void SetupEnvironment()
+    {
+        if (_sun == null)
+        {
+            _sun = new DirectionalLight3D
+            {
+                RotationDegrees = new Vector3(-55f, -35f, 0f),
+                ShadowEnabled = true,
+                LightColor = new Color(1f, 0.96f, 0.88f), // 微暖阳光，去冷白感
+                LightEnergy = WorldConfig.DaySunEnergy,
+                // 批次九十二：卷轴装裱层材质一律 Unshaded（不受光照），光照效果仅作用于地图内
+            };
+            AddChild(_sun);
+        }
+
+        // 标题阶段已建好天空环境则复用，避免重复 WorldEnvironment
+        if (_env == null)
+        {
+            var env = new Godot.Environment
+            {
+                BackgroundMode = Godot.Environment.BGMode.Sky,
+                Sky = new Sky { SkyMaterial = new ProceduralSkyMaterial
+                {
+                    // 白天淡灰蓝（夜间由 UpdateDayNight 平滑插值到蓝黑）
+                    SkyTopColor = WorldConfig.DaySkyTop,
+                    SkyHorizonColor = WorldConfig.DaySkyHorizon,
+                    GroundHorizonColor = WorldConfig.DaySkyGround,
+                } },
+                AmbientLightSource = Godot.Environment.AmbientSource.Sky,
+                AmbientLightEnergy = 0.55f,
+                // Filmic 色调映射压高光 + 全局降饱和：整体去卡通鲜艳、归素雅
+                TonemapMode = Godot.Environment.ToneMapper.Filmic,
+                AdjustmentEnabled = true,
+                AdjustmentSaturation = 0.82f,
+                AdjustmentBrightness = 0.97f,
+                // 深度雾化：拉远看卷轴/桌面外缘时远端融入雾（默认关，由 _Process 按相机拉距动态开关，性能优先）
+                FogEnabled = false,
+                FogLightColor = WorldConfig.NightSkyHorizon, // 浅蓝黑雾色，呼应夜空
+                FogDensity = 0.001f,
+                FogAerialPerspective = 0.4f,
+            };
+            _env = env;
+            _skyMat = (ProceduralSkyMaterial)env.Sky.SkyMaterial;
+            AddChild(new WorldEnvironment { Environment = env });
+        }
+
 
         // 卷轴装裱（地图外）独立成层：白底/绢帛纸面/卷轴圆柱/祥云置于 RenderLayers.Scroll，
         // 与地图内（RenderLayers.Map）分层渲染；图缘裙板由 GridRenderer 生成但同归卷轴层，

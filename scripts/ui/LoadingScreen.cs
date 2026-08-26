@@ -44,6 +44,9 @@ public partial class LoadingScreen : CanvasLayer
         Layer = 90; // 盖住 HUD/菜单层之下的一切游戏画面
         ProcessMode = ProcessModeEnum.Always;
 
+        // 毛玻璃桥接：先于各玻璃面板合成，把背后世界抓进后台缓冲，供 FrostedPanel 读 SCREEN_TEXTURE。
+        AddChild(new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport });
+
         // 全屏深色底
         var dim = new ColorRect { Color = new Color(0.08f, 0.07f, 0.06f) };
         dim.SetAnchorsPreset(Control.LayoutPreset.FullRect);

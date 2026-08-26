@@ -9,7 +9,7 @@ namespace Bianjing;
 /// </summary>
 public static class TimeConfig
 {
-    /// <summary>每天小时数（24 小时，白天/夜晚各 12 时，见 DayStartHour/NightStartHour）。</summary>
+    /// <summary>每天小时数（24 小时，白天 14 时 [5–19) / 夜晚 10 时 [19–次日5)，见 DayStartHour/NightStartHour）。</summary>
     public const int HoursPerDay = 24;
 
     /// <summary>每月旬数（3 旬为一月：上旬/中旬/下旬，一游戏旬 = 1 现实分钟、一游戏月 ≈ 3 现实分钟）。</summary>
@@ -23,13 +23,15 @@ public static class TimeConfig
     public const float SecondsPerGameHour = 60f / 24;
 
     /// <summary>白天/夜晚分界（时）：白天 = [DayStartHour, NightStartHour)，其余为夜晚。
-    /// 批次七十四：去除十二时辰，昼夜两态（显示与作息判定共用，光照夜间联动变暗）。</summary>
-    public const int DayStartHour = 6;
-    public const int NightStartHour = 18;
+    /// 昼夜两态（显示与作息判定共用，光照夜间联动变暗）。
+    /// 与一日六时对齐：白天 平旦→晡时（5–19，14 时），夜晚 黄昏→夜半（19–次日5，10 时）。</summary>
+    public const int DayStartHour = 5;
+    public const int NightStartHour = 19;
 
     // ---- 作息（原 ScheduleConfig 并入）：有职居民的上下工时刻与轮休周期 ----
 
-    /// <summary>上班时段起止时（含起不含止）：早晨上工、下午收工（与昼夜边界一致）。</summary>
+    /// <summary>上班时段起止时（含起不含止）：清晨上工、傍晚收工（工作时段为白天的一部分，
+    /// 不与昼夜边界完全重合；19–次日5 为夜、18–19 视作居民傍晚闲暇）。</summary>
     public const int WorkStartHour = 6;
     public const int WorkEndHour = 18;
 

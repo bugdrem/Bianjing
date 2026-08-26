@@ -42,6 +42,23 @@ public static class VisitorConfig
     /// <summary>每日摆摊对外售货上限（份/天）：对照需求账本逐步卖出，防一夜清空。</summary>
     public const double StallDailySaleCap = 18;
 
+    // ---- 互市供需闭环（道路通边 → 四向邻城来人买卖；访客行为响应城市真实供需 gs.Demand）----
+    /// <summary>访客带货偏向「城市短缺货」的概率（城市有缺口时）。其余概率带邻城特产，维持多样性。[PLACEHOLDER·需 playtest]</summary>
+    public const double ImportBias = 0.7;
+
+    /// <summary>短缺货单次带货量区间（份）。参考：城市日口粮需求≈pop×EconomyConfig.FoodPerDay，取约 1–3 天缺口量。[PLACEHOLDER·需 playtest]</summary>
+    public const double ShortageCargoMin = 20;
+    public const double ShortageCargoMax = 60;
+
+    /// <summary>出口收购阈值：城市某货「可支撑天数」高于此值才视为过剩、外城才收购（避免买走刚需）。[PLACEHOLDER·需 playtest]</summary>
+    public const double SurplusDaysThreshold = 30;
+
+    /// <summary>出口单次收购量上限（份）。[PLACEHOLDER·需 playtest]</summary>
+    public const double ExportMaxQty = 80;
+
+    /// <summary>出口收购占该过剩货城市库存的比例。[PLACEHOLDER·需 playtest]</summary>
+    public const double ExportStockShare = 0.5;
+
     // ---- 四城配色（区分来客所属邻城，外观一眼可分）----
     /// <summary>北/东/南/西 四城外袍主色（按 MapDir 枚举序）。</summary>
     public static readonly Color[] CityRobe =

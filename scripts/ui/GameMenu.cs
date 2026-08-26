@@ -58,6 +58,10 @@ public partial class GameMenu : CanvasLayer
         Layer = 10;
         ProcessMode = ProcessModeEnum.Always;
 
+        // 毛玻璃桥接：作为本 CanvasLayer 第一个子节点，先于各玻璃面板合成，
+        // 把已画好的背景（标题天空 / 暂停时的世界）抓进后台缓冲；之后 FrostedPanel 读 SCREEN_TEXTURE 即采到背后内容。
+        AddChild(new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport });
+
         // 半透明遮罩，拦截下层鼠标操作
         var dim = new ColorRect
         {
