@@ -11,13 +11,12 @@ public partial class SkyBodies : Node3D
     private const float Dist = 700f;        // 天体距世界原点的距离（相机远平面 2000 内）
     private const float SunCoreSize = 0.5f;  // Sprite3D scale（PixelSize=1、纹理 128px → 64 世界单位直径）
     private const float SunGlowSize = 1.7f;  // 光晕 ~218 世界单位
-    private const float MoonSize = 0.34f;    // 月盘 ~44 世界单位
 
     private Sprite3D _sunCore;
     private Sprite3D _sunGlow;
-    private Sprite3D _moon;
     private DirectionalLight3D _moonLight;
-    private ShaderMaterial _moonMat;
+    private ShaderMaterial _sunCoreMat;
+    private ShaderMaterial _sunGlowMat;
     private ImageTexture _glowTex;
 
     public override void _Ready()
@@ -29,38 +28,31 @@ public partial class SkyBodies : Node3D
     {
         _glowTex = MakeRadialTexture();
 
-        // —— 太阳核心（不透明感的光盘）——
+        // —— 太阳核心（不透明感的光盘）：自定义 unshaded 着色器、不含雾处理 → 不受地平雾影响，
+        // 太阳贴地平（早/黄昏）时仍鲜亮红黄，不被雾化糊掉（月亮同机制豁免雾）。
+        // 仍挂 _glowTex 仅用于撑出非 0 尺寸四边形（着色器按 UV 自算圆盘，不采样贴图像素）。——
+        _sunCoreMat = MakeSunMaterial(false);
         _sunCore = new Sprite3D
         {
             Texture = _glowTex,
             PixelSize = 1f,
             Scale = new Vector3(SunCoreSize, SunCoreSize, 1f),
-            MaterialOverride = MakeUnlit(Colors.White, false),
+            MaterialOverride = _sunCoreMat,
         };
         AddChild(_sunCore);
 
-        // —— 太阳光晕（叠加混合，柔和外晕）——
+        // —— 太阳光晕（叠加混合，柔和外晕；同样豁免雾）——
+        _sunGlowMat = MakeSunMaterial(true);
         _sunGlow = new Sprite3D
         {
             Texture = _glowTex,
             PixelSize = 1f,
             Scale = new Vector3(SunGlowSize, SunGlowSize, 1f),
-            MaterialOverride = MakeUnlit(Colors.White, true),
+            MaterialOverride = _sunGlowMat,
         };
         AddChild(_sunGlow);
 
-        // —— 月亮（相位 Shader：满月→弦月→新月循环）——
-        _moonMat = MakeMoonMaterial();
-        _moon = new Sprite3D
-        {
-            Texture = _glowTex,
-            PixelSize = 1f,
-            Scale = new Vector3(MoonSize, MoonSize, 1f),
-            MaterialOverride = _moonMat,
-        };
-        AddChild(_moon);
-
-        // —— 月光平行光（夜间投影，深浅挂钩月亮亮度）——
+        // —— 月光平行光（夜间投影，深浅挂钩月亮亮度；可见月盘已移除）——
         _moonLight = new DirectionalLight3D
         {
             LightColor = WorldConfig.MoonLightColor,
@@ -81,20 +73,17 @@ public partial class SkyBodies : Node3D
         float t = Smooth01(sunH, 0.0f, 0.5f);
         Color sunCol = WorldConfig.SunWarmColor.Lerp(WorldConfig.SunNoonColor, t);
 
-        // 太阳位置 / 颜色 / 可见度
+        // 太阳位置 / 颜色 / 可见度：颜色（vec3）与淡入透明度（float）分别写入着色器，与月亮同机制（Godot 着色器 vec4 不接受 Color，故拆 vec3+float）。
+        // 自定义 unshaded 着色器不含雾处理 → 不受地平雾影响，太阳贴地平（早/黄昏）仍鲜亮红黄。
         _sunCore.GlobalPosition = sunDir * Dist;
         _sunGlow.GlobalPosition = sunDir * Dist;
-        SetUnlitColor(_sunCore, sunCol);
-        SetUnlitColor(_sunGlow, sunCol);
-        _sunCore.Modulate = new Color(1f, 1f, 1f, sunVis);
-        _sunGlow.Modulate = new Color(1f, 1f, 1f, sunVis * 0.55f);
+        _sunCoreMat.SetShaderParameter("tint", new Color(sunCol.R, sunCol.G, sunCol.B));
+        _sunCoreMat.SetShaderParameter("alpha", sunVis);
+        _sunGlowMat.SetShaderParameter("tint", new Color(sunCol.R, sunCol.G, sunCol.B));
+        _sunGlowMat.SetShaderParameter("alpha", sunVis * 0.55f);
 
-        // 月亮方向 = -太阳方向；位置 / 相位 / 可见度
+        // 月亮方向 = -太阳方向（月光照方向来源；可见月盘已移除）
         Vector3 moonDir = -sunDir;
-        _moon.GlobalPosition = moonDir * Dist;
-        _moonMat.SetShaderParameter("phase", moonPhase);
-        _moonMat.SetShaderParameter("tint", WorldConfig.MoonTintColor);
-        _moonMat.SetShaderParameter("alpha", moonVis);
 
         // 月光照亮：亮度 = 可见度 × 相位受光比例（满月 1 / 新月 0）
         float phaseLit = 0.5f + 0.5f * Mathf.Cos((moonPhase - 0.5f) * Mathf.Tau);
@@ -110,58 +99,32 @@ public partial class SkyBodies : Node3D
     private static float Smooth01(float x, float a, float b)
         => Mathf.Clamp((x - a) / (b - a), 0f, 1f);
 
-    private static StandardMaterial3D MakeUnlit(Color col, bool additive)
-    {
-        var m = new StandardMaterial3D
-        {
-            ShadingMode = StandardMaterial3D.ShadingModeEnum.Unshaded,
-            Transparency = StandardMaterial3D.TransparencyEnum.Alpha,
-            AlbedoColor = col,
-        };
-        if (additive)
-            m.BlendMode = StandardMaterial3D.BlendModeEnum.Add;
-        return m;
-    }
-
-    private static void SetUnlitColor(Sprite3D s, Color col)
-    {
-        if (s.MaterialOverride is StandardMaterial3D m)
-            m.AlbedoColor = col;
-    }
-
-    private static ShaderMaterial MakeMoonMaterial()
+    /// <summary>太阳/光晕材质：自定义 unshaded 空间着色器，圆盘形状由 UV 现场计算（不采样纹理，无需绑定贴图），
+    /// 且不含任何雾处理 → 不受 Main 的地平雾影响，太阳在地平附近（早/黄昏）仍鲜亮红黄。
+    /// 颜色经 vec3 tint、不透明度经 float alpha 每帧写入（与月亮同机制；Godot 着色器 vec4 不接受 Color，故拆 vec3+float）。
+    /// additive=true 时叠加混合（外晕）；核心用 blend_mix（透明），即便参数异常也不会渲染成不透明黑盘。</summary>
+    private static ShaderMaterial MakeSunMaterial(bool additive)
     {
         var shader = new Shader
         {
             Code = @"shader_type spatial;
-render_mode unshaded, blend_mix;
-
-uniform float phase;   // 0/1=新月，0.5=满月
+render_mode unshaded" + (additive ? ", blend_add" : ", blend_mix") + @";
 uniform vec3 tint;
 uniform float alpha;
-
 void fragment() {
-    vec2 p = (UV - 0.5) * 2.0;          // 中心 (0,0)，边缘半径 1
-    float d = length(p);
-    float disk = smoothstep(1.0, 0.97, d);
-    // 阴影盘：满月(phase=0.5)时移到圆外、新月(phase=0)时 concentric 全遮
-    float o = (phase <= 0.5) ? (phase * 2.0) : ((1.0 - phase) * 2.0);
-    float dir = (phase <= 0.5) ? 1.0 : -1.0;
-    vec2 sc = vec2(dir * o, 0.0);
-    float shadow = smoothstep(1.0, 0.97, length(p - sc));
-    float lit = disk * (1.0 - shadow);
+    vec2 p = (UV - 0.5) * 2.0;
+    float d = clamp(length(p), 0.0, 1.0);
+    float a = 1.0 - d;
+    a *= a; // 中心实、边缘软
     ALBEDO = tint;
-    ALPHA = lit * alpha;
+    ALPHA = a * alpha;
 }
 "
         };
-        return new ShaderMaterial
-        {
-            Shader = shader,
-        };
+        return new ShaderMaterial { Shader = shader };
     }
 
-    /// <summary>程序化径向渐变纹理（中心不透明 → 边缘透明），供太阳/光晕/月盘复用，无需外部资产。</summary>
+    /// <summary>程序化径向渐变纹理（中心不透明 → 边缘透明），供太阳核心/光晕复用，无需外部资产。</summary>
     private static ImageTexture MakeRadialTexture()
     {
         int s = 128;

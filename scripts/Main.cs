@@ -275,6 +275,8 @@ public partial class Main : Node3D
             _skyMat.SkyTopColor = _skyMat.SkyTopColor.Lerp(top, k);
             _skyMat.SkyHorizonColor = _skyMat.SkyHorizonColor.Lerp(hor, k);
             _skyMat.GroundHorizonColor = _skyMat.GroundHorizonColor.Lerp(gnd, k);
+            // 雾色与地平天空同色 → 远端地形/卷轴融入雾色，地图外硬切线（天际线）消失、地平柔化
+            _env.FogLightColor = _env.FogLightColor.Lerp(hor, k);
         }
 
         // 太阳颜色：地平红黄 → 正午白（同步照亮场景，营造早晚金辉）；夜间沉到地平线下、能量极低
@@ -287,12 +289,13 @@ public partial class Main : Node3D
         _sky?.UpdateSky(_sunDir, moonPhase);
     }
 
-    /// <summary>深度雾化当前已关闭：每帧确保 FogEnabled=false（保留按拉距开关的骨架，后续如需重启用回下方逻辑）。
-    /// 原逻辑：拉距 > CameraConfig.FogEnableDistance（视角扩到地图外）才开雾，凑近地图内关雾省一次雾 pass。</summary>
+    /// <summary>地平雾恒定低密度、不再按拉距升满：凭指数衰减仅在极远缘软化天际线，
+    /// 城市任何视角（近景/俯瞰）都接近无雾；雾色由 UpdateDayNight 随昼夜在地平天空色间平滑过渡。</summary>
     private void UpdateFog()
     {
-        if (_env != null && _env.FogEnabled)
-            _env.FogEnabled = false;
+        if (_env == null) return;
+        if (!_env.FogEnabled) _env.FogEnabled = true;
+        _env.FogDensity = WorldConfig.HorizonFogDensity;
     }
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
@@ -525,11 +528,14 @@ public partial class Main : Node3D
                 AdjustmentEnabled = true,
                 AdjustmentSaturation = 0.82f,
                 AdjustmentBrightness = 0.97f,
-                // 深度雾化：拉远看卷轴/桌面外缘时远端融入雾（默认关，由 _Process 按相机拉距动态开关，性能优先）
-                FogEnabled = false,
-                FogLightColor = WorldConfig.NightSkyHorizon, // 浅蓝黑雾色，呼应夜空
-                FogDensity = 0.001f,
-                FogAerialPerspective = 0.4f,
+                // 地平雾（天际线柔化）：拉远看地图外/卷轴时远端地形与装裱随距离融入雾色（与地平天空同色），
+                // 地图外硬切线（天际线）消失、地平柔化为烟雾感；密度由 _Process 按相机拉距从 0 平滑升到 HorizonFogDensity
+                // （凑近地图内几乎无雾、城市清晰；拉远看外缘才起烟）。雾色随昼夜在地平天空色间平滑过渡（见 UpdateDayNight）。
+                FogEnabled = true,
+                FogMode = Godot.Environment.FogModeEnum.Exponential,
+                FogLightColor = WorldConfig.DaySkyHorizon, // 初始地平雾色（白天淡灰蓝，夜间由 UpdateDayNight 插值到蓝黑）
+                FogDensity = 0f, // 初始 0，_Process 按拉距插值（进场俯瞰即起雾、落近城市即散）
+                FogAerialPerspective = WorldConfig.HorizonFogAerial,
             };
             _env = env;
             _skyMat = (ProceduralSkyMaterial)env.Sky.SkyMaterial;

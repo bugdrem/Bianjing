@@ -66,6 +66,7 @@ public partial class InspectPanel : FrostedPanel
         head.AddChild(_backButton);
         _title = new Label { SizeFlagsHorizontal = SizeFlags.ExpandFill };
         _title.AddThemeFontSizeOverride("font_size", 18);
+        _title.AddThemeColorOverride("font_color", UiTheme.Ink); // 显式墨字（标题不被主题遗漏）
         head.AddChild(_title);
         var close = new Button { Text = "×", Flat = true };
         close.Pressed += Close;
@@ -106,6 +107,9 @@ public partial class InspectPanel : FrostedPanel
             ScrollActive = false,
             AutowrapMode = TextServer.AutowrapMode.WordSmart,
         };
+        // RichTextLabel 默认正文字色走主题 default_color（不是 font_color）；显式覆盖节点级 default_color 为墨色，
+        // 确保 BBCode 未着色的纯文本也呈墨字（BBCode 显式 [color=] 不受影响，如人名蓝/红）。
+        _body.AddThemeColorOverride("default_color", UiTheme.Ink);
         _body.AddThemeFontSizeOverride("normal_font_size", 13);
         _body.MetaClicked += OnMetaClicked; // 批次七十：人名链接展开个人面板
         box.AddChild(_body);
@@ -122,6 +126,7 @@ public partial class InspectPanel : FrostedPanel
 
         _bioBody = new Label { AutowrapMode = TextServer.AutowrapMode.WordSmart, Visible = false };
         _bioBody.AddThemeFontSizeOverride("font_size", 12);
+        _bioBody.AddThemeColorOverride("font_color", UiTheme.Muted); // 履历副文用弱文色，明确非白
         box.AddChild(_bioBody);
     }
 

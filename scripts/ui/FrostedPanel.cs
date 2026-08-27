@@ -75,8 +75,8 @@ public partial class FrostedPanel : PanelContainer
         _mat.SetShaderParameter("border_color", new Vector3(UiTheme.PaperEdge.R, UiTheme.PaperEdge.G, UiTheme.PaperEdge.B));
         _mat.SetShaderParameter("blur_radius", 8.0f);
         _mat.SetShaderParameter("radius", 14.0f);
-        _mat.SetShaderParameter("tint_strength", 0.34f);
-        _mat.SetShaderParameter("alpha", 0.9f);
+        _mat.SetShaderParameter("tint_strength", 0.5f); // 提高宣纸混入：明亮天空后也明确呈纸色而非近白
+        _mat.SetShaderParameter("alpha", 0.95f); // 提高不透明度：弱化背后强光透出，防止面板发白
         _mat.SetShaderParameter("border_width", 1.0f);
         _mat.SetShaderParameter("panel_size", Size);
         _mat.SetShaderParameter("texel", new Vector2(1f / 1280f, 1f / 720f));

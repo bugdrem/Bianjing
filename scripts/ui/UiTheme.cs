@@ -58,10 +58,17 @@ public static class UiTheme
         t.SetColor("font_color", "Button", Ink);
         t.SetColor("font_disabled_color", "Button", Muted);
         t.SetColor("font_color", "ItemList", Ink);
+        // 悬停/选中行文字色：Godot 4 ItemList 默认 hover 文字色偏白、落在浅米色玻璃面板上几乎不可读；
+        // 显式覆盖墨字并配 hover/selected 样式盒，确保"浅青底墨字"高对比
+        t.SetColor("font_hover_color", "ItemList", Ink);
+        t.SetColor("font_selected_color", "ItemList", Ink);
         t.SetColor("font_color", "PopupMenu", Ink);
         // 悬停项：浅青底 + 墨字（白字落浅面板看不清，改高对比墨字）
         t.SetColor("font_hover_color", "PopupMenu", Ink);
         t.SetColor("font_color", "RichTextLabel", Ink);
+        // RichTextLabel 默认正文基色走主题 default_color（不是 font_color，font_color 对其无效）；
+        // 否则 BBCode 未着色的纯文本会保持 Godot 默认白字，在毛玻璃面板上不可见。
+        t.SetColor("default_color", "RichTextLabel", Ink);
         t.SetColor("font_color", "OptionButton", Ink);
         t.SetColor("font_color", "CheckButton", Ink);
 
@@ -96,9 +103,12 @@ public static class UiTheme
         t.SetStylebox("panel", "LineEdit", MakeLine(PaperSolid, PaperEdge, 1f));
         t.SetStylebox("focus", "LineEdit", MakeLine(PaperSolid, Celadon, 1.5f));
 
-        // —— 列表选中 ——
+        // —— 列表选中/悬停：浅青底 + 墨字（悬停≠选中底色也走浅青，呼应 PopupMenu 浅青风格、与浅米面板明确区隔）——
         t.SetStylebox("selected", "ItemList", MakeFlat(CeladonL, 4));
         t.SetStylebox("selected_focus", "ItemList", MakeFlat(CeladonL, 4));
+        t.SetStylebox("hovered", "ItemList", MakeFlat(CeladonL, 4));
+        t.SetStylebox("hovered_selected", "ItemList", MakeFlat(Celadon, 4)); // 选中行再悬停：青填充保持选中感
+        t.SetStylebox("hovered_selected_focus", "ItemList", MakeFlat(Celadon, 4));
 
         // —— 进度条（加载/其它）——
         t.SetStylebox("fill", "ProgressBar", MakeFlat(Celadon, 4));

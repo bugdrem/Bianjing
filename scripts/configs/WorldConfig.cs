@@ -86,6 +86,17 @@ public static class WorldConfig
     /// <summary>昼夜过渡速率（1/秒，指数逼近系数；取值越小过渡越平缓，约 5–6 秒完成大半过渡）。</summary>
     public const float DayNightSmoothPerSec = 0.5f;
 
+    // ---- 地平雾化（天际线柔化）：指数雾密度恒定低值，靠指数衰减只让极远缘软化，城市任何视角都接近无雾 ----
+
+    /// <summary>地平雾密度（指数雾，常量、不再按拉距升满）：凭指数衰减仅在极远缘软化天际线，
+    /// 城市任何视角（近景/俯瞰）都接近无雾；雾色与地平天空同色（昼夜由 Main.UpdateDayNight 插值）。
+    /// 取值经验——0.00025：200m 处≈5%雾（肉眼无感）、1500m 处≈31%雾（柔化地平硬边）。</summary>
+    public const float HorizonFogDensity = 0.00025f;
+
+    /// <summary>地平雾空透视混合比（0=纯用 FogLightColor，1=雾化色取天空方向色）：取中值，
+    /// 远端雾化色既与地平天空同色无缝、又保留轻微方向梯度。</summary>
+    public const float HorizonFogAerial = 0.5f;
+
     // ---- 天空天体（太阳/月亮）：配色与参数，集中此处便于微调 ----
 
     /// <summary>太阳颜色：地平（早/黄昏）红黄，正午转白。同步作用于太阳精灵与平行光，营造早晚金辉。</summary>
