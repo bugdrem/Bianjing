@@ -33,7 +33,15 @@ public partial class Hud : CanvasLayer
         // 毛玻璃桥接：作为本 CanvasLayer 第一个子节点，先于各玻璃面板合成，
         // 把已画好的世界（地形/建筑/小人）抓进后台缓冲；之后 FrostedPanel 读 SCREEN_TEXTURE 即采到背后世界，
         // 而非本层透明内容（Godot 4 中 CanvasLayer 内 SCREEN_TEXTURE 默认只采到本层）。
-        AddChild(new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport });
+        // —— 必须显式扩 Rect 覆盖整屏（默认 256×256 不够）：否则 FrostedPanel 大部分屏幕 UV 采到 backbuffer 外、返回无效色，毛玻璃退化为实色带。
+        var win = GetWindow();
+        var bbc = new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport };
+        if (win != null)
+        {
+            bbc.Rect = new Rect2(Vector2.Zero, win.Size);
+            win.SizeChanged += () => bbc.Rect = new Rect2(Vector2.Zero, win.Size); // 改窗口/分辨率/F11 全屏切换时跟新
+        }
+        AddChild(bbc);
 
         _policy = new PolicyPanel();
         _finance = new FinancePanel();

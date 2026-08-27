@@ -45,7 +45,15 @@ public partial class LoadingScreen : CanvasLayer
         ProcessMode = ProcessModeEnum.Always;
 
         // 毛玻璃桥接：先于各玻璃面板合成，把背后世界抓进后台缓冲，供 FrostedPanel 读 SCREEN_TEXTURE。
-        AddChild(new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport });
+        // —— 必须显式扩 Rect 覆盖整屏（默认 256×256 不够）
+        var win = GetWindow();
+        var bbc = new BackBufferCopy { CopyMode = BackBufferCopy.CopyModeEnum.Viewport };
+        if (win != null)
+        {
+            bbc.Rect = new Rect2(Vector2.Zero, win.Size);
+            win.SizeChanged += () => bbc.Rect = new Rect2(Vector2.Zero, win.Size);
+        }
+        AddChild(bbc);
 
         // 全屏深色底
         var dim = new ColorRect { Color = new Color(0.08f, 0.07f, 0.06f) };

@@ -33,7 +33,12 @@ public partial class TopBar : FrostedPanel
 
     public override void _Ready()
     {
+        // 与屏幕边缘各留一点距离：顶 16、左右各 24，仍占满水平带宽以保持与底栏对齐感。
+        // 使用 TopWide 让面板横向铺满、纵向向上长；手动覆盖 offsets 加上边距。
         SetAnchorsAndOffsetsPreset(Control.LayoutPreset.TopWide);
+        OffsetLeft = 24;
+        OffsetRight = -24;
+        OffsetTop = 16;
 
         var box = new HBoxContainer();
         box.AddThemeConstantOverride("separation", 24);

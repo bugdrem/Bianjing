@@ -39,8 +39,13 @@ public partial class BuildMenu : FrostedPanel
 
     public override void _Ready()
     {
+        // 与屏幕边缘各留一点距离：底 16、左右各 24，与顶栏对齐感保持一致。
+        // 使用 BottomWide 让面板向下吸附；手动覆盖 offsets 加上边距。
         SetAnchorsAndOffsetsPreset(Control.LayoutPreset.BottomWide);
         GrowVertical = GrowDirection.Begin;
+        OffsetLeft = 24;
+        OffsetRight = -24;
+        OffsetBottom = -16;
 
         var col = new VBoxContainer();
         col.AddThemeConstantOverride("separation", 4);
