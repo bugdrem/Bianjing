@@ -127,13 +127,13 @@ public class GameState
     private readonly Dictionary<Vector2I, int> _roadIndex = new();
 
     /// <summary>坐标→列表序号的反查，支撑 O(1) 尾交换删除。</summary>
-    public void RegisterRoadCell(Vector2I c)
+    public void RegisterRoadCell(Vector2I c, bool raiseEdgeEvent = true)
     {
         if (_roadIndex.ContainsKey(c))
             return;
         _roadIndex[c] = RoadCells.Count;
         RoadCells.Add(c);
-        RegisterEdgeCell(c);
+        RegisterEdgeCell(c, raiseEdgeEvent);
     }
 
     public void UnregisterRoadCell(Vector2I c)
@@ -178,7 +178,7 @@ public class GameState
         return null;
     }
 
-    private void RegisterEdgeCell(Vector2I c)
+    private void RegisterEdgeCell(Vector2I c, bool raiseEdgeEvent = true)
     {
         var dir = EdgeDirOf(c);
         if (dir == null)
@@ -189,7 +189,10 @@ public class GameState
         if (!wasConnected)
         {
             nb.Connected = true;
-            EventBus.RaiseRoadReachedEdge(dir.Value);
+            // 读档重建期（raiseEdgeEvent=false）不广播：LoadData 在后台线程执行，
+            // 若此刻 Main 已订阅 RoadReachedEdge，跨线程触碰 HUD 会引发线程越界
+            if (raiseEdgeEvent)
+                EventBus.RaiseRoadReachedEdge(dir.Value);
         }
     }
 

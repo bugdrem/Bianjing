@@ -438,7 +438,7 @@ public static class SaveService
             // v24：小路归属随档恢复（无主/非小路为 -1）
             cell.LaneOwnerId = i < (map.LaneOwnerIds?.Count ?? 0) ? map.LaneOwnerIds[i] : -1;
             gs.Roads.SetRoad(c, true, cell.RoadKind); // 含寻路权重重建（主路代价低）
-            gs.RegisterRoadCell(c); // 重建增量道路格索引
+            gs.RegisterRoadCell(c, false); // 重建增量道路格索引（读档期静默，避免后台线程广播事件跨线程触碰 HUD）
         }
         for (int i = 0; i < map.ZoneCells.Count; i++)
         {

@@ -372,6 +372,7 @@ public partial class Main : Node3D
                 _loadResult = null;
                 GameState.I = gs; // 先替换世界数据：主菜单读档时 _clock 尚不存在，EnterWorld 会新建
                 EnterWorld();     // 装配渲染/系统/时钟（_inWorld 守卫：F9 游戏中读档不二次装配）
+                _visitors?.Setup(_clock, gs); // F9/游戏内读档时 EnterWorld 提前返回，此处重绑访客系统到新 GameState，避免用旧 state 刷访客
                 FocusEnterView(); // 读档视角定位：王爷府（缺失时兜底地图中心）
                 _clock.SetDate(meta.Year, meta.Month, meta.Day, meta.Hour);
                 _autoSaveTimer = 0f;

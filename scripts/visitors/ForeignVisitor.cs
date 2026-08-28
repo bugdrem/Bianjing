@@ -60,8 +60,8 @@ public partial class ForeignVisitor : Node3D
         _pathIndex = 0;
         _phase = _path.Count > 0 ? Phase.Entering : Phase.Dwell;
         if (_phase == Phase.Dwell)
-            _dwell = Kind == VisitorKind.Peddler ? float.MaxValue
-                : VisitorConfig.DwellSecondsMin + (float)_rng.NextDouble() * (VisitorConfig.DwellSecondsMax - VisitorConfig.DwellSecondsMin);
+            // 直接驻留（无路径）：有限驻留，到点自动离场；若随后分配到摊位由 VisitorSystem 改为永久
+            _dwell = VisitorConfig.DwellSecondsMin + (float)_rng.NextDouble() * (VisitorConfig.DwellSecondsMax - VisitorConfig.DwellSecondsMin);
 
         // 个人信息：姓名（与市民同风格）、性别、年龄
         Gender = _rng.Next(2) == 0 ? Gender.Male : Gender.Female;
@@ -86,6 +86,9 @@ public partial class ForeignVisitor : Node3D
         BeginLeave();
     }
 
+    /// <summary>分配到摊位后由 VisitorSystem 调用：小贩转为永久驻留（直到摊位到期 ForceLeave 才离场）。</summary>
+    public void SetDwellPermanent() => _dwell = float.MaxValue;
+
     public override void _Process(double delta)
     {
         if (_clock == null || _clock.Speed <= 0)
@@ -101,9 +104,8 @@ public partial class ForeignVisitor : Node3D
             if (_phase == Phase.Entering)
             {
                 _phase = Phase.Dwell;
-                if (Kind != VisitorKind.Peddler || !HasStall)
-                    _dwell = Kind == VisitorKind.Peddler ? float.MaxValue
-                        : VisitorConfig.DwellSecondsMin + (float)_rng.NextDouble() * (VisitorConfig.DwellSecondsMax - VisitorConfig.DwellSecondsMin);
+                // 有限驻留：无摊位小贩/游客到点自动离场；小贩若随后分配到摊位，由 VisitorSystem.OnVisitorArrived 调 SetDwellPermanent() 改为永久
+                _dwell = VisitorConfig.DwellSecondsMin + (float)_rng.NextDouble() * (VisitorConfig.DwellSecondsMax - VisitorConfig.DwellSecondsMin);
                 Arrived?.Invoke(this);
             }
             else if (_phase == Phase.Dwell)

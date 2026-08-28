@@ -148,6 +148,7 @@ public partial class VisitorSystem : Node
                 _stalls.Add(stall);
                 vv.Stall = stall;
                 vv.HasStall = true;
+                vv.SetDwellPermanent(); // 有摊位的小贩永久驻留，摊位到期再离场
             }
             // 找不到摊位点 → HasStall 仍 false → 有限驻留后自动离场
         }
