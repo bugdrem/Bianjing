@@ -84,6 +84,8 @@ public partial class GridRenderer : Node3D
         public MultiMeshInstance3D Trunks;     // 树干：圆柱
         public MultiMeshInstance3D ConeCrowns; // 圆锥树冠（针叶状）
         public MultiMeshInstance3D BallCrowns; // 椭球树冠（阔叶状，果树固定用此）
+        /// <summary>外部树木模型层：每种树一层（索引对应 TreeModelConfig 的树种）；该种未配置模型时为 null。</summary>
+        public MultiMeshInstance3D[] TreeModels;
         public bool Dirty = true;
         public bool TreesDirty;          // 树层单独脏（月度生长）：只刷树木 MultiMesh 不重建地形
     }
@@ -120,6 +122,7 @@ public partial class GridRenderer : Node3D
     private CylinderMesh _trunkMesh;
     private CylinderMesh _coneCrownMesh;
     private SphereMesh _ballCrownMesh;
+    private ArrayMesh[] _treeModelMeshes; // 外部树木模型（合并后的单一网格）；未配置的树种为 null
     private StandardMaterial3D _terrainMat; // 地形：顶点色受光
     private StandardMaterial3D _waterMat;   // 水面：顶点色半透（透见河床）
     private StandardMaterial3D _roadMainMat; // 主路白石砖纹：纹理×顶点色受光，双面
@@ -137,6 +140,12 @@ public partial class GridRenderer : Node3D
         _coneCrownMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
         _ballCrownMesh = new SphereMesh { Radius = 0.5f, Height = 1f };
         _ballCrownMesh.Material = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
+
+        // 外部树木模型：每种树合并成单一网格（含树干+树冠，材质色已烘进顶点色）。
+        // 未配置的树种为 null，继续用上面的原始体三件套——行为与接入前完全一致。
+        _treeModelMeshes = new ArrayMesh[TreeModelConfig.SpeciesCount];
+        for (int si = 0; si < TreeModelConfig.SpeciesCount; si++)
+            _treeModelMeshes[si] = TreeModelFactory.MeshOf(si);
 
         // 地形/水面/贴地路三套材质（顶点色）：水面半透可见河床，双面免低角度穿帮漏面
         _terrainMat = new StandardMaterial3D { VertexColorUseAsAlbedo = true };
@@ -192,6 +201,7 @@ public partial class GridRenderer : Node3D
                 Trunks = MakeMulti(_trunkMesh, useColors: true),
                 ConeCrowns = MakeMulti(_coneCrownMesh, useColors: true),
                 BallCrowns = MakeMulti(_ballCrownMesh, useColors: true),
+                TreeModels = new MultiMeshInstance3D[TreeModelConfig.SpeciesCount],
             };
             AddChild(chunk.Terrain);
             AddChild(chunk.Water);
@@ -202,6 +212,15 @@ public partial class GridRenderer : Node3D
             AddChild(chunk.Trunks);
             AddChild(chunk.ConeCrowns);
             AddChild(chunk.BallCrowns);
+            // 外部树木模型层：仅为已配置模型的树种建层（未配置的层保持 null，不产生绘制开销）
+            for (int si = 0; si < TreeModelConfig.SpeciesCount; si++)
+            {
+                if (_treeModelMeshes[si] == null)
+                    continue;
+                var layer = MakeMulti(_treeModelMeshes[si], useColors: true);
+                chunk.TreeModels[si] = layer;
+                AddChild(layer);
+            }
             _chunks[i] = chunk;
         }
 
@@ -634,6 +653,7 @@ public partial class GridRenderer : Node3D
         var coneColor = new List<Color>();
         var ballXf = new List<Transform3D>();
         var ballColor = new List<Color>();
+        NewTreeModelBuffers(out var modelXf, out var modelColor); // 外部树木模型层（每树种一组）
 
         for (int x = x0; x < x1; x++)
         {
@@ -704,7 +724,8 @@ public partial class GridRenderer : Node3D
 
                 // 树木：植物实体驱动，逐株造型抽到 CollectTree（树层单独刷新时复用）
                 if (cell.HasTree)
-                    CollectTree(gs, x, y, groundY, trunkXf, trunkColor, coneXf, coneColor, ballXf, ballColor);
+                    CollectTree(gs, x, y, groundY, trunkXf, trunkColor, coneXf, coneColor, ballXf, ballColor,
+                        modelXf, modelColor, _treeModelMeshes);
             }
         }
 
@@ -716,6 +737,7 @@ public partial class GridRenderer : Node3D
         FillMultiMesh(chunk.Trunks.Multimesh, trunkXf, trunkColor);
         FillMultiMesh(chunk.ConeCrowns.Multimesh, coneXf, coneColor);
         FillMultiMesh(chunk.BallCrowns.Multimesh, ballXf, ballColor);
+        FillTreeModelLayers(chunk, modelXf, modelColor);
     }
 
     /// <summary>只刷新单块的树木三层 MultiMesh（月度生长/散播）：不重建地形/水面/道路网格，
@@ -735,16 +757,39 @@ public partial class GridRenderer : Node3D
         var coneColor = new List<Color>();
         var ballXf = new List<Transform3D>();
         var ballColor = new List<Color>();
+        NewTreeModelBuffers(out var modelXf, out var modelColor); // 外部树木模型层（每树种一组）
 
         for (int x = x0; x < x1; x++)
             for (int y = y0; y < y1; y++)
                 if (gs.Map.CellAt(x, y).HasTree)
                     CollectTree(gs, x, y, gs.Map.GroundY(new Vector2I(x, y)),
-                        trunkXf, trunkColor, coneXf, coneColor, ballXf, ballColor);
+                        trunkXf, trunkColor, coneXf, coneColor, ballXf, ballColor,
+                        modelXf, modelColor, _treeModelMeshes);
 
         FillMultiMesh(chunk.Trunks.Multimesh, trunkXf, trunkColor);
         FillMultiMesh(chunk.ConeCrowns.Multimesh, coneXf, coneColor);
         FillMultiMesh(chunk.BallCrowns.Multimesh, ballXf, ballColor);
+        FillTreeModelLayers(chunk, modelXf, modelColor);
+    }
+
+    /// <summary>为外部树木模型层分配收集缓冲：每树种一组（变换 + 颜色）。</summary>
+    private static void NewTreeModelBuffers(out List<Transform3D>[] xf, out List<Color>[] col)
+    {
+        xf = new List<Transform3D>[TreeModelConfig.SpeciesCount];
+        col = new List<Color>[TreeModelConfig.SpeciesCount];
+        for (int s = 0; s < TreeModelConfig.SpeciesCount; s++)
+        {
+            xf[s] = new List<Transform3D>();
+            col[s] = new List<Color>();
+        }
+    }
+
+    /// <summary>把外部树木模型层的收集结果刷进分块 MultiMesh；未建层的树种（无模型）跳过。</summary>
+    private static void FillTreeModelLayers(Chunk chunk, List<Transform3D>[] xf, List<Color>[] col)
+    {
+        for (int s = 0; s < TreeModelConfig.SpeciesCount; s++)
+            if (chunk.TreeModels[s] != null)
+                FillMultiMesh(chunk.TreeModels[s].Multimesh, xf[s], col[s]);
     }
 
     /// <summary>收集一株树的渲染实例：尺寸随生长进度放大，圆柱树干 + 树冠
@@ -752,7 +797,9 @@ public partial class GridRenderer : Node3D
     private static void CollectTree(GameState gs, int x, int y, float groundY,
         List<Transform3D> trunkXf, List<Color> trunkColor,
         List<Transform3D> coneXf, List<Color> coneColor,
-        List<Transform3D> ballXf, List<Color> ballColor)
+        List<Transform3D> ballXf, List<Color> ballColor,
+        List<Transform3D>[] modelXf, List<Color>[] modelColor,
+        ArrayMesh[] modelMeshes)
     {
         if (!gs.Plants.TryGetValue(GameState.CellIndex(new Vector2I(x, y)), out var p))
             return;
@@ -760,6 +807,25 @@ public partial class GridRenderer : Node3D
         float jz = ((x * 41 + y * 57) % 7 - 3) * 0.15f;
         float s = (0.8f + ((x * 13 + y * 17) % 5) * 0.1f) * (0.35f + 0.65f * p.GrowthRatio);
         var root = MapGrid.CellToWorld(new Vector2I(x, y)) + new Vector3(jx, groundY, jz); // 树根落在本格地面
+
+        // 树种：果树固定果树种，其余按坐标伪随机取约两成针叶（沿用原始体时代的选型规则）
+        int species = p.IsFruitTree ? TreeModelConfig.Fruit
+            : ((x * 29 + y * 61) % 5 < 2 ? TreeModelConfig.Conifer : TreeModelConfig.Broadleaf);
+
+        // 外部模型：整株一次成型（树干+树冠已由 TreeModelFactory 合并为单一网格，
+        // 并归一化到「底面 y=0、高 1、水平居中」），故实例变换只需等比缩放到目标树高，
+        // 再随机绕 Y 转向打破成片重复感。
+        if (modelMeshes != null && species >= 0 && species < modelMeshes.Length && modelMeshes[species] != null)
+        {
+            float h = TreeModelConfig.HeightOf(species) * s;
+            float rotY = ((x * 17 + y * 23) % 360) * (Mathf.Pi / 180f);
+            var basis = new Basis(Vector3.Up, rotY).Scaled(Vector3.One * h);
+            // 顶点色已带树本色，实例色只做微亮扰动（乘算：>1 提亮 / <1 压暗）
+            float tint = 0.92f + ((x * 7 + y * 11) % 5) * 0.04f;
+            modelXf[species].Add(new Transform3D(basis, root));
+            modelColor[species].Add(new Color(tint, tint, tint));
+            return;
+        }
 
         // 树干：高随株大小，颜色带微扰动（免成片同色塑料感）
         float trunkH = 1.1f * s;

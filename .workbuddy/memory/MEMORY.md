@@ -34,3 +34,25 @@
   - 规避：颜色/透明度拆成 `uniform vec3 tint` + `uniform float alpha` 两个 uniform，分别传 `Color` / `float`（与月亮同机制，已验证可用）。
 - 自定义 `ShaderMaterial` **不含任何雾处理** → 天体（太阳/月亮）用它可天然豁免距离雾，避免地平雾糊掉太阳。
 - `Sprite3D` 无 `Texture` 时四边形尺寸为 0（不可见）：自定义着色器仍需挂一张贴图撑出非 0 四边形（着色器可忽略其像素，仅用 UV 算形状）。
+
+## 外部 3D 模型接入（树木/资产管线）
+- **`MultiMesh` 一次只能承载一个 Mesh**——树木这类"树干+树冠多子网格"模型必须先合并成单一
+  `ArrayMesh` 才能批量实例化。`TreeModelFactory` 负责：遍历 `MeshInstance3D` → 按节点变换合并各
+  surface → 材质色烘进顶点色 → 归一化到"底面 y=0 / 高 1 / 水平居中" → 按树种缓存。
+- **`ArrayMesh` 没有 `Material` 属性**（那是 `PrimitiveMesh` 的），材质用 `SurfaceSetMaterial(0, mat)`。
+  顶点色需材质 `VertexColorUseAsAlbedo = true`；`MultiMesh` 的逐实例颜色是**乘算**，适合做微亮扰动而非改色相。
+- 改写色相/降饱和要在**烘焙顶点色阶段**做（只降饱和不改色相，保住树冠/树干固有色关系）；用实例色
+  通道乘算无法同时把树冠拉向目标色又不把树干推歪。
+- 树种配置集中在 `configs/TreeModelConfig.cs`（路径/高度/去饱和），路径留空即回退程序化原始体，可逐树种灰度替换。
+- 资产：Kenney Nature Kit（CC0 1.0，可商用无需署名），树模型在 `assets/trees/`；首次用 Godot 编辑器打开项目
+  才自动生成 `.import`，此前加载会返回 null 并优雅回退。
+- 接入前务必先查清资产是**顶点色还是贴图**：`TreeModelFactory` 已支持两者——带贴图表面保留
+  `AlbedoTexture`+UV 并克隆材质（每源表面一个独立 surface）；无贴图表面才把材质色烘进顶点色。
+  注意去饱和 `Mute` 只作用于纯色路径，带贴图模型不改色（要调需另加 albedo_color 色调）。
+- **放资产 ≠ 能用**：`res://` 下的 .glb 必须先被 Godot 编辑器导入生成 `.import`，
+  `ResourceLoader.Load<PackedScene>` 才拿得到东西；否则返回 null（静默回退，容易误判成"代码没生效"）。
+  判断方法：看资源目录有没有同名 `.import` 文件。
+- **免导入的运行时方案**：引擎自带 `GltfDocument` 可直接从文件解析 .glb，无需 `.import`
+  ——适合开发期"丢进资产就生效"。但**导出时未导入的 .glb 不会进 pck**，正式导出前仍应开一次编辑器导入。
+- Godot 4.7 C# 绑定的命名坑：glTF 相关类缩写改成了 PascalCase —— **`GltfDocument` / `GltfState`**
+  （不是 `GLTFDocument`，也不在 `Godot.GLTF` 命名空间）；`GenerateScene()` 返回 `Node`，需 `as Node3D`。
