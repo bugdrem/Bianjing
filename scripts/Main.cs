@@ -276,7 +276,8 @@ public partial class Main : Node3D
             _skyMat.SkyHorizonColor = _skyMat.SkyHorizonColor.Lerp(hor, k);
             _skyMat.GroundHorizonColor = _skyMat.GroundHorizonColor.Lerp(gnd, k);
             // 雾色与地平天空同色 → 远端地形/卷轴融入雾色，地图外硬切线（天际线）消失、地平柔化
-            _env.FogLightColor = _env.FogLightColor.Lerp(hor, k);
+            if (_env.FogEnabled)
+                _env.FogLightColor = _env.FogLightColor.Lerp(hor, k);
         }
 
         // 太阳颜色：地平红黄 → 正午白（同步照亮场景，营造早晚金辉）；夜间沉到地平线下、能量极低
@@ -293,9 +294,8 @@ public partial class Main : Node3D
     /// 城市任何视角（近景/俯瞰）都接近无雾；雾色由 UpdateDayNight 随昼夜在地平天空色间平滑过渡。</summary>
     private void UpdateFog()
     {
-        if (_env == null) return;
-        if (!_env.FogEnabled) _env.FogEnabled = true;
-        _env.FogDensity = WorldConfig.HorizonFogDensity;
+        // 雾已关闭（按用户反馈"去雾"），此处留空：保留方法签名避免其它调用方修改
+        // 如未来要重启雾：恢复原实现（强制 FogEnabled + 写 HorizonFogDensity）。
     }
 
     // ---- 新游戏 / 存读档 / 返回主菜单 ----
@@ -529,14 +529,14 @@ public partial class Main : Node3D
                 AdjustmentEnabled = true,
                 AdjustmentSaturation = 0.82f,
                 AdjustmentBrightness = 0.97f,
-                // 地平雾（天际线柔化）：拉远看地图外/卷轴时远端地形与装裱随距离融入雾色（与地平天空同色），
-                // 地图外硬切线（天际线）消失、地平柔化为烟雾感；密度由 _Process 按相机拉距从 0 平滑升到 HorizonFogDensity
-                // （凑近地图内几乎无雾、城市清晰；拉远看外缘才起烟）。雾色随昼夜在地平天空色间平滑过渡（见 UpdateDayNight）。
-                FogEnabled = true,
+                // 雾：当前按用户反馈关掉（"游戏界面雾蒙蒙"）。保留配置与字段以备后续重新启用。
+                // 如需重启雾：FogEnabled=true、FogDensity 设小值（如 0.00025）、搭配 FogAerialPerspective 调气氛；
+                // 雾色仍由 UpdateDayNight 在地平天空色间插值，与昼夜同步。
+                FogEnabled = false,
                 FogMode = Godot.Environment.FogModeEnum.Exponential,
-                FogLightColor = WorldConfig.DaySkyHorizon, // 初始地平雾色（白天淡灰蓝，夜间由 UpdateDayNight 插值到蓝黑）
-                FogDensity = 0f, // 初始 0，_Process 按拉距插值（进场俯瞰即起雾、落近城市即散）
-                FogAerialPerspective = WorldConfig.HorizonFogAerial,
+                FogLightColor = WorldConfig.DaySkyHorizon,
+                FogDensity = 0f,
+                FogAerialPerspective = 0f, // 关闭大气透视：它会把远处染上蓝天色，是"雾蒙蒙"的另一半来源
             };
             _env = env;
             _skyMat = (ProceduralSkyMaterial)env.Sky.SkyMaterial;

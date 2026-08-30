@@ -831,6 +831,9 @@ public class GameState
     public AnimalObj AddAnimal(Vector2I c)
     {
         var a = new AnimalObj { Id = NextAnimalId++, X = c.X, Y = c.Y };
+        // 物种按 Id 在"野外物种表"内轮转：均布出现，且不含 Pug（狗留作后期村民宠物）
+        var kinds = AnimalModelConfig.WildlifeKinds;
+        a.Kind = kinds[(int)(a.Id % (uint)kinds.Length)];
         Animals[a.Id] = a;
         return a;
     }

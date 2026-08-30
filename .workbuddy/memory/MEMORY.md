@@ -35,20 +35,37 @@
 - 自定义 `ShaderMaterial` **不含任何雾处理** → 天体（太阳/月亮）用它可天然豁免距离雾，避免地平雾糊掉太阳。
 - `Sprite3D` 无 `Texture` 时四边形尺寸为 0（不可见）：自定义着色器仍需挂一张贴图撑出非 0 四边形（着色器可忽略其像素，仅用 UV 算形状）。
 
-## 外部 3D 模型接入（树木/资产管线）
+## 外部 3D 模型接入（树木/动物/资产管线）
+- **共用管线 `GltfMeshMerger`**（scripts/render/）：装载（PackedScene 缓存 → GltfDocument 运行时解析）+
+  重组（每个源表面保留为独立 surface 挂自己材质；带贴图保留 AlbedoTexture+UV，无贴图烘顶点色+可去饱和）+
+  归一化（底面 y=0 / 高 1 / 水平居中）。TreeModelFactory（树）与 AnimalModelFactory（动物）都是它的薄层，
+  各自的 configs（TreeModelConfig / AnimalModelConfig）管路径/高度/去饱和，路径留空即回退程序化造型。
 - **`MultiMesh` 一次只能承载一个 Mesh**——树木这类"树干+树冠多子网格"模型必须先合并成单一
-  `ArrayMesh` 才能批量实例化。`TreeModelFactory` 负责：遍历 `MeshInstance3D` → 按节点变换合并各
-  surface → 材质色烘进顶点色 → 归一化到"底面 y=0 / 高 1 / 水平居中" → 按树种缓存。
+  `ArrayMesh` 才能批量实例化。
 - **`ArrayMesh` 没有 `Material` 属性**（那是 `PrimitiveMesh` 的），材质用 `SurfaceSetMaterial(0, mat)`。
   顶点色需材质 `VertexColorUseAsAlbedo = true`；`MultiMesh` 的逐实例颜色是**乘算**，适合做微亮扰动而非改色相。
 - 改写色相/降饱和要在**烘焙顶点色阶段**做（只降饱和不改色相，保住树冠/树干固有色关系）；用实例色
   通道乘算无法同时把树冠拉向目标色又不把树干推歪。
 - 树种配置集中在 `configs/TreeModelConfig.cs`（路径/高度/去饱和），路径留空即回退程序化原始体，可逐树种灰度替换。
+- **glTF 底色 = 材质 baseColorFactor × 顶点色 `COLOR_0`，必须相乘**（不能"有顶点色就只用顶点色"）。
+  实测本作动物模型 `COLOR_0` 全为白 (1,1,1,1)、真实颜色全在材质里，只取顶点色会烘成全白（"没色彩"）。
+  有贴图时：贴图 × 顶点色 × AlbedoColor；无贴图时：把"顶点色 × 材质色"烘进顶点色、AlbedoColor 留白防二次相乘。
+- **骨骼绑定模型不能走 MultiMesh**：含 `JOINTS_0`/`WEIGHTS_0`/`skins`/`animations` 的模型（如 Quaternius
+  动物，自带 Idle/Walk/Run），MultiMesh 只能静态批渲、无法驱动骨架 → 动画全丢（表现为"不会动"）。
+  判据：glTF 里是否有 JOINTS_0 或 animations。此类模型须改为**逐实例节点 + AnimationPlayer**
+  （本项目见 `AnimalRenderer`）。静态模型（树/建筑）才用 MultiMesh 批渲。
+- **量蒙皮模型包围盒要以"骨架"为基准，不是网格节点**：蒙皮几何由骨骼驱动；当 glTF 里
+  骨架缩放 ≠ 网格节点缩放时（本包 Sheep 100/65.46、Pug 39.55/100），按网格节点算会把底点与
+  高度算错 → 模型漂浮/尺寸异常，且只有缩放不一致的那几个模型出错（最难排查的一类）。
+  写法：`!mi.Skeleton.IsEmpty` → `GetNodeOrNull<Skeleton3D>(mi.Skeleton)`，用它累乘变换。
 - 资产：Kenney Nature Kit（CC0 1.0，可商用无需署名），树模型在 `assets/trees/`；首次用 Godot 编辑器打开项目
   才自动生成 `.import`，此前加载会返回 null 并优雅回退。
 - 接入前务必先查清资产是**顶点色还是贴图**：`TreeModelFactory` 已支持两者——带贴图表面保留
   `AlbedoTexture`+UV 并克隆材质（每源表面一个独立 surface）；无贴图表面才把材质色烘进顶点色。
   注意去饱和 `Mute` 只作用于纯色路径，带贴图模型不改色（要调需另加 albedo_color 色调）。
+- **别改写 glTF 根节点自身的 Transform**：glTF 场景根节点常带单位换算缩放/偏移，直接覆盖会破坏
+  模型定位（表现为"模型飞天/尺度异常"）。正确做法：套一个受控 `Node3D` 包装节点，模型作子节点保留
+  自身变换，缩放/落地/朝向/平移作用在包装节点上，包围盒也以包装节点为基准测量。
 - **放资产 ≠ 能用**：`res://` 下的 .glb 必须先被 Godot 编辑器导入生成 `.import`，
   `ResourceLoader.Load<PackedScene>` 才拿得到东西；否则返回 null（静默回退，容易误判成"代码没生效"）。
   判断方法：看资源目录有没有同名 `.import` 文件。
@@ -56,3 +73,14 @@
   ——适合开发期"丢进资产就生效"。但**导出时未导入的 .glb 不会进 pck**，正式导出前仍应开一次编辑器导入。
 - Godot 4.7 C# 绑定的命名坑：glTF 相关类缩写改成了 PascalCase —— **`GltfDocument` / `GltfState`**
   （不是 `GLTFDocument`，也不在 `Godot.GLTF` 命名空间）；`GenerateScene()` 返回 `Node`，需 `as Node3D`。
+
+## 水面渲染（规则纹路 / 透明度）
+- **`WaterConfig.WaterEdgeOverlap = 0.7f` 不能四向无差别外扩**：1m 格子会被扩成 2.4m，相邻水面
+  互相重叠约 1.4m → 半透明(alpha 0.85)逐层叠加，浮现 **1m 周期的规则网格**（大湖面明显、窄河道
+  因太窄看不出来），且叠加后实际 ≈99% 不透明，"透见河床"的设计效果失效。
+  正确做法（`AddWaterQuad`）：只朝**邻格非水**的方向外扩（保留"水平面钻到岸下、消除水陆交界锯齿"的
+  原意图），水-水相邻方向共享边不重叠。桥格桥下仍有水面，`IsWaterCell` 需把 `HasBridge` 也算作水面。
+- 排查"规则纹路"的通用思路：先排除 `_gridLines`（主视图默认隐藏，仅建造模式由 BuildController 打开），
+  再查是否有**逐格几何互相重叠 + 半透明叠加**。
+- 雾（`WorldEnvironment.FogEnabled` + `FogAerialPerspective`）会掩盖远景这类纹路：
+  **去掉雾之后才暴露的渲染瑕疵，不代表是新引入的回归**。当前雾已按用户要求关闭（保留配置字段可复原）。

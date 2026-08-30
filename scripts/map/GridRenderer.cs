@@ -875,15 +875,22 @@ public partial class GridRenderer : Node3D
     }
 
     /// <summary>往网格数组追加一格水面四边形：四角取顶点插值水位（WaterVertexH），
-    /// 同地形三顶点模式——坡河上水面随水位连续倾斜，不再逐格阶梯错层；
-    /// 四边向外扩 WaterEdgeOverlap 嵌入邻格，水平面从高岸下方穿过被岸地遮住，消隙除锯齿。</summary>
+    /// 同地形三顶点模式——坡河上水面随水位连续倾斜，不再逐格阶梯错层。
+    /// 外扩规则：**只在邻格非水（陆地/越界）的方向**向外扩 WaterEdgeOverlap，
+    /// 让水平面钻到高岸下方、消除水陆交界的锯齿与空隙（原设计意图，保留）；
+    /// 而**水与水相邻的方向不再外扩**——否则相邻水面互相重叠约 1.4m，半透明逐层叠加会
+    /// (1) 让水面浮现 1m 周期的规则网格（平坦大湖面尤其刺眼，窄河道因太窄看不出来），
+    /// (2) 叠加后实际不透明度 ≈99%，“透见河床”的效果形同失效。</summary>
     private static void AddWaterQuad(GameState gs, List<Vector3> v, List<Vector3> n, List<Color> c, List<int> idx,
         int x, int y, float fallback, Color col)
     {
         float half = MapGrid.Size * MapGrid.CellSize / 2f;
         float m = WaterConfig.WaterEdgeOverlap;
-        float x0 = x - half - m, x1 = x + 1 - half + m;
-        float y0 = y - half - m, y1 = y + 1 - half + m;
+        // 四个方向分别判断：邻格是水面 → 不外扩（共享边，严丝合缝）；否则外扩嵌入岸地
+        float x0 = x - half - (IsWaterCell(gs, x - 1, y) ? 0f : m);
+        float x1 = x + 1 - half + (IsWaterCell(gs, x + 1, y) ? 0f : m);
+        float y0 = y - half - (IsWaterCell(gs, x, y - 1) ? 0f : m);
+        float y1 = y + 1 - half + (IsWaterCell(gs, x, y + 1) ? 0f : m);
         int b = v.Count;
         v.Add(new Vector3(x0, WaterVertexH(gs, x, y, fallback), y0));
         v.Add(new Vector3(x1, WaterVertexH(gs, x + 1, y, fallback), y0));
@@ -896,6 +903,16 @@ public partial class GridRenderer : Node3D
         }
         idx.Add(b); idx.Add(b + 1); idx.Add(b + 2);
         idx.Add(b + 1); idx.Add(b + 3); idx.Add(b + 2);
+    }
+
+    /// <summary>该格是否为水面（含桥下水面）：决定水面四边形朝该方向是否外扩。
+    /// 桥格虽另铺桥体板，其下仍有水面，故一并视作水面以保证水面连续。</summary>
+    private static bool IsWaterCell(GameState gs, int x, int y)
+    {
+        if (!MapGrid.InBounds(new Vector2I(x, y)))
+            return false;
+        ref var cell = ref gs.Map.CellAt(x, y);
+        return cell.HasWater || cell.HasBridge;
     }
 
     /// <summary>往网格数组追加一格贴地四边形（道路用）：四角采地形顶点高 + 抬升，坡道上自然倾斜；

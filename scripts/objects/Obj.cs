@@ -63,6 +63,11 @@ public class PlantObj : Obj
 public class AnimalObj : Obj
 {
     public int AgeMonths;
+
+    /// <summary>物种索引（对应 AnimalModelConfig 的模型序号）：决定渲染外形。
+    /// 生成时按 Id 轮转分配（GameState.AddAnimal），七种外形均布出现；
+    /// 旧存档无此字段时反序列化为默认 0，不影响读档。</summary>
+    public int Kind;
 }
 
 /// <summary>
