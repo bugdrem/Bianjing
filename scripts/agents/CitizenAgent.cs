@@ -679,13 +679,11 @@ public partial class CitizenAgent : Node3D
     /// （批次七十六：市集已撤除；朝廷衙门只进不出不售，排除在货源外）。</summary>
     private BuildingInstance FindGoodsSource(GameState gs, string goodsId)
     {
-        if (gs.FamilyMoney(C) <= 0)
-            return null;
-        // 批次八十七：买不起一份不去空跑（旧版只看有无钱，到店发现不够再折返，反复白跑）
-        long price = Goods.PriceOf(goodsId);
-        if (price <= 0 || gs.FamilyMoney(C) < (long)(price * (1 + gs.Taxes.TradeTaxRate)))
+        long purse = gs.FamilyMoney(C);
+        if (purse <= 0)
             return null;
         var pos = MapGrid.WorldToCell(Position);
+        double taxRate = gs.Taxes.TradeTaxRate;
         BuildingInstance best = null;
         float bestDist = float.MaxValue;
         foreach (var b in gs.Buildings.Values)
@@ -697,6 +695,11 @@ public partial class CitizenAgent : Node3D
                 continue;
             float dist = new Vector2(b.X - pos.X, b.Y - pos.Y).Length();
             if (dist > BuySearchRadius)
+                continue;
+            // 批次八十七：买不起一份不去空跑（旧版只看有无钱，到店发现不够再折返，反复白跑）；
+            // 批次九十四：单价改按该铺库存联动倍率现算（各铺不同价，不能再拿基价统一判）
+            long price = Goods.RetailPrice(b, goodsId);
+            if (price <= 0 || purse < (long)Math.Round(price * (1 + taxRate), MidpointRounding.AwayFromZero))
                 continue;
             if (dist < bestDist)
             {
@@ -1134,14 +1137,20 @@ public partial class CitizenAgent : Node3D
                 }
                 break;
             case ActivityType.Shopping:
-                // 带采买单的购物（工坊补料或家庭补货）：按基价买一担背走（量力而行），货款付给货源方（雇工分账/官库入账）；主妇闲逛式采买无需结算
+                // 带采买单的购物（工坊补料或家庭补货）：买一担背走（量力而行），货款付给货源方（雇工分账/官库入账）；
+                // 主妇闲逛式采买无需结算。
+                // 批次九十四：定价分两档（此前两档都按基价，与家庭自动购粮的 1.5 倍零售价同货不同价）——
+                //   生产性补料（_supplyBuildingId 指向工坊）走批发价 Goods.BuyerPrice；
+                //   家庭补货走零售价 Goods.RetailPrice，与 GoodsSystem.BuyGoods 完全同价。
                 if (_buyGoodsId != "" && gs.Buildings.TryGetValue(_buySourceId, out var src))
                 {
-                    long price = Goods.PriceOf(_buyGoodsId);
+                    long price = _supplyBuildingId >= 0
+                        ? Goods.BuyerPrice(src, _buyGoodsId)
+                        : Goods.RetailPrice(src, _buyGoodsId);
                     // 商税（批次七十五）：买家按成交额另付税入官库（可买量按含税价估算防超支）
                     double taxRate = gs.Taxes.TradeTaxRate;
                     long afford = price > 0 ? gs.FamilyMoney(C) / (long)(price * (1 + taxRate)) : (long)C.Pack.Free;
-                    double got = src.TakeGoods(_buyGoodsId, Math.Min(C.Pack.Free, afford));
+                    double got = price > 0 ? src.TakeGoods(_buyGoodsId, Math.Min(C.Pack.Free, afford)) : 0;
                     if (got > 0)
                     {
                         C.Pack.Store(_buyGoodsId, got);
@@ -1182,9 +1191,12 @@ public partial class CitizenAgent : Node3D
                     foreach (var s in C.Pack.Stacks.ToArray())
                     {
                         // 超限入库：背来的货全收（上限只把门不拦货）
-                        double put = dest.StoreGoodsForce(s.GoodsId, s.Amount);
+                        // 批次九十五：连同该批的时效状态一起入库，否则一路搬运会把"在露天晒了半天"的损耗抹掉
+                        double put = dest.Inv.StoreForceBatch(s.GoodsId, s.Amount, s.State);
                         if (put > 0 && s.GoodsId == _consignGoodsId)
-                            gs.PayFromBuilding(dest, C, (long)(Goods.PriceOf(s.GoodsId) * put)); // 成品卖给商铺：铺面付款
+                            // 成品卖给商铺：铺面付款（批次九十四：买方议价 × 库存联动倍率，并按成交额代扣商税）
+                            gs.PayFromBuildingTaxed(dest, C,
+                                (long)(Goods.BuyerPrice(dest, s.GoodsId) * put), gs.Taxes.TradeTaxRate);
                         C.Pack.Take(s.GoodsId, put);
                         stored += put;
                     }
@@ -1288,7 +1300,8 @@ public partial class CitizenAgent : Node3D
             if (shop != null)
             {
                 // 超限收购：收货方已经过 AtCap 闸门筛选，背来的一担全收不截断
-                double accepted = shop.StoreGoodsForce(s.GoodsId, amount);
+                // （批次九十五：连同时效状态入库，陈粮不会因易手而"变新鲜"）
+                double accepted = shop.Inv.StoreForceBatch(s.GoodsId, amount, s.State);
                 if (accepted > 0)
                 {
                     if (shop.Def.IsCourtBuyer)
@@ -1299,7 +1312,9 @@ public partial class CitizenAgent : Node3D
                             * EconomyConfig.CourtProcurementPriceFactor * accepted));
                     }
                     else
-                        gs.PayFromBuilding(shop, C, (long)(Goods.PriceOf(s.GoodsId) * accepted)); // 铺面能付多少付多少
+                        // 铺面能付多少付多少（批次九十四：买方议价 × 库存联动倍率，并按成交额代扣商税入官库）
+                        gs.PayFromBuildingTaxed(shop, C,
+                            (long)(Goods.BuyerPrice(shop, s.GoodsId) * accepted), gs.Taxes.TradeTaxRate);
                     C.Pack.Take(s.GoodsId, accepted);
                     amount -= accepted;
                 }

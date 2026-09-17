@@ -44,6 +44,15 @@ public partial class VisitorSystem : Node
                 st.OwnerVisitor?.ForceLeave();
             }
         }
+
+        // 行囊计时效（批次九十五）：访客上路时带的货一路风吹日晒，同样会陈旧；
+        // 商队行囊按"随身携带"计，抵达后由 TimelinessSystem 按入库位置接管
+        var ctx = TimedContext.ForGoods("", TimedPlace.Carried, -1, gs.CurMonth, false);
+        foreach (var v in _visitors)
+        {
+            if (!v.Inv.IsEmpty)
+                TimelinessSystem.AdvanceInventory(v.Inv, ctx, gs, -1, -1);
+        }
     }
 
     public override void _Process(double delta)
@@ -204,7 +213,9 @@ public partial class VisitorSystem : Node
         {
             if (!gs.Demand.IsShort(s.GoodsId))
                 continue; // 城市已不缺此货 → 跳过，不买
-            double amt = venue.StoreGoodsForce(s.GoodsId, s.Amount);
+            // 进口：连时效状态一并入库（批次九十五：商队长途运来的货本就"半旧"，
+            // 不该因为进了本城仓房就变新鲜）
+            double amt = venue.Inv.StoreForceBatch(s.GoodsId, s.Amount, s.State);
             cost += (long)(amt * Goods.PriceOf(s.GoodsId));
         }
         if (cost > 0)

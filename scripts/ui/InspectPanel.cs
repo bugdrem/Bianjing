@@ -705,12 +705,23 @@ public partial class InspectPanel : FrostedPanel
         // 储存（逐堆列出，入库天数为后期变质系统铺垫）
         if (b.Def.StorageCapacity > 0)
         {
-            sb.AppendLine($"—— 储存 {b.StorageTotal:F1}/{b.StorageCap:F0} 份 ——");
+            // 批次九十四：整仓占用率就是库存联动定价的输入（满仓折价、缺货溢价），
+            // 一并显示档位，免得玩家看到售价随库存浮动却找不到缘由
+            double fill = Goods.FillRateOf(b);
+            string priceTag = fill >= EconomyConfig.StockFullThreshold ? "满仓折价"
+                : fill >= EconomyConfig.StockHighThreshold ? "偏高折价"
+                : fill <= EconomyConfig.StockLowThreshold ? "缺货溢价"
+                : "平价";
+            sb.AppendLine($"—— 储存 {b.StorageTotal:F1}/{b.StorageCap:F0} 份（占用 {fill * 100:F0}% · {priceTag}）——");
             if (b.Inv.IsEmpty)
                 sb.AppendLine("（空仓）");
             else
+            {
+                // 仓房时效环境：NoRoof 露棚 / 有顶室内（与 TimelinessSystem 判定同口径）
+                var storePlace = b.Def.NoRoof ? TimedPlace.OpenShed : TimedPlace.Sheltered;
                 foreach (var s in b.Inv.Stacks)
-                    sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日）");
+                    sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日 · {TimedTag(gs, s.GoodsId, s.State, storePlace, b.X, b.Y)}）");
+            }
         }
 
         // 生产需求：加工建筑（工坊）的按级配方原料/燃料/副产品，及产业建筑（粮田/林场/矿场等）的收成信息
@@ -730,8 +741,10 @@ public partial class InspectPanel : FrostedPanel
             if (byp > 0)
                 arrow += $" + {Goods.NameOf(Goods.Scrap)}×{byp:0.##}"; // 副产品
             sb.AppendLine($"配方（{b.Level}级）：{arrow}");
-            sb.AppendLine($"需料：{string.Join("、", inputs.Select(kv => $"{Goods.NameOf(kv.Key)} {b.Inv.AmountOf(kv.Key):F1}份（{Goods.PriceOf(kv.Key)}文）"))}");
-            sb.AppendLine($"产出：{Goods.NameOf(b.Specialty)} {b.Inv.AmountOf(b.Specialty):F1}份（{Goods.PriceOf(b.Specialty)}文）");
+            // 批次九十四：价的来源分开标注——进料按「收价」（买方议价，工坊补料与向居民收货同价），
+            // 出货按「零售价」（家庭零买价，含买入加价），两者都随本仓占用率浮动
+            sb.AppendLine($"需料：{string.Join("、", inputs.Select(kv => $"{Goods.NameOf(kv.Key)} {b.Inv.AmountOf(kv.Key):F1}份（收价 {Goods.BuyerPrice(b, kv.Key)}文）"))}");
+            sb.AppendLine($"产出：{Goods.NameOf(b.Specialty)} {b.Inv.AmountOf(b.Specialty):F1}份（零售 {Goods.RetailPrice(b, b.Specialty)}文）");
             double eff = b.Def.EfficiencyAt(b.Level);
             if (eff != 1.0)
                 sb.AppendLine($"效率：{eff:0.0}×（{b.Level}级坊铺）");
@@ -814,8 +827,10 @@ public partial class InspectPanel : FrostedPanel
 
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"堆存 {pile.Inv.Total:F1}/{ItemPileObj.PileCapacity:F0} 份（任何居民可拾取）");
+        // 批次九十五：地面堆按露天计时效（临水的堆坏得更快），与 TimelinessSystem 同口径
+        var gs = GameState.I;
         foreach (var s in pile.Inv.Stacks)
-            sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日）");
+            sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日 · {TimedTag(gs, s.GoodsId, s.State, TimedPlace.Ground, pile.X, pile.Y)}）");
         _body.Text = sb.ToString().TrimEnd();
     }
 
@@ -881,6 +896,38 @@ public partial class InspectPanel : FrostedPanel
     /// <summary>名字按性别着色并挂点击链接（批次七十）：建筑面板点人名即在面板展开该居民个人页。</summary>
     private static string UrlName(Citizen c)
         => $"[url=citizen:{c.Id}]{ColorName(c)}[/url]";
+
+    /// <summary>
+    /// 单批货物的时效标签（批次九十五，BBCode 着色）：鲜度阶段 + 剩余可存天数。
+    /// 剩余天数按该库存<b>当前所处环境</b>现算——同一批货在露天与在仓房的剩余天数本就不同，
+    /// 这也是玩家把货搬进仓库能立刻看到数字变长的原因（阈值回滚，见 specs）。
+    /// </summary>
+    private static string TimedTag(GameState gs, string goodsId, in TimedState st, TimedPlace place, int x, int y)
+    {
+        if (!TimedRules.Applies(goodsId))
+            return "不腐"; // 矿石、书籍、废料等不参与时效
+
+        int cell = x >= 0 ? x + y * MapGrid.Size : -1;
+        bool nearWater = x >= 0 && TimelinessSystem.IsNearWater(gs, x, y);
+        var rates = TimedRegistry.Compute(TimedContext.ForGoods(goodsId, place, cell, gs.CurMonth, nearWater));
+        var r = TimedRules.Resolve(st, rates, goodsId);
+
+        string fresh = r.Stage switch
+        {
+            FreshStage.Full => $"[color=#2f7d4f]鲜 {st.Fresh:F0}%[/color]",
+            FreshStage.Waning => $"[color=#b8860b]渐损 {st.Fresh:F0}%[/color]",
+            _ => "[color=#b03a2e]已失效[/color]",
+        };
+        // 只参与软轴的货品（柴薪、木炭等）没有"尚存天数"，只报鲜度
+        if (r.SoftOnly)
+            return fresh;
+        string span = r.Remain <= 0f ? "[color=#b03a2e]将尽[/color]" : $"尚存 {r.Remain:F0} 日";
+        // 翻新次数：让玩家看清"这块饼被回锅过两次"才解释得通为何坏得更快
+        string renew = st.RenewCount > 0
+            ? $"[color=#7a5c1e]· 翻新 {st.RenewCount} 次[/color]"
+            : "";
+        return $"{fresh} · {span} {renew}".TrimEnd();
+    }
 
     /// <summary>家产模块（批次七十一）：独立小节「—— 家产 ——」+ 金额，不再缀在户主/田主名后。</summary>
     private static void AppendFamilyAssets(System.Text.StringBuilder sb, GameState gs, Citizen c)

@@ -5,114 +5,76 @@ using Godot;
 namespace Bianjing;
 
 /// <summary>
-/// 水系生成（批次五十起，批次六十一改走线来源）：河流定线在 128 草图完成（WorldSketch.WalkRivers，
-/// 预览所见），此处把定线 ×8 放大为引导线，在侵蚀完成的「成品地形」上走廊循坡细化——
-/// 只读地势、不改地势（唯一例外：河床下压，把水格顶点压到本格水面之下），保证地形生成算法的纯粹性。
-/// ① 沿引导线循坡细化（前向扇区取最低 + 拉力拉回），撞既有水体即汇流（树状水系），出图缘即河口；
-/// ② 逐格水位 Cell.WaterH：沿程取「平滑地形的运行最小值」、下限 0（以 0 为最低点）——
-///    水面随地势逐级下降形成流向观感，河岸高差由地形自然涌现（平原浅滩、山区峡谷）；
-/// ③ 湖泊坐落干流低平处：谐波湾汊圈内「地形低于湖面」的格才着水，高地自然留成湖中岛/岬角；
-/// ④ 支流汇入处水位回灌抬平（backwater），免支口低于干流水面的倒挂。
+/// 水系落地（批次六十九重写）：把 RiverNetwork 的河道折线与 LakeGenerator 的湖群写进地图网格，
+/// 再统一水位、下压河床。四步：
+/// ① <b>刻河</b>：沿折线按「与河宽成比例」的步距盖圆盘，写入 HasWater/WaterH/FlowDir；
+///    水面 = 平滑后的沿程地形 - RiverSurfaceDrop，取运行最小保证不倒流；重叠处取较高者（上游优先）。
+/// ② <b>落湖</b>：湖格整体覆盖（同湖统一水位、FlowDir=0 静水），湖面是权威值。
+/// ③ <b>统一水位</b>：在 FlowRouter 的洪泛拓扑序上单趟扫描（先下游后上游），
+///    令「水位沿流向单调不增」——支流汇入处自动回灌抬平（backwater），不再出现水位倒挂；
+///    湖面冻结不参与抬升（出水口呈跌水，符合真实湖口形态）。
+/// ④ <b>河床下压</b>（唯一的地形修改）：按连通水体分别求多源 BFS 离岸距离，
+///    深度按水体自身的最大离岸距离缩放——窄河仍是浅槽，大湖自然成深盆。
+/// 全程除 ④ 外只读地势，保证地形生成算法的纯粹性。
 /// </summary>
 public static class RiverGenerator
 {
-    /// <summary>水系总入口：细化走线 → 刻水/赋水位/流向 → 干流点湖 → 河床下压。sketch 提供草图定线。</summary>
-    public static void BuildWaterSystem(MapGrid map, WorldSketch sketch, Random rng)
+    /// <summary>水系总入口：刻河 → 落湖 → 统一水位 → 下压河床。</summary>
+    public static void BuildWaterSystem(MapGrid map, FlowField flow,
+        List<RiverPath> rivers, List<LakeShape> lakes)
     {
-        for (int i = 0; i < sketch.Rivers.Count; i++)
-        {
-            var path = FollowGuide(map, GuideFromSketch(sketch.Rivers[i]));
-            if (path.Count < WaterConfig.MinRiverPathCells)
-                continue; // 细化后过短（源点即贴水/贴缘）：弃之
-            var levels = ComputeLevels(map, path);
-            CarveRiver(map, path, levels, isMain: i == 0);
-            if (i == 0)
-                PlaceLakes(map, path, levels, rng); // 湖只挂在干流上
-        }
+        foreach (var river in rivers)
+            CarveRiver(map, river);
+        StampLakes(map, lakes);
+        SolveLevels(map, flow);
         CarveBed(map);
     }
 
-    // ---- ① 草图定线 → 全图循坡细化 ----
+    // ---- ① 刻河 ----
 
-    /// <summary>草图路径 → 世界坐标引导线（草图 1 格 = SketchScale 格）。</summary>
-    private static List<Vector2I> GuideFromSketch(List<Vector2I> sketchPath)
+    /// <summary>沿折线刻一条河：先由沿程地形求水位（滑动平均 → 运行最小 → 让出岸顶 → 下限 0），
+    /// 再按弧长步进盖圆盘（步距 ∝ 河宽：窄溪密、宽河疏），末点补一刀保证河口满宽。</summary>
+    private static void CarveRiver(MapGrid map, RiverPath path)
     {
-        int k = TerrainConfig.SketchScale;
-        var guide = new List<Vector2I>(sketchPath.Count);
-        foreach (var p in sketchPath)
-            guide.Add(new Vector2I(p.X * k, p.Y * k));
-        return guide;
-    }
+        int n = path.Points.Count;
+        if (n < 2)
+            return;
 
-    /// <summary>沿引导线走廊循坡细化（1024² 格中心高）：锚点间每步从前向扇区（直行+两斜前）选
-    /// 「高度 + 拉力×到锚点距离」最低的格——大方向由草图定线（预览所见），局部贴合全图地形
-    /// （fBm 细节/侵蚀）；撞既有水体即汇流终止；出图缘终止（引导线末点在图缘，必达河口）。
-    /// 强制滑行无上限：河流终点只可能是图缘或汇流，不再中途断流。</summary>
-    private static List<Vector2I> FollowGuide(MapGrid map, List<Vector2I> guide)
-    {
-        var path = new List<Vector2I>();
-        var visited = new HashSet<int>();
-        var cur = guide[0];
-        for (int gi = 1; gi < guide.Count; gi++)
+        var levels = ComputeLevels(path.Terrain);
+
+        var arc = new float[n];
+        for (int i = 1; i < n; i++)
+            arc[i] = arc[i - 1] + path.Points[i].DistanceTo(path.Points[i - 1]);
+        float total = arc[n - 1];
+        if (total < 1f)
+            return;
+
+        int seg = 0;
+        for (float s = 0f; s <= total;)
         {
-            var target = guide[gi];
-            int guard = 0;
-            while ((cur.X != target.X || cur.Y != target.Y) && guard++ < 64)
-            {
-                if (cur.X < 1 || cur.Y < 1 || cur.X >= MapGrid.Size - 1 || cur.Y >= MapGrid.Size - 1)
-                {
-                    path.Add(cur);
-                    return path; // 出图缘：河口
-                }
-                path.Add(cur);
-                visited.Add(cur.Y * MapGrid.Size + cur.X);
-                if (path.Count > 32 && map.CellAt(cur).HasWater)
-                    return path; // 撞既有水体：汇流终止（树状水系）
-
-                int dx = Math.Sign(target.X - cur.X), dy = Math.Sign(target.Y - cur.Y);
-                int bx = 0, by = 0;
-                float bestScore = float.MaxValue;
-                for (int oy = -1; oy <= 1; oy++)
-                {
-                    for (int ox = -1; ox <= 1; ox++)
-                    {
-                        if ((ox == 0 && oy == 0) || ox * dx + oy * dy <= 0)
-                            continue; // 原地/后退不入候选：前向扇区
-                        int nx = cur.X + ox, ny = cur.Y + oy;
-                        if (nx < 0 || ny < 0 || nx >= MapGrid.Size || ny >= MapGrid.Size
-                            || visited.Contains(ny * MapGrid.Size + nx))
-                            continue;
-                        float score = map.Height.CellCenterH(new Vector2I(nx, ny))
-                            + WaterConfig.GuidePull * (Math.Abs(nx - target.X) + Math.Abs(ny - target.Y));
-                        if (score < bestScore)
-                        {
-                            bestScore = score;
-                            bx = ox; by = oy;
-                        }
-                    }
-                }
-                if (bx == 0 && by == 0)
-                    break; // 前向扇区全堵（visited 围困）：放弃本段，段末仍对齐锚点
-                cur = new Vector2I(cur.X + bx, cur.Y + by);
-            }
-            cur = target; // 段末对齐锚点：细化路径始终贴近预览定线（跳变 ≤ 数格，刻盘重叠掩盖）
+            while (seg < n - 2 && arc[seg + 1] < s)
+                seg++;
+            float span = arc[seg + 1] - arc[seg];
+            float t = span > 1e-4f ? (s - arc[seg]) / span : 0f;
+            var p = path.Points[seg].Lerp(path.Points[seg + 1], t);
+            float w = Mathf.Lerp(path.Widths[seg], path.Widths[seg + 1], t);
+            float lv = Mathf.Lerp(levels[seg], levels[seg + 1], t);
+            var dir = path.Points[seg + 1] - path.Points[seg];
+            CarveDisk(map, p, w * 0.5f, EncodeFlow(dir.X, dir.Y), lv);
+            s += Mathf.Max(0.6f, w * 0.3f);
         }
-        path.Add(cur);
-        return path;
+
+        // 末点补刻：河口在图外时最后一段步进可能刚好跨过图缘，补一刀保证图缘处满宽
+        var tail = path.Points[n - 1] - path.Points[n - 2];
+        CarveDisk(map, path.Points[n - 1], path.Widths[n - 1] * 0.5f,
+            EncodeFlow(tail.X, tail.Y), levels[n - 1]);
     }
 
-    // ---- ② 沿程水位 ----
-
-    /// <summary>沿程水位：走线上的格中心高 → 滑动平均（滤逐米噪声）→ 运行最小值（水不倒流上坡）
-    /// → clamp 下限 MinWaterLevel（以 0 为最低点）。地势台阶保留成急流/跌水观感。</summary>
-    private static float[] ComputeLevels(MapGrid map, List<Vector2I> path)
+    /// <summary>沿程水位：折线上的地形高 → 滑动平均（滤逐米噪声）→ 运行最小（水不倒流上坡）
+    /// → 让出岸顶 RiverSurfaceDrop（岸坡露出水面而非与水齐平）→ 下限 MinWaterLevel。</summary>
+    private static float[] ComputeLevels(List<float> terrain)
     {
-        int n = path.Count;
-        var terrain = new float[n];
-        for (int i = 0; i < n; i++)
-            terrain[i] = map.Height.CellCenterH(path[i]);
-
-        // 滑动平均（窗口 LevelSmoothWindow，边缘缩窗）
+        int n = terrain.Count;
         var smooth = new float[n];
         int hw = WaterConfig.LevelSmoothWindow / 2;
         for (int i = 0; i < n; i++)
@@ -124,166 +86,87 @@ public static class RiverGenerator
             smooth[i] = sum / (b - a + 1);
         }
 
-        // 运行最小 + 下限 0
         var levels = new float[n];
         float run = float.MaxValue;
         for (int i = 0; i < n; i++)
         {
             run = Math.Min(run, smooth[i]);
-            levels[i] = Math.Max(WaterConfig.MinWaterLevel, run);
+            levels[i] = Mathf.Max(WaterConfig.MinWaterLevel, run - WaterConfig.RiverSurfaceDrop);
         }
         return levels;
     }
 
-    // ---- ③ 刻水（河/湖）----
-
-    /// <summary>沿走线逐点刻圆盘：宽度沿程渐宽（干流封顶 RiverWidthMouth、支线 BranchWidthMouth），
-    /// 流向取走线切向八方向；支流汇入时把尾段水位回灌抬平到干流水面（backwater）。</summary>
-    private static void CarveRiver(MapGrid map, List<Vector2I> path, float[] levels, bool isMain)
-    {
-        int n = path.Count;
-        float mouthW = isMain ? WaterConfig.RiverWidthMouth : WaterConfig.BranchWidthMouth;
-
-        // 汇流回灌：终点若落在既有水体上且其水面高于本线尾段，把尾段抬平到汇入点水面（免倒挂）
-        var last = path[n - 1];
-        if (MapGrid.InBounds(last) && map.CellAt(last).HasWater)
-        {
-            float mouthLevel = map.CellAt(last).WaterH;
-            for (int i = n - 1; i >= 0 && levels[i] < mouthLevel; i--)
-                levels[i] = mouthLevel;
-        }
-
-        for (int i = 0; i < n; i++)
-        {
-            float t = i / (float)Math.Max(1, n - 1);
-            float width = Mathf.Lerp(WaterConfig.RiverWidthSource, mouthW, t);
-            var dir = i + 1 < n ? path[i + 1] - path[i] : path[i] - path[Math.Max(0, i - 1)];
-            byte flow = EncodeFlow(dir.X, dir.Y);
-            CarveDisk(map, path[i], width / 2f, flow, levels[i]);
-        }
-    }
-
-    /// <summary>干流低平处点湖（1~2 座）：湖面 = 该点河水位；谐波湾汊圈内「地形低于湖面」的格才着水
-    /// （静水、流向清零），高于湖面的高地自然留成湖中岛/岬角——不再强制抠岛。</summary>
-    private static void PlaceLakes(MapGrid map, List<Vector2I> path, float[] levels, Random rng)
-    {
-        int lakes = WaterConfig.RiverLakeMin + rng.Next(WaterConfig.RiverLakeMax - WaterConfig.RiverLakeMin + 1);
-        int n = path.Count;
-        for (int i = 0; i < lakes; i++)
-        {
-            // 中后段取低平点（水位低于 LakeMaxSiteLevel 才成湖，山区不点湖）
-            int idx = n / 3 + rng.Next(Math.Max(1, n / 2));
-            if (idx >= n || levels[idx] > WaterConfig.LakeMaxSiteLevel)
-                continue;
-            var center = path[idx];
-            float level = levels[idx];
-            int baseR = WaterConfig.BigLakeRadiusMin + rng.Next(WaterConfig.BigLakeRadiusMax - WaterConfig.BigLakeRadiusMin + 1);
-
-            // 三组随机相位谐波，叠出扭曲湖缘
-            double p1 = rng.NextDouble() * Math.PI * 2, p2 = rng.NextDouble() * Math.PI * 2, p3 = rng.NextDouble() * Math.PI * 2;
-            double w = WaterConfig.LakeEdgeWaviness;
-            int rMax = (int)(baseR * (1 + w)) + 2;
-
-            for (int ox = -rMax; ox <= rMax; ox++)
-            {
-                for (int oy = -rMax; oy <= rMax; oy++)
-                {
-                    var c = center + new Vector2I(ox, oy);
-                    if (!MapGrid.InBounds(c))
-                        continue;
-                    double dist = Math.Sqrt(ox * ox + oy * oy);
-                    double theta = Math.Atan2(oy, ox);
-                    double edge = baseR * (1 + w * (0.5 * Math.Sin(3 * theta + p1) + 0.3 * Math.Sin(5 * theta + p2) + 0.2 * Math.Sin(7 * theta + p3)));
-                    if (dist > edge)
-                        continue;
-                    // 地形高出湖面超并入容差的格留作湖中岛/岬角；容差内并入湖盆（后续河床下压削到水下）
-                    if (map.Height.CellCenterH(c) >= level + WaterConfig.LakeFloodTolerance && !map.CellAt(c).HasWater)
-                        continue;
-                    ref var cell = ref map.CellAt(c);
-                    cell.HasWater = true;
-                    cell.WaterH = level;
-                    cell.FlowDir = 0; // 湖为静水
-                }
-            }
-        }
-    }
-
-    /// <summary>以 center 为圆心刻一片水面圆盘（半径 radius 米，流向 flow，水位 level）：
-    /// 已是水的格保留原水位/流向（上游先刻，汇流处以先到者为准），新格全量赋值。</summary>
-    private static void CarveDisk(MapGrid map, Vector2I center, float radius, byte flow, float level)
+    /// <summary>以 p（连续格坐标）为圆心盖一片水面圆盘（半径 radius 米、流向 flow、水位 level）：
+    /// 已是水的格只抬高不压低（上游/湖面优先，互不削弱）；新格全量赋值。</summary>
+    private static void CarveDisk(MapGrid map, Vector2 p, float radius, byte flow, float level)
     {
         int r = Mathf.CeilToInt(radius);
-        for (int ox = -r; ox <= r; ox++)
-            for (int oy = -r; oy <= r; oy++)
+        int cx = Mathf.FloorToInt(p.X), cy = Mathf.FloorToInt(p.Y);
+        float rr = radius * radius;
+        for (int oy = -r; oy <= r; oy++)
+        {
+            for (int ox = -r; ox <= r; ox++)
             {
-                if (ox * ox + oy * oy > radius * radius)
+                // 按格中心到圆心的距离判定（格 (x,y) 的中心 = x+0.5）
+                float dx = cx + ox + 0.5f - p.X, dy = cy + oy + 0.5f - p.Y;
+                if (dx * dx + dy * dy > rr)
                     continue;
-                var c = center + new Vector2I(ox, oy);
+                var c = new Vector2I(cx + ox, cy + oy);
                 if (!MapGrid.InBounds(c))
                     continue;
                 ref var cell = ref map.CellAt(c);
                 if (cell.HasWater)
-                    continue; // 先到者为准（同河重叠盖戳水位连续，异河汇流不互改）
+                {
+                    if (level > cell.WaterH)
+                        cell.WaterH = level;
+                    continue; // 保留先到者的流向（上游河段/湖面不被后来者改写）
+                }
                 cell.HasWater = true;
                 cell.WaterH = level;
                 cell.FlowDir = flow;
             }
+        }
     }
 
-    // ---- ④ 河床下压（唯一的地形修改）----
+    // ---- ② 落湖 ----
 
-    /// <summary>河床下压（顶点高度场）：多源 BFS 算每个水格的离岸距离，
-    /// 深度按距离从 BedDepthEdge 插值到 BedDepthCenter（BedFalloffDist 处满深），
-    /// 把水格四角顶点压到「本格水面 - 深度」（只降不升）。
-    /// 岸缘共享顶点被拉到浅滩深度：平原岸缓入水；山区河谷两壁自然成峡谷陡岸。</summary>
-    private static void CarveBed(MapGrid map)
+    /// <summary>湖格整体覆盖写入：同湖统一水位、FlowDir=0（静水）。
+    /// 湖面是权威值——覆盖河格，让穿湖的河段与湖面齐平。</summary>
+    private static void StampLakes(MapGrid map, List<LakeShape> lakes)
     {
-        var hf = map.Height;
-        // 1) 多源 BFS：从贴岸水格（四邻含陆地/图缘）向水体内部扩散，得每个水格离岸距离（贴岸=1）
-        var dist = new int[MapGrid.Size * MapGrid.Size];
-        var queue = new Queue<int>();
-        Span<Vector2I> dirs = stackalloc Vector2I[] { new(1, 0), new(-1, 0), new(0, 1), new(0, -1) };
-        for (int y = 0; y < MapGrid.Size; y++)
+        foreach (var lake in lakes)
         {
-            for (int x = 0; x < MapGrid.Size; x++)
+            foreach (var c in lake.Cells)
             {
-                if (!map.CellAt(x, y).HasWater)
+                if (!MapGrid.InBounds(c))
                     continue;
-                bool shore = false;
-                foreach (var d in dirs)
-                {
-                    var n = new Vector2I(x + d.X, y + d.Y);
-                    if (!MapGrid.InBounds(n) || !map.CellAt(n).HasWater)
-                    {
-                        shore = true;
-                        break;
-                    }
-                }
-                if (shore)
-                {
-                    dist[y * MapGrid.Size + x] = 1;
-                    queue.Enqueue(y * MapGrid.Size + x);
-                }
+                ref var cell = ref map.CellAt(c);
+                cell.HasWater = true;
+                cell.WaterH = lake.Level;
+                cell.FlowDir = 0; // 湖为静水
             }
         }
-        while (queue.Count > 0)
-        {
-            int idx = queue.Dequeue();
-            int cx = idx % MapGrid.Size, cy = idx / MapGrid.Size;
-            for (int i = 0; i < 4; i++)
-            {
-                var n = new Vector2I(cx + (i == 0 ? 1 : i == 1 ? -1 : 0), cy + (i == 2 ? 1 : i == 3 ? -1 : 0));
-                if (!MapGrid.InBounds(n) || !map.CellAt(n).HasWater)
-                    continue;
-                int ni = n.Y * MapGrid.Size + n.X;
-                if (dist[ni] != 0)
-                    continue;
-                dist[ni] = dist[idx] + 1;
-                queue.Enqueue(ni);
-            }
-        }
+    }
 
-        // 2) 逐水格下压四角顶点：目标高度 = 本格水面 - 深度（离岸越远越深，只降不升）
+    // ---- ③ 统一水位 ----
+
+    /// <summary>沿 FlowRouter 的洪泛拓扑序单趟扫描，令水位沿流向单调不增：
+    /// 出队序即填充高升序（先下游后上游），扫到某格时其下游格的水位已是终值，
+    /// 直接取 max 即可——支流汇入干流处自动回灌抬平。
+    /// 湖面（FlowDir=0）冻结不抬：保住湖自身水位，出水口呈跌水。
+    /// 分辨率：路由格（成品 2m）——河湖混杂在同一路由格时以湖面为准。</summary>
+    private static void SolveLevels(MapGrid map, FlowField flow)
+    {
+        int ds = Math.Max(1, flow.Downsample);
+        int rs = flow.Size;
+        int rn = rs * rs;
+
+        var riverLevel = new float[rn];
+        var hasRiver = new bool[rn];
+        var lakeLevel = new float[rn];
+        var isLake = new bool[rn];
+
+        // 1m 格 → 路由格聚合：湖格与河格分开累计，同格取最高
         for (int y = 0; y < MapGrid.Size; y++)
         {
             for (int x = 0; x < MapGrid.Size; x++)
@@ -291,25 +174,186 @@ public static class RiverGenerator
                 ref var cell = ref map.CellAt(x, y);
                 if (!cell.HasWater)
                     continue;
-                int d = dist[y * MapGrid.Size + x];
+                int ri = (y / ds) * rs + (x / ds);
+                if (cell.FlowDir == 0)
+                {
+                    if (!isLake[ri] || cell.WaterH > lakeLevel[ri])
+                        lakeLevel[ri] = cell.WaterH;
+                    isLake[ri] = true;
+                }
+                else if (!isLake[ri])
+                {
+                    if (!hasRiver[ri] || cell.WaterH > riverLevel[ri])
+                        riverLevel[ri] = cell.WaterH;
+                    hasRiver[ri] = true;
+                }
+            }
+        }
+
+        var level = new float[rn];
+        var hasWater = new bool[rn];
+        for (int i = 0; i < rn; i++)
+        {
+            if (isLake[i])
+            {
+                level[i] = lakeLevel[i];
+                hasWater[i] = true;
+            }
+            else if (hasRiver[i])
+            {
+                level[i] = riverLevel[i];
+                hasWater[i] = true;
+            }
+        }
+
+        // 拓扑单趟：下游 → 上游（Order 即填充高升序）
+        for (int k = 0; k < rn; k++)
+        {
+            int c = flow.Order[k];
+            if (!hasWater[c] || isLake[c])
+                continue;
+            int t = flow.Dir[c];
+            if (t < 0 || !hasWater[t])
+                continue;
+            if (level[c] < level[t])
+                level[c] = level[t]; // 回灌抬平（水位沿流向单调不增）
+        }
+
+        // 写回 1m 格
+        for (int y = 0; y < MapGrid.Size; y++)
+        {
+            for (int x = 0; x < MapGrid.Size; x++)
+            {
+                ref var cell = ref map.CellAt(x, y);
+                if (!cell.HasWater)
+                    continue;
+                int ri = (y / ds) * rs + (x / ds);
+                if (hasWater[ri])
+                    cell.WaterH = level[ri];
+            }
+        }
+    }
+
+    // ---- ④ 河床下压（唯一的地形修改）----
+
+    /// <summary>按连通水体分别下压：多源 BFS 求每个水格的离岸距离，
+    /// 深度按<b>本水体</b>的最大离岸距离缩放（窄河 → BedDepthCenterMin 浅槽，大湖 → BedDepthCenterMax 深盆），
+    /// 由岸缘的 BedDepthEdge 浅滩插值到中心满深，只降不升。
+    /// 岸缘共享顶点被拉到浅滩深度：平原岸缓入水；山区河谷两壁自然成峡谷陡岸。</summary>
+    private static void CarveBed(MapGrid map)
+    {
+        int size = MapGrid.Size;
+        int n = size * size;
+        var comp = new int[n];
+        var dist = new int[n];
+        var queue = new int[n];
+        var members = new List<int>();
+        int compId = 0;
+
+        for (int seed = 0; seed < n; seed++)
+        {
+            if (!map.CellAt(seed % size, seed / size).HasWater || comp[seed] != 0)
+                continue;
+
+            // 1) 连通分量（4-连通）：一个水体一套深度参数
+            compId++;
+            members.Clear();
+            int qh = 0, qt = 0;
+            comp[seed] = compId;
+            queue[qt++] = seed;
+            while (qh < qt)
+            {
+                int idx = queue[qh++];
+                members.Add(idx);
+                int cx = idx % size, cy = idx / size;
+                for (int k = 0; k < 4; k++)
+                {
+                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0);
+                    int ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                    if (nx < 0 || ny < 0 || nx >= size || ny >= size)
+                        continue;
+                    int ni = ny * size + nx;
+                    if (comp[ni] != 0 || !map.CellAt(nx, ny).HasWater)
+                        continue;
+                    comp[ni] = compId;
+                    queue[qt++] = ni;
+                }
+            }
+
+            // 2) 多源 BFS：贴岸水格（四邻含陆地/图缘）为源，向水体内部扩散
+            qh = 0; qt = 0;
+            int maxDist = 1;
+            foreach (int idx in members)
+            {
+                int cx = idx % size, cy = idx / size;
+                bool shore = false;
+                for (int k = 0; k < 4; k++)
+                {
+                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0);
+                    int ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                    if (nx < 0 || ny < 0 || nx >= size || ny >= size || !map.CellAt(nx, ny).HasWater)
+                    {
+                        shore = true;
+                        break;
+                    }
+                }
+                if (!shore)
+                    continue;
+                dist[idx] = 1;
+                queue[qt++] = idx;
+            }
+            while (qh < qt)
+            {
+                int idx = queue[qh++];
+                int cx = idx % size, cy = idx / size;
+                for (int k = 0; k < 4; k++)
+                {
+                    int nx = cx + (k == 0 ? 1 : k == 1 ? -1 : 0);
+                    int ny = cy + (k == 2 ? 1 : k == 3 ? -1 : 0);
+                    if (nx < 0 || ny < 0 || nx >= size || ny >= size)
+                        continue;
+                    int ni = ny * size + nx;
+                    if (comp[ni] != compId || dist[ni] != 0)
+                        continue;
+                    dist[ni] = dist[idx] + 1;
+                    if (dist[ni] > maxDist)
+                        maxDist = dist[ni];
+                    queue[qt++] = ni;
+                }
+            }
+
+            // 3) 深度按水体胖瘦缩放：最大离岸距离越大，中心越深、过渡带越宽
+            float t = Mathf.Clamp((maxDist - WaterConfig.BedDepthShallowDist)
+                / (WaterConfig.BedDepthDeepDist - WaterConfig.BedDepthShallowDist), 0f, 1f);
+            float centerDepth = Mathf.Lerp(WaterConfig.BedDepthCenterMin, WaterConfig.BedDepthCenterMax, t);
+            float falloff = Mathf.Clamp(maxDist * WaterConfig.BedFalloffRatio,
+                WaterConfig.BedFalloffMin, WaterConfig.BedFalloffMax);
+            float floorH = TerrainConfig.MinTerrainHeight + 0.05f;
+
+            var hf = map.Height;
+            foreach (int idx in members)
+            {
+                int cx = idx % size, cy = idx / size;
+                float d = dist[idx];
                 if (d <= 0)
-                    d = WaterConfig.BedFalloffDist; // 孤立未达格兜底：按满深处理
-                float t = Mathf.Min(1f, (d - 1) / (float)WaterConfig.BedFalloffDist);
-                float target = cell.WaterH - Mathf.Lerp(WaterConfig.BedDepthEdge, WaterConfig.BedDepthCenter, t);
-                for (int vx = x; vx <= x + 1; vx++)
-                    for (int vy = y; vy <= y + 1; vy++)
+                    d = maxDist; // 未达格兜底：按满深处理
+                float k2 = Mathf.Min(1f, (d - 1) / falloff);
+                float target = Mathf.Max(
+                    map.CellAt(cx, cy).WaterH - Mathf.Lerp(WaterConfig.BedDepthEdge, centerDepth, k2),
+                    floorH);
+                for (int vx = cx; vx <= cx + 1; vx++)
+                    for (int vy = cy; vy <= cy + 1; vy++)
                         if (hf.VertexH(vx, vy) > target)
                             hf.SetVertex(vx, vy, target);
             }
         }
     }
 
-    /// <summary>把方向分量 (sx,sy)∈{-1,0,1} 量化为八方向编码：0=静水，1=东,2=东南,3=南,4=西南,5=西,6=西北,7=北,8=东北。</summary>
-    public static byte EncodeFlow(int sx, int sy)
+    /// <summary>把方向分量 (sx,sy) 量化为八方向编码：0=静水，1=东,2=东南,3=南,4=西南,5=西,6=西北,7=北,8=东北。</summary>
+    public static byte EncodeFlow(float sx, float sy)
     {
-        sx = Math.Sign(sx);
-        sy = Math.Sign(sy);
-        return (sx, sy) switch
+        int x = Math.Sign(sx), y = Math.Sign(sy);
+        return (x, y) switch
         {
             (1, 0) => 1,
             (1, 1) => 2,

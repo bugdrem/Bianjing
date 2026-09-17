@@ -17,6 +17,7 @@ public partial class Main : Node3D
     private TaxSystem _taxes;
     private EconomySystem _economy;
     private MaintenanceSystem _maintenance;
+    private TimelinessSystem _timeliness; // 货品时效：新鲜度（软轴）+ 有效期（硬轴），批次九十五
     private GoodsSystem _goods;
     private CraftingSystem _crafting;
     private PlantGrowthSystem _plants;
@@ -103,6 +104,7 @@ public partial class Main : Node3D
         _taxes = new TaxSystem();
         _economy = new EconomySystem();
         _maintenance = new MaintenanceSystem();
+        _timeliness = new TimelinessSystem();
         _goods = new GoodsSystem();
         _crafting = new CraftingSystem();
         _plants = new PlantGrowthSystem();
@@ -176,6 +178,7 @@ public partial class Main : Node3D
         _taxes.TickDay(gs);
         _economy.TickDay(gs);
         _maintenance.TickDay(gs);
+        _timeliness.TickDay(gs); // 货品时效：先老化再吃饭（当日鲜度决定今天的口粮折算）
         _goods.TickDay(gs);
         _crafting.TickDay(gs); // 工坊/商铺把原料加工成成品
         _plants.TickDay(gs); // 挂果生长与落果

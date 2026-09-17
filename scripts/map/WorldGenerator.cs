@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Godot;
 
@@ -9,9 +10,9 @@ namespace Bianjing;
 /// ① WorldSketch 128² 草图规划（趋势/峰点/山脊/独立山 + 草图级侵蚀，纯地形无水系）→
 /// ② 双线性上采样映射 1025² 顶点高度场 + 高频 fBm 细节（坡度削减，防山脚毛刺）→
 /// ③ 全图 droplet 水力侵蚀（冲沟/冲积扇纹理）→
-/// ④ 热侵蚀塌方松弛（磨平侵蚀残留的坡脚毛刺，保留冲沟纹理）→
-/// ⑤ 水系落地：草图定线（预览所见）放大为引导线，在成品地形上走廊循坡细化
-///    （逐格水位、下限 0、湖岛自然涌现）+ 河床下压 →
+/// ④ 主峰二次隆升（侵蚀会削顶，按草图登记的目标高度余弦羽化补回）→ 高度钳制 →
+/// ⑤ 水系三连：FlowRouter 在成品地形上求流向场 → RiverNetwork 提河网 → LakeGenerator 点湖泊
+///    → RiverGenerator 刻水 / 按洪泛拓扑序统一水位 / 按水体尺寸下压河床 →
 /// ⑥ 树木/野物播种照旧。
 /// 「主动限制」全部集中在收尾单步（ClampHeights 上下限），不侵入基础地形算法。
 /// 全程纯数据操作（Map/Plants/Animals），可在后台线程运行；
@@ -71,29 +72,39 @@ public static class WorldGenerator
         Report("勾画山川", 0.05f);
         var sketch = WorldSketch.Build(rng);
 
-        Report("铺陈大地", 0.2f);
+        Report("铺陈大地", 0.15f);
         UpsampleToHeightField(sketch, gs.Map.Height, rng);
 
-        Report("冲刷侵蚀", 0.3f);
+        Report("冲刷侵蚀", 0.28f);
         HydraulicEroder.Erode(gs.Map.Height.Raw, HeightField.VertsPerSide,
             TerrainConfig.ErodeDropletsFull, TerrainConfig.ErodeBrushRadius, rng);
 
-        Report("坡脚归整", 0.55f);
+        Report("坡脚归整", 0.45f);
         HydraulicEroder.ThermalRelax(gs.Map.Height.Raw, HeightField.VertsPerSide);
+        ReapplyPrimaryPeaks(sketch, gs.Map.Height); // 侵蚀削顶：主峰按目标高度补回
         ClampHeights(gs.Map.Height.Raw);
 
-        Report("引水成河", 0.7f);
-        // 河流定线已在草图阶段完成（预览所见）：放大为引导线后循坡细化刻水
-        RiverGenerator.BuildWaterSystem(gs.Map, sketch, rng);
+        // 水系三连（批次六十九）：成品地形上求流向 → 提河网 → 点湖泊 → 刻水落盘
+        Report("疏理水系", 0.56f);
+        var flow = FlowRouter.Build(gs.Map.Height);
 
-        Report("播种林木", 0.85f);
+        Report("勾连河网", 0.64f);
+        var rivers = RiverNetwork.Build(flow, gs.Map.Height.SampleCell, rng);
+
+        Report("点染湖泊", 0.72f);
+        var lakes = LakeGenerator.Build(gs.Map, flow, rng);
+
+        Report("引水成河", 0.8f);
+        RiverGenerator.BuildWaterSystem(gs.Map, flow, rivers, lakes);
+
+        Report("播种林木", 0.88f);
         TreeGenerator.Scatter(gs, rng);
 
-        Report("放归野物", 0.95f);
+        Report("放归野物", 0.94f);
         new WildlifeSystem().SeedInitial(gs);
 
         Report("落成", 1f);
-        PrintWorldStats(gs); // 生成指标一行日志（headless 冒烟/调参依据）
+        PrintWorldStats(gs, rivers, lakes); // 生成指标一行日志（headless 冒烟/调参依据）
     }
 
     private static void Report(string stage, float progress)
@@ -150,6 +161,40 @@ public static class WorldGenerator
         ClampHeights(raw);
     }
 
+    /// <summary>主峰二次隆升（批次六十九）：水力侵蚀与热松弛会削掉峰顶，
+    /// 主峰高 88~105m 是「一两张王牌」，不能任其磨平——按草图登记的目标高度补回。
+    /// 做法：对主峰覆盖的顶点，把当前高度朝目标高斯面插值，权重由峰心 1 余弦渐隐到缘 0，
+    /// 只抬高不压低，边缘羽化——不留硬台、不与既有山脊冲突。</summary>
+    private static void ReapplyPrimaryPeaks(WorldSketch sketch, HeightField hf)
+    {
+        float scale = TerrainConfig.SketchScale;
+        foreach (var (pos, targetH, rMeters) in sketch.PrimaryPeaks)
+        {
+            float cx = pos.X * scale, cy = pos.Y * scale;
+            int r = Mathf.CeilToInt(rMeters);
+            int vx0 = Math.Max(0, Mathf.FloorToInt(cx) - r), vx1 = Math.Min(HeightField.VertsPerSide - 1, Mathf.CeilToInt(cx) + r);
+            int vy0 = Math.Max(0, Mathf.FloorToInt(cy) - r), vy1 = Math.Min(HeightField.VertsPerSide - 1, Mathf.CeilToInt(cy) + r);
+
+            for (int vy = vy0; vy <= vy1; vy++)
+            {
+                for (int vx = vx0; vx <= vx1; vx++)
+                {
+                    float dx = vx - cx, dy = vy - cy;
+                    float d = Mathf.Sqrt(dx * dx + dy * dy) / rMeters;
+                    if (d > 1f)
+                        continue;
+                    float target = targetH * MathF.Exp(-3f * d * d);
+                    float cur = hf.VertexH(vx, vy);
+                    if (cur >= target)
+                        continue;
+                    // 余弦羽化：峰心全量补回、峰缘渐隐，与既有地形无缝衔接
+                    float w = 0.5f + 0.5f * MathF.Cos(MathF.PI * d);
+                    hf.SetVertex(vx, vy, Mathf.Lerp(cur, target, w));
+                }
+            }
+        }
+    }
+
     /// <summary>全场高度钳制（收尾的「主动限制」单步，不侵入基础算法）：
     /// 上限 MaxTerrainHeight、下限 MinTerrainHeight（卷轴画布/裙板垫在其下）。</summary>
     private static void ClampHeights(float[] raw)
@@ -160,12 +205,14 @@ public static class WorldGenerator
 
     // ---- 生成指标（调参依据，headless 冒烟直接可读）----
 
-    /// <summary>关键占比一行日志：山地（>5m）/ 水面 / 可用平原（非水、坡度可走、<5m）/ 最高点。</summary>
-    private static void PrintWorldStats(GameState gs)
+    /// <summary>关键占比一行日志：山地（&gt;5m）/ 水面 / 可用平原（非水、坡度可走、&lt;5m）/ 最高点，
+    /// 并附河道条数、湖群座数与前 5 高峰——headless 冒烟与调参的直接依据。</summary>
+    private static void PrintWorldStats(GameState gs, List<RiverPath> rivers, List<LakeShape> lakes)
     {
         int total = MapGrid.Size * MapGrid.Size;
         int mountain = 0, water = 0, usable = 0;
         float maxH = float.MinValue;
+        var top = new float[5];
         for (int y = 0; y < MapGrid.Size; y++)
         {
             for (int x = 0; x < MapGrid.Size; x++)
@@ -177,14 +224,33 @@ public static class WorldGenerator
                     continue;
                 }
                 float h = gs.Map.Height.CellCenterH(c);
-                maxH = Math.Max(maxH, h);
+                if (h > maxH)
+                    maxH = h;
+                // 前 5 高峰（降序插位；只统计未被水覆盖的陆地）
+                if (h > top[4])
+                {
+                    top[4] = h;
+                    for (int k = 3; k >= 0; k--)
+                    {
+                        if (top[k] >= top[k + 1])
+                            break;
+                        (top[k], top[k + 1]) = (top[k + 1], top[k]);
+                    }
+                }
                 if (h > 5f)
                     mountain++;
                 else if (gs.Map.Height.CellSlopeDeg(c) <= TerrainConfig.MaxWalkSlopeDeg)
                     usable++;
             }
         }
-        GD.Print($"[worldgen] 山地(>5m) {100f * mountain / total:F1}% | 水面 {100f * water / total:F1}% | " +
-            $"可用平原 {100f * usable / total:F1}% | 最高 {maxH:F1}m");
+
+        int lakeCells = 0;
+        foreach (var lk in lakes)
+            lakeCells += lk.Cells.Count;
+
+        GD.Print($"[worldgen] 山地(>5m) {100f * mountain / total:F1}% | 水面 {100f * water / total:F1}% " +
+            $"(湖 {100f * lakeCells / total:F1}%) | 可用平原 {100f * usable / total:F1}% | " +
+            $"河道 {rivers.Count} 条 / 湖 {lakes.Count} 座 | 最高 {maxH:F1}m | 前5峰 " +
+            $"{top[0]:F0}/{top[1]:F0}/{top[2]:F0}/{top[3]:F0}/{top[4]:F0}m");
     }
 }

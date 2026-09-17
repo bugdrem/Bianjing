@@ -196,15 +196,16 @@ public partial class GameMenu : CanvasLayer
             for (int x = 0; x < S; x++)
                 img.SetPixel(x, y, HeightColor(sketch.H[y * S + x]));
         }
-        DrawRivers(img, sketch, S); // 叠加河流定线：预览所见即最终河的位置
+        DrawRivers(img, sketch, S); // 叠加示意河网：与成品水系同源算法（低分辨率骨架）
         _mapPreview.Texture = ImageTexture.CreateFromImage(img);
     }
 
-    /// <summary>在预览图上叠加河流定线（浅蓝 1px）：草图路径 8 邻连续，逐点着色即可。</summary>
+    /// <summary>在预览图上叠加示意河网（浅蓝 1px）：草图上跑一遍轻量 FlowRouter+RiverNetwork 得到，
+    /// 成品水系在 512² 地形上另算，二者同源但分辨率不同——此处只作「大河大致走向」的示意。</summary>
     private static void DrawRivers(Image img, WorldSketch sketch, int s)
     {
         var river = WaterConfig.PreviewRiverColor;
-        foreach (var path in sketch.Rivers)
+        foreach (var path in sketch.PreviewRivers)
         {
             foreach (var p in path)
             {
@@ -217,18 +218,20 @@ public partial class GameMenu : CanvasLayer
 
     /// <summary>预览高度着色（与成品地形视觉一致的色阶；草图无水面，纯高度插值）：
     /// h≤0 低地深草绿（批次八十八：原深青绿形似水体误导——成品中海拔≤0 是干地而非水，
-    /// 水只在河流定线/湖盆处生成，见 RiverGenerator；改延 0m 翠绿向下加深，所见即所得）
-    /// → 0 翠绿 → 12m 黄绿 → 24m 黄褐 → 40m 灰褐 → ≥64m 灰白。</summary>
+    /// 水只在河道/湖盆处生成，见 RiverGenerator；改延 0m 翠绿向下加深，所见即所得）
+    /// → 0 翠绿 → 12m 黄绿 → 24m 黄褐 → 40m 灰褐 → 64m 灰白 → ≥110m 雪白（主峰封顶）。</summary>
     private static Color HeightColor(float h)
     {
         if (h <= 0f)
             return new Color(0.16f, 0.48f, 0.22f).Lerp(new Color(0.07f, 0.24f, 0.10f),
-                Mathf.Clamp(-h / 3f, 0f, 1f)); // 0m 与上档无缝衔接，-3m（MinTerrainHeight）最暗
+                Mathf.Clamp(-h / -TerrainConfig.MinTerrainHeight, 0f, 1f)); // 0m 与上档无缝衔接，MinTerrainHeight 处最暗
         if (h < 12f) return new Color(0.16f, 0.48f, 0.22f).Lerp(new Color(0.42f, 0.55f, 0.20f), h / 12f);
         if (h < 24f) return new Color(0.42f, 0.55f, 0.20f).Lerp(new Color(0.58f, 0.47f, 0.24f), (h - 12f) / 12f);
         if (h < 40f) return new Color(0.58f, 0.47f, 0.24f).Lerp(new Color(0.52f, 0.50f, 0.46f), (h - 24f) / 16f);
         if (h < 64f) return new Color(0.52f, 0.50f, 0.46f).Lerp(new Color(0.78f, 0.78f, 0.74f), (h - 40f) / 24f);
-        return new Color(0.78f, 0.78f, 0.74f);
+        // 64m 以上：主峰段（88~105m）向雪白渐亮，预览里一眼认出王牌山峰
+        return new Color(0.78f, 0.78f, 0.74f).Lerp(new Color(0.97f, 0.97f, 0.96f),
+            Mathf.Clamp((h - 64f) / (TerrainConfig.MaxTerrainHeight - 64f), 0f, 1f));
     }
 
     /// <summary>确认建城：校验城名后携种子回调 Main（同种子生成真实地图），随即关菜单恢复游戏。</summary>

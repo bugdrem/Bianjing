@@ -24,11 +24,13 @@ public static class TerrainConfig
     /// <summary>整平垫基允许的占地最大高差（米）：占地内最高-最低顶点超过此值不可落建筑。</summary>
     public const float MaxBuildFlattenDiff = 1.0f;
 
-    /// <summary>世界最高海拔（米）：峰顶上限（映射/侵蚀后统一 clamp）。</summary>
-    public const float MaxTerrainHeight = 64f;
+    /// <summary>世界最高海拔（米）：峰顶上限（映射/侵蚀后统一 clamp）。
+    /// 批次六十九起提到 110——为 PrimaryPeak 主峰（88~105m）留出空间。</summary>
+    public const float MaxTerrainHeight = 110f;
 
-    /// <summary>世界最低海拔（米）：侵蚀/噪声下掘的统一下限；卷轴画布/图缘裙板垫在其下。</summary>
-    public const float MinTerrainHeight = -3f;
+    /// <summary>世界最低海拔（米）：侵蚀/噪声下掘的统一下限；卷轴画布/图缘裙板垫在其下。
+    /// 批次六十九起放到 -5：深湖湖床最深约 -3.5m，须在裙板底之上留出余量。</summary>
+    public const float MinTerrainHeight = -5f;
 
     // ---- 草图规划（SketchSize² 内存小图：先宏观后细节）----
 
@@ -70,19 +72,67 @@ public static class TerrainConfig
     /// <summary>地图中心避让半径（米）：峰点/独立山不落在中心圆内，给城建留开阔腹地。</summary>
     public const float CenterExclusionRadius = 280f;
 
-    // ---- 低矮独立山（中部/东南平原上的零星山包，不连脊）----
+    // ---- 主峰（批次六十九：一两张王牌，鹤立鸡群）----
 
-    /// <summary>独立山数量范围（座）：撒在山区带之外（中部/东南），避中心圆与图缘（原值×1.5 取整）。</summary>
-    public const int LowHillCountMin = 5;
-    public const int LowHillCountMax = 9;
+    /// <summary>主峰数量（座）：群山之上再叠一两座极高主峰，突破普通峰高上限成绝对制高点。</summary>
+    public const int PrimaryPeakCount = 2;
+
+    /// <summary>主峰高度范围（米）：约为普通峰上限（62m）的 1.5 倍，视觉上一眼可辨。</summary>
+    public const float PrimaryPeakHeightMin = 88f;
+    public const float PrimaryPeakHeightMax = 105f;
+
+    /// <summary>主峰高斯锥半径范围（米）：比普通峰更大，山体浑厚成「山汇」而非尖笋。</summary>
+    public const float PrimaryPeakRadiusMin = 160f;
+    public const float PrimaryPeakRadiusMax = 210f;
+
+    /// <summary>主峰轮廓的角向谐波幅度（0-1）：半径按方位角做 3 阶谐波调制——
+    /// 山体不再是完美圆锥，长出山脊凸出与沟谷凹入（对称锥在俯视图里非常「假」）。</summary>
+    public const float PrimaryPeakLobeAmp = 0.22f;
+
+    /// <summary>主峰彼此的最小间距（米）：两座主峰分开，不叠成一坨。</summary>
+    public const float PrimaryPeakMinSeparation = 300f;
+
+    /// <summary>主峰落位高度加成（米）：侵蚀会削顶，先按此量超填再靠「侵蚀后二次隆升」补足。</summary>
+    public const float PrimaryPeakOverbuild = 6f;
+
+    // ---- 低矮独立山（点缀全图：东北/西南/中部/东南皆可）----
+
+    /// <summary>独立山数量范围（座）：撒在山区带外围与平原上，避中心圆与图缘。
+    /// 批次六十九起按「到山区带的径向距离」衰减选点——除西北山区外，东北/西南/中部也落小山。</summary>
+    public const int LowHillCountMin = 12;
+    public const int LowHillCountMax = 20;
+
+    /// <summary>成簇丘陵的组数范围（组）：每组 2~4 座小山挨在一起，比均匀撒点更像天然丘陵群。</summary>
+    public const int LowHillClusterMin = 2;
+    public const int LowHillClusterMax = 4;
+
+    /// <summary>成簇丘陵的组内散布半径（米）。</summary>
+    public const float LowHillClusterSpread = 90f;
 
     /// <summary>独立山高度范围（米）：低矮可见但不成屏障（高处仍可能超行走坡限成景观）。</summary>
-    public const float LowHillHeightMin = 3f;
-    public const float LowHillHeightMax = 7f;
+    public const float LowHillHeightMin = 2f;
+    public const float LowHillHeightMax = 14f;
 
     /// <summary>独立山高斯锥半径范围（米）。</summary>
     public const float LowHillRadiusMin = 30f;
-    public const float LowHillRadiusMax = 80f;
+    public const float LowHillRadiusMax = 110f;
+
+    /// <summary>独立山落点的山区带排斥半径（米）：距西/北缘的较小距离小于此值即视为「已在山区」，
+    /// 落点概率按到该带的距离衰减（带内不落，带外越远越容易落）——西北留给峰群，其余方向点缀小山。</summary>
+    public const float LowHillBandAvoid = 300f;
+
+    /// <summary>独立山的最大允许地形坡度（度）：落点处现状坡角超此值即不叠山
+    /// （避免在陡坡上再堆锥、形成超过安息角的孤立尖刺）。</summary>
+    public const float LowHillMaxSiteSlopeDeg = 16f;
+
+    /// <summary>独立山的最大高宽比（高/半径）：按此比例限高——矮胖不尖刺，
+    /// 0.40 ≈ 22° 平均坡，既看得见起伏又不会在平原上戳出超安息角的孤峰。</summary>
+    public const float LowHillMaxAspect = 0.40f;
+
+    /// <summary>独立山落点对既有峰群的避让阈值（0-1）：落点的「峰群影响强度」
+    /// （所有峰的高斯包络最大值）超此值即视为已在山区，换点。
+    /// 用「离峰群远近」替代旧判据「东南象限」——东北/西南/中部只要有空档都能落小山。</summary>
+    public const float LowHillMaxPeakInfluence = 0.22f;
 
     // ---- 山脊连接（峰对之间未被河湖拦截才连）----
 

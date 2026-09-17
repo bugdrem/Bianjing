@@ -25,7 +25,8 @@ public class GoodsSystem
     public void TickDay(GameState gs)
     {
         var workersOf = BuildWorkerIndex(gs);
-        AgeAllInventories(gs);
+        // 批次九十五：库存计龄与时效推进移交 TimelinessSystem（每日 TickDay 内统一处理，
+        // 含建筑仓/村民背包/地面堆），本处不再重复遍历
 
         foreach (var c in gs.Citizens.Values)
         {
@@ -48,7 +49,8 @@ public class GoodsSystem
             }
 
             // 饮水：只扣家中存水（水不上市无处可买）；缺水暂不设惩罚，由储备阈值驱动居民去井/河边打水
-            home?.TakeGoods(Goods.Water, WaterPerDay);
+            // （批次九十五：按鲜度折算——馊水不顶渴，需取更多份数）
+            home?.Inv.ConsumeEffective(Goods.Water, WaterPerDay);
 
             ConsumeTierNeeds(gs, c, home, workersOf);
         }
@@ -69,7 +71,7 @@ public class GoodsSystem
             foreach (var id in need.GoodsIds)
             {
                 if (home != null)
-                    left -= home.TakeGoods(id, left);
+                    left -= home.Inv.ConsumeEffective(id, left); // 分级需求同样按鲜度折算（陈酒馔不顶用）
                 if (left > 0.0001)
                     left -= BuyGoods(gs, c, id, left, workersOf);
                 if (left <= 0.0001)
@@ -152,16 +154,8 @@ public class GoodsSystem
                 b.Inv.Stacks.Clear();
     }
 
-    /// <summary>全部库存计龄一天（建筑/背包/地面堆）：本批次仅记录，变质效果后期在 Inventory 上挂接。</summary>
-    private static void AgeAllInventories(GameState gs)
-    {
-        foreach (var b in gs.Buildings.Values)
-            b.Inv.AgeOneDay();
-        foreach (var c in gs.Citizens.Values)
-            c.Pack.AgeOneDay();
-        foreach (var p in gs.Piles.Values)
-            p.Inv.AgeOneDay();
-    }
+    // 批次九十五：原 AgeAllInventories（全库存计龄）已并入 TimelinessSystem.TickDay——
+    // 计龄与两根时间轴的推进在同一次遍历里完成，避免每日重复遍历三类 Inventory 持有者。
 
     /// <summary>建筑 Id → 在岗雇工列表（分货款/算产量用）。</summary>
     private static Dictionary<int, List<Citizen>> BuildWorkerIndex(GameState gs)
@@ -178,7 +172,8 @@ public class GoodsSystem
         return map;
     }
 
-    /// <summary>吃饭：先掏家中存粮（粮→果→野味），不够再上市购买；返回是否吃饱。</summary>
+    /// <summary>吃饭：先掏家中存粮（粮→果→野味），不够再上市购买；返回是否吃饱。
+    /// 批次九十五：家中存粮按鲜度折算有效量——陈粮要吃更多份才顶饱（囤积的时间成本由此体现）。</summary>
     private bool ConsumeFood(GameState gs, Citizen c, BuildingInstance home, Dictionary<int, List<Citizen>> workersOf)
     {
         double need = FoodPerDay;
@@ -186,7 +181,7 @@ public class GoodsSystem
         {
             foreach (var id in FoodOrder)
             {
-                need -= home.TakeGoods(id, need);
+                need -= home.Inv.ConsumeEffective(id, need);
                 if (need <= 0.0001)
                     return true;
             }
@@ -207,9 +202,10 @@ public class GoodsSystem
         double need = FuelPerDay;
         if (home != null)
         {
-            need -= home.TakeGoods(Goods.Wood, need);
+            // 批次九十五：柴薪按"燥度"折算——湿柴热量低，要烧更多份才够（烘干可恢复）
+            need -= home.Inv.ConsumeEffective(Goods.Wood, need);
             if (need > 0.0001)
-                need -= home.TakeGoods(Goods.Scrap, need); // 柴薪不足烧废料
+                need -= home.Inv.ConsumeEffective(Goods.Scrap, need); // 柴薪不足烧废料
         }
         if (need <= 0.0001)
             return true;
@@ -222,7 +218,8 @@ public class GoodsSystem
 
     /// <summary>
     /// 上市购买：从有存货的专营铺面直接买走（当日即耗，不再入家库），
-    /// 买价 = 基价 × 加价倍率；货款从买家家庭公产扣（另按商税率交税入官库），
+    /// 买价 = 零售单价（基价 × 买入加价 × 库存联动倍率，见 Goods.RetailPrice）；
+    /// 货款从买家家庭公产扣（另按商税率交税入官库），
     /// 卖方收款：官营入官库（批次七十五，俸禄制不回分账）、民营平分给铺面雇工家庭，无雇工则折入官库。
     /// 返回实际买到的份数。
     /// </summary>
@@ -232,16 +229,11 @@ public class GoodsSystem
         if (amount <= 0)
             return 0;
 
-        long unitPrice = (long)(Goods.PriceOf(goodsId) * Goods.BuyMarkup);
-        if (unitPrice <= 0)
-            return 0;
-        // 商税（批次七十五）：买家按成交额另付税入官库，可买量按含税价估算防超支
+        // 商税（批次七十五）：买家按成交额另付税入官库。
+        // 批次九十四：单价含库存联动倍率、各卖家不同价，故逐铺现算、逐铺扣钱，
+        // 不再开场估一个统一的「可买量」（那需要假设全场同价，与库存定价天然冲突）。
         double taxRate = gs.Taxes.TradeTaxRate;
-        long affordable = gs.FamilyMoney(c) / (long)(unitPrice * (1 + taxRate));
-        double want = Math.Min(amount, affordable);
-        if (want <= 0)
-            return 0;
-
+        long purse = gs.FamilyMoney(c);
         double bought = 0;
         foreach (var b in gs.Buildings.Values)
         {
@@ -250,7 +242,17 @@ public class GoodsSystem
             if (b.Specialty != goodsId && !b.ExtraGoods.Contains(goodsId)
                 && !(b.Def.Category == "official" && !b.Def.IsCourtBuyer && b.Def.ProduceGoods != ""))
                 continue;
-            double got = b.TakeGoods(goodsId, want - bought);
+
+            long unitPrice = Goods.RetailPrice(b, goodsId);
+            if (unitPrice <= 0)
+                continue;
+            // 余钱按含税价折算本铺可买量（防超支）
+            long affordable = purse / (long)Math.Max(1.0, unitPrice * (1 + taxRate));
+            double want = Math.Min(amount - bought, affordable);
+            if (want <= 0)
+                continue;
+
+            double got = b.TakeGoods(goodsId, want);
             if (got <= 0)
                 continue;
 
@@ -258,6 +260,7 @@ public class GoodsSystem
             // 批次八十七：四舍五入（旧版 long 截断——小额交易税 <1 文直接归零，商税档位名存实亡）
             long tax = (long)Math.Round(pay * taxRate, MidpointRounding.AwayFromZero);
             gs.TakeFromFamily(c, pay + tax); // 货款 + 商税由家庭公产支付
+            purse -= pay + tax;
             if (tax > 0)
             {
                 gs.Money += tax;
@@ -272,8 +275,10 @@ public class GoodsSystem
             }
             else if (workersOf.TryGetValue(b.Id, out var staff) && staff.Count > 0)
             {
-                foreach (var w in staff)
-                    gs.PayToFamily(w, pay / staff.Count);
+                // 批次九十四：末位雇工收除不尽余数（旧版逐人 pay/人数 平摊，余数凭空消失）
+                long share = pay / staff.Count;
+                for (int i = 0; i < staff.Count; i++)
+                    gs.PayToFamily(staff[i], i == staff.Count - 1 ? pay - share * (staff.Count - 1) : share);
             }
             else
             {
@@ -282,7 +287,7 @@ public class GoodsSystem
             }
 
             bought += got;
-            if (bought >= want - 0.0001)
+            if (bought >= amount - 0.0001)
                 break;
         }
         return bought;

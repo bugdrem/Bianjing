@@ -15,6 +15,33 @@
 - 动画走 `SetBonePose`（骨架自有通道）：组合为 rest*pose，pose 取纯旋转时绕 rest 原点旋转（正好作支点）。**不要**直接改 Bone 节点旋转（无 Bone 节点可改）。
 - 村民/NPC 已用此方案：Skeleton3D + 5 根骨（root→spine→{head,armL,armR}），代码驱动 4 段动作（idle/walk/carry/working），无 AnimationPlayer。
 
+## 地图生成与渲染架构（批次九十三起，权威描述在 specs/DESIGN.md）
+- 水系 = 汇流求解制：`FlowRouter`（Priority-Flood 填洼 + D8 + 汇流累积，路由格 2m）→ `RiverNetwork`（河宽∝√面积、Chaikin、蛇曲、**河口外推 56m 出图**）→ `LakeGenerator`（洼地塘 + 三档选址湖 3~6 座）→ `RiverGenerator.BuildWaterSystem`（水位拓扑单趟取 max 回灌、河床按离岸距离 1.0~3.5m）。改水系参数去 `WaterConfig`，别恢复旧「草图引导线」方案。
+- 山体：2 座 88~105m 主峰（谐波锥 + 侵蚀后 `ReapplyPrimaryPeaks` 补削顶），MaxTerrainHeight=110 / MinTerrainHeight=−5；小山按 `PeakInfluence` 远离峰群选址（不是象限判据）。
+- 渲染：`GridRenderer` 只是协调器（脏标 + 预算仲裁 12+32 + 裙板），内容在 `scripts/map/layers/` 六图层（Terrain/Water/Road/Vegetation/Building/Overlay，基类 MapLayer）；分块几何走 `ChunkGeometryBuilder` 单趟遍历产出 `ChunkGeometry` 缓冲再分发 `ApplyChunk`。**图层不订阅 EventBus、不写 _Process**（预算会翻六倍）。新增地表内容层时：缓冲加进 ChunkGeometry、产出加进 Builder、分发加进 GridRenderer.RebuildChunk。
+
+## 经济循环（实现版摘要，权威文档 = specs/ECONOMY.md）
+- 钱在「外部注入 → 官库 → 村民家庭 → 铺面/工坊 → 回流官库」闭环内转；货在「自然 → 原料 → 中间品 → 成品 → 消费」单向流。
+- **三条守恒律**（历批次反复修的坑）：① 官库该付的钱一律「先发放、按实扣款」(`GameState.PayBuildWages`，无人领则留官库)；② 家庭该交的钱一律实扣公产、不足少收 (`TakeFromFamily`/`TakeLandTax`)；③ **价只有一个出口**——只取 `Goods.PriceOf`(基价) / `Goods.RetailPrice`(基价×1.5×库存倍率，家庭零买) / `Goods.BuyerPrice`(基价×库存倍率，买方为铺面/工坊)，任何调用点不得自己乘倍率（各写各的正是「同货不同价」的成因）。
+- **库存联动定价（批次九十四已接线）**：`Goods.FactorOf` = `StockPriceFactor(整仓占用率 Inv.Total/Inv.Capacity)`；档位 ≥95% ×0.7 / ≥80% ×0.9 / ≤20% ×1.1。容量≤0 的非贸易建筑取平价（否则 0% 占用被误判缺货加价）。此前 `StockPriceFactor` 全项目零调用、售价恒定。
+- **商税两种征法**：买方为居民 → 买方家庭按成交额另付；**买方为建筑** → `GameState.PayFromBuildingTaxed` 代扣（恒等式「买方出资 = 卖方所得 + 官库税收」，买方付不足按比例缩放、卖方不倒贴）。朝廷采购与外贸进出口不征。
+- 工资分制：`official`/`field` 发固定月俸（旬记 `WagesOwed`、月结发）；`grown` 店坊不发固定工钱（靠售货分账 `PayToBuilding`）**且自负进料货款——名义雇工、实质≈合伙人**；`court` 衙门俸禄由朝廷凭空出（不占官库）。
+- 仍未做：分品类库存定价（现用整仓占用率，满仓废料会连带折价卖铁器）；外贸按基价平价（不受城内库存倍率影响）；农田开垦 0 成本；朝廷采购无配额。
+- 旧 `.qoder/specs/req.md` 需求稿已废（「交易链单向不可跨级」「商铺加工」「黄金货币」等均不再成立）。
+
+## 物品时效系统（批次九十五起，权威文档 = specs/TIMELINESS.md）
+- 双时间轴：**软轴 Fresh**（0~100，三阶段 全效果≥60 / 渐损 15~60 / 已失效<15，失效后"可作他用"）+ **硬轴 Lifespan**（归零即消亡或降级为 `Goods.Scrap`）。两轴**独立计时**。
+- `TimedState` **只存三个客观量**：`Fresh` / `UsedLifespan` / `RenewCount`。`Span` 与衰减速率**一律现算**（`TimedRules.Resolve`）——环境会实时改阈值，存派生量会失真、且季节切换要全城改写。剩余天数必须 `max(0, Span - Used)` 夹紧。
+- **效果打折 = 消耗时有效量折算**：`有效量 = 取用量 × EffectOf(Fresh)`。一处改动同时覆盖粮食与柴薪（湿柴要烧双份）。折算系数 <0.02 的批次不参与正常消耗（防除零放大取用量）。
+- **环境修正走可注册接口**（`ITimedModifier` + `TimedRegistry`，乘算累积，基准 = 露天+春季）。新增地窖/熏房/冰鉴只需一个类 + 一行注册，衰减器不动。
+- **合并键不含环境，且用"已耗寿限"而非"剩余寿限"**：`SameBand` = 鲜度档(10点) + 已耗寿限档(30日) + 翻新次数。理由——剩余是派生量（随搬家变，当键会拆散同批货）；衰减速率只取决于当前储存点与季节，故"露天坏得快"会**自然沉淀到 `Fresh` 数值**里自动落档分开，无需环境标签、也无需季节变化时重新分批。
+- **翻新 = 带代价的恢复**（用户举例定的）：恢复鲜度但 `寿限 ×0.65^n`、`衰减 ×1.8^n` 复合叠加，递减收益自然涌现，**不需要额外规则禁止无限回锅**。
+- **搬运必须保状态**（`TakeBatch`→`StoreBatch`），否则"露天搬进仓库"这条核心玩法会在半路丢失损耗。生产端（收获/加工/开局赠送）走全新状态无需改。
+- 坑：**`GoodsStack.Fresh` 的字段初始化器 `= 100f` 不可省**（旧档缺字段时保留 100，默认 0 会让全部库存瞬间"已失效"）；**`const bool` 配置开关会被编译器折叠**致关闭分支报 CS0162，须用 `static readonly`。
+- ⚠️ **道路状态必须走稀疏字典**：`Cell` 是 struct 且活在 100 万格 dense 数组（`MapGrid`）里，**不能加字段**。
+- 时间尺度：**1 游戏日 = 20 秒现实**（1 旬=60 秒=3 日、1 月=3 分钟、1 年=36 分钟）。调时效数值必先按此换算，否则玩家来不及反应。
+- 批次①（内核+货品）已完成；②房屋+道路、③植物/动物/人、④恢复动作+NPC 自救+配方状态条件 待办。
+
 ## 建筑造型
 - `BuildingModelFactory`：纯代码宋代轮廓造型（地基/半透房体/三棱柱坡顶/檐口/屋脊/立柱/招幌/灯笼），按 Category/占地/等级拆角色，供 GridRenderer 多 MultiMesh 与 BuildController 预览同源复用。
 - 阶段 C 资产管线：`BuildingDef.ModelPath` + `BuildingAssetLoader`（glb 加载缓存 + 自动贴合占地层高），GridRenderer 对 HasModel 建筑走此路径，缺失则回退原始体。

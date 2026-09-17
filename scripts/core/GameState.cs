@@ -563,9 +563,10 @@ public class GameState
     {
         RemovePlantAt(c);
         // 扩地格上的地面物资堆并入建筑仓（超限也全收，不散佚），免得永久压在房底下
+        // （批次九十五：连时效状态一起并入，露天堆了半月的货进仓后仍是"半旧"）
         if (Piles.Remove(CellIndex(c), out var pile) && Buildings.TryGetValue(buildingId, out var owner))
             foreach (var s in pile.Inv.Stacks)
-                owner.StoreGoodsForce(s.GoodsId, s.Amount);
+                owner.Inv.StoreForceBatch(s.GoodsId, s.Amount, s.State);
         // 并入的若是自家小路环格：先清道路再纳入占地（避免占地格残留 HasRoad）
         ref var lane = ref Map.CellAt(c);
         if (lane.HasRoad)
@@ -905,11 +906,13 @@ public class GameState
         if (!Piles.TryGetValue(CellIndex(c), out var pile))
             return;
         // 逐堆搬入（列表快照：搬空的堆会从原库存移除）
+        // 批次九十五：搬运时把原批的时效状态一并带过去（TakeBatch→StoreBatch），
+        // 否则"从露天搬进仓库"这条核心玩法会在半路丢失物品的鲜度与已耗寿限
         foreach (var s in pile.Inv.Stacks.ToArray())
         {
-            double got = pile.Inv.Take(s.GoodsId, into.Free);
+            double got = pile.Inv.TakeBatch(s.GoodsId, into.Free, out var st);
             if (got > 0)
-                into.Store(s.GoodsId, got);
+                into.StoreBatch(s.GoodsId, got, st);
         }
         if (pile.Inv.IsEmpty)
             Piles.Remove(CellIndex(c));
@@ -1139,6 +1142,44 @@ public class GameState
         }
         PayToFamily(to, paid);
         return paid;
+    }
+
+    /// <summary>
+    /// 买方为建筑、卖方为居民的带税结算（批次九十四）：买方按「货款 + 商税」出资，
+    /// 货款归卖方、商税入官库 —— 补上「工坊→商铺」进货与铺面向居民收货两处此前完全不征商税的环节。
+    ///
+    /// 为什么从买方出资、而非向买方另征：买方是建筑，民营铺面的钱其实在雇工家庭手里（见 PayFromBuilding）。
+    /// 先把含税总额付给卖方、再从卖方收回税款，账目只有一条恒等式：
+    ///     买方出资 gross = 卖方所得 net + 官库税收 realTax  （资金守恒）
+    /// 若改成「买方只付净额，另向买方加征一笔税」，官营买方会变成官库给自己交税（收付相抵、形同无税），
+    /// 民营买方还要二次向同一批雇工家庭扣款，既绕又与「付不出」判定混淆。
+    ///
+    /// 买方实付不足时按同比例拆分（税随交易规模缩放，卖方不倒贴）；实付少到不足 1 文净得时免这一笔税，
+    /// 免把卖方扣成零。返回实付给卖方的货款（不含税），调用方按此记账。
+    /// </summary>
+    public long PayFromBuildingTaxed(BuildingInstance b, Citizen to, long goodsValue, double taxRate)
+    {
+        if (goodsValue <= 0)
+            return 0;
+        long tax = taxRate > 0
+            ? (long)Math.Round(goodsValue * taxRate, MidpointRounding.AwayFromZero)
+            : 0;
+        long gross = goodsValue + tax;
+        long paid = PayFromBuilding(b, to, gross); // 买方按含税总额出资，钱先到卖方手里
+        if (paid <= 0)
+            return 0;
+        // 按实付比例拆分：正常即 net=goodsValue、realTax=tax；买方付不足则等比缩放
+        long net = paid >= gross ? goodsValue : (long)((double)paid * goodsValue / gross);
+        if (net < 1)
+            net = paid; // 买家出钱太少：全归卖方，这一笔免征
+        long realTax = paid - net;
+        if (realTax > 0)
+        {
+            TakeFromFamily(to, realTax); // 收回多付的税（刚入账，必有钱）
+            Money += realTax;
+            Ledger.Add("商税", realTax);
+        }
+        return net;
     }
 
     /// <summary>卖方建筑收款（居民向建筑买货）：官营一律入官库记账（批次七十二：此前有员工时钱全分给员工家庭，

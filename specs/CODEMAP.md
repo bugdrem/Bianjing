@@ -22,11 +22,15 @@
 |---|---|---|
 | 网格 + 单元 | `MapGrid` / `Cell` | `scripts/map/MapGrid.cs` · `Cell.cs` |
 | 顶点高度场（灰度地图） | `HeightField` | `scripts/map/HeightField.cs` |
-| 地形生成管线（草图→侵蚀→河湖） | `WorldGenerator` / `WorldSketch` / `HydraulicEroder` / `ValueNoise` | `scripts/map/` |
-| 河流 / 湖泊 / 河床下压 | `RiverGenerator` + `WaterConfig` | `scripts/map/RiverGenerator.cs` · `configs/WaterConfig.cs` |
+| 地形生成管线（草图→侵蚀→主峰补回→水系） | `WorldGenerator` / `WorldSketch` / `HydraulicEroder` / `ValueNoise` | `scripts/map/` |
+| 水系汇流求解（填洼/D8/汇流累积） | `FlowRouter` + `FlowField` | `scripts/map/FlowRouter.cs` |
+| 河网走线（选源/蛇曲/河口外推） | `RiverNetwork` + `RiverPath` | `scripts/map/RiverNetwork.cs` |
+| 湖泊生成（洼地塘 + 三档选址湖） | `LakeGenerator` + `LakeShape` | `scripts/map/LakeGenerator.cs` |
+| 河/湖刻盘（水位/河床下压） | `RiverGenerator.BuildWaterSystem` + `WaterConfig` | `scripts/map/RiverGenerator.cs` · `configs/WaterConfig.cs` |
 | 植被生成 | `TreeGenerator` + `PlantConfig` | `scripts/map/TreeGenerator.cs` · `configs/PlantConfig.cs` |
 | 道路寻路图 | `RoadNetwork` + `MovementConfig` | `scripts/map/RoadNetwork.cs` · `configs/MovementConfig.cs` |
-| 分块增量渲染器 | `GridRenderer`（64×64 分块 + 脏标） | `scripts/map/GridRenderer.cs` |
+| 渲染协调器（脏标 + 预算仲裁 + 裙板） | `GridRenderer` | `scripts/map/GridRenderer.cs` |
+| 渲染六图层（地形/水/路/植被/建筑/叠加） | `TerrainLayer`/`WaterLayer`/`RoadLayer`/`VegetationLayer`/`BuildingLayer`/`OverlayLayer`（基类 `MapLayer`）+ `ChunkGeometryBuilder`/`LayerKit` | `scripts/map/layers/` |
 | 动物 / 物资堆 / 屋内库存 渲染 | `AnimalRenderer` / `PileRenderer` / `BuildingStockRenderer` | `scripts/map/` |
 | 货品配色 | `GoodsColors` | `scripts/map/GoodsColors.cs` |
 | 卷轴背景 | `ScrollBackdrop` / `RenderLayers` | `scripts/render/` |
@@ -68,10 +72,14 @@
 | 业务概念 | 代码实体 | 位置 |
 |---|---|---|
 | 货币换算与显示 | `CurrencyConfig` / `CurrencyHelper` | `scripts/configs/CurrencyConfig.cs` · `core/CurrencyHelper.cs` |
-| 货品 / 基价 / 配方 / 库存联动定价 | `Goods`（+ `Goods.Recipes`） | `scripts/sim/Goods.cs` |
+| 货品 / 基价 / 配方 | `Goods`（+ `Goods.Recipes`） | `scripts/sim/Goods.cs` |
+| 定价三出口（基价 / 零售 / 批发）+ 库存联动倍率 | `Goods.PriceOf` · `Goods.RetailPrice` · `Goods.BuyerPrice` · `Goods.StockPriceFactor` · `Goods.FillRateOf` | `scripts/sim/Goods.cs` · 档位见 `configs/EconomyConfig.cs` |
 | 配方三级化 | `RecipeDef` + `Goods.InputsAt/FuelAt/ByproductAt` | `scripts/sim/RecipeDef.cs` |
-| 统一仓储（建筑仓/背包/地面堆） | `Inventory` / `GoodsStack` | `scripts/sim/Inventory.cs` |
+| 统一仓储（建筑仓/背包/地面堆） | `Inventory` / `GoodsStack`（按属性分批，同档才并堆） | `scripts/sim/Inventory.cs` |
+| **物品时效系统**（新鲜度软轴 + 有效期硬轴） | `TimedState` / `TimedRules` / `TimedRegistry` / `TimedModifier` / `TimelinessSystem` | `scripts/sim/timeliness/` · 阈值见 `configs/TimelinessConfig.cs` · 设计见 `specs/TIMELINESS.md` |
+| 时效环境修正源（位置/季节/临水，可注册扩展） | `ITimedModifier` 实现类 + `TimedRegistry.Register` | `scripts/sim/timeliness/TimedRegistry.cs` |
 | 家庭消费 / 市场 / 分级需求 | `GoodsSystem` + `EconomyConfig` | `scripts/sim/GoodsSystem.cs` · `configs/EconomyConfig.cs` |
+| 商税代扣（买方为建筑） | `GameState.PayFromBuildingTaxed` | `scripts/core/GameState.cs` |
 | 加工链（工坊专营） | `CraftingSystem` | `scripts/sim/CraftingSystem.cs` |
 | 官库 / 月俸 / 朝廷粮饷 / 开基 | `EconomySystem` | `scripts/sim/EconomySystem.cs` |
 | 老化 / 修缮（官修 + 私宅集资） | `MaintenanceSystem` | `scripts/sim/MaintenanceSystem.cs` |
@@ -121,10 +129,11 @@
 | 配置类 | 业务归属 | 关键内容 |
 |---|---|---|
 | `WorldConfig` | 道路/桥造价与宽、抬升/地基、开局资源、记录上限 | 主路 18 文/延米宽 4、辅路 10/宽 2、桥 30/宽 4；路面抬升 0.1m、地基深 1m；建筑抬升 0.1m/地基 2m；拱顶 1m、桥体厚 0.2m、引桥 3 格；白边 10m；开局钱 100000/粮 500；履历 40、公告 200 |
-| `TerrainConfig` | 高度场生成 / 坡度 / 垫基 / 采集豁免 | 步高 0.5m、坡度 30°、垫基高差 1m；海拔 [-3,64]m；草图 128²；峰 10~14 座 30~62m；侵蚀 25 万滴；热侵蚀安息角≈33°；采集豁免 4.5m |
-| `WaterConfig` | 河流湖泊 | 河 4~6 条；源头宽 6→河口 20（支 12）；外扩 0.7m；河床下压；湖 1~2 座、成湖水位 ≤1.5m、半径 30~52 |
-| `TimeConfig` | 日历 / 作息 | 24h/12 天/12 月；1 游戏时≈0.833 秒；上工 6~18 时；轮休 5 天（旬历：月=3 旬、旬=1 分钟，批次九十一） |
-| `EconomyConfig` | 货担/价差/消耗/产能/税制（文） | 一担 5 份、买价 ×1.5；官粮 0.05/人/旬、朝廷粮饷 3/人/月、田赋 0.1；口粮 0.2333/柴 0.07/水 0.2333 份/人/旬；加工 1.8667 份/工/旬；家计 200 文/人/月；老化 0.7/月；土地税 1~10%(默认3%)/商税 2~15%(默认5%)/人口税 20%；安家银 100000、月俸 8000 |
+| `TerrainConfig` | 高度场生成 / 坡度 / 垫基 / 采集豁免 | 步高 0.5m、坡度 30°、垫基高差 1m；海拔 [-5,110]m；草图 128²；主峰 2 座 88~105m（半径 160~210m）；小山 12~20 座 2~14m 成簇；侵蚀 25 万滴；热侵蚀安息角≈33°；采集豁免 4.5m |
+| `WaterConfig` | 河网 / 湖泊 / 河床 | 路由格 2m；河道 ≥45 汇流格、≤13 条；河宽 0.075×√汇流面积（5~34m）；蛇曲波长 210m；河口外推 56m×展宽 2.1；湖 3~6 座（大 70~110 / 中 32~58 / 小 12~26m）、总水面 5.5% 封顶；河床深 1.0~3.5m 按离岸距离；水面外扩 0.7m |
+| `TimeConfig` | 日历 / 作息 | 24h/日 · 3 旬/月 · 12 月/年（1 游戏日 = 20 秒现实、1 旬 = 1 分钟、1 年 = 36 分钟）；上工 6~18 时；轮休 2 旬 |
+| `TimelinessConfig` | **物品时效**（软/硬双轴阈值与全部倍率） | 软轴阶段 60 / 15；分档鲜度 10 点、寿限 30 日；翻新惩罚 寿限 ×0.65^n、速率 ×1.8^n；位置 有顶 ×0.45速率/×1.6寿限；季节 夏 ×1.6 / 秋 ×0.85 / 冬 ×0.55；临水 ×1.35/×0.9；硬轴归零转废料 0.3；货品基线 野味 10 日 / 烧饼 15 日 / 果品 24 日 / 粮食 120 日（硬轴 480）/ 柴薪 240（无硬轴），未登记即不腐 |
+| `EconomyConfig` | 货担/价差/库存定价/消耗/产能/税制（文） | 一担 5 份、零售加价 ×1.5；库存定价档位 ≥95% ×0.7 / ≥80% ×0.9 / ≤20% ×1.1；官粮 0.05/人/旬、朝廷粮饷 3/人/月、田赋 0.1；口粮 0.2333/柴 0.07/水 0.2333 份/人/旬；加工 1.8667 份/工/旬；家计 200 文/人/月；老化 0.7/月；土地税 1~10%(默认3%)/商税 2~15%(默认5%)/人口税 20%；安家银 100000、月俸 8000 |
 | `PopulationConfig` | 迁入/婚配/生育/交友/迁出（旬频） | 迁入 0.2333/旬（四类权重 归民0.35/寓商0.30/散勇0.20/客士0.15）；婚配 0.0233/旬、生育 0.007/旬、交友 0.0233/旬；无家 6 月迁出；拥挤 0.15/月；自建门槛 5000、分家公产 1500、空房继承 1000/600 |
 | `LifeConfig` | 年龄门槛 / 死亡曲线 | 成年 16、老年 60、婚配上限 50、生育上限 45；退休 50/家族产业 60；Gompertz 年死亡率 0.005+0.03×e^((age-55)/8)；最大寿数 120 |
 | `GrowthConfig` | 坊区生长 / 吸引力 | 小路环 1 格；基价 20、地价 5/分；打分 主3/辅2/河道1.5/邻居1.2×3栋；阈值 3、抽签幂 2；升级 0.02/日（完好≥60、吸引力1.2/级）；工商占比封顶 0.3；转业 0.03/日；吸引力 主1.0/辅0.4÷16、半径 12 |
@@ -151,7 +160,7 @@
 |---|---|
 | `scripts/core/` | 骨架：`GameState`/`EventBus`/`GameClock`/`GamePaths`/`GameSettings`/`Ledger`/`NewsItem`/`Milestones`/`CurrencyHelper` |
 | `scripts/configs/` | 全部常量与公式（21 个静态类） |
-| `scripts/map/` | 网格/地形/水系/植被/道路/渲染（`GridRenderer`/`AnimalRenderer`/`PileRenderer`/`BuildingStockRenderer`/`GoodsColors`） |
+| `scripts/map/` | 网格/地形/水系/植被/道路/渲染（`FlowRouter`/`RiverNetwork`/`LakeGenerator`/`GridRenderer` 及 `layers/` 六图层/`AnimalRenderer`/`PileRenderer`/`BuildingStockRenderer`/`GoodsColors`） |
 | `scripts/render/` | 宋风模型工厂 / 卷轴背景 / 渲染图层 |
 | `scripts/build/` | 建造：`BuildingDef`/`BuildingInstance`/`BuildController`/`PlacementValidator`/`BuildingAssetLoader` |
 | `scripts/citizens/` | `Citizen`/`Family`/`LifecycleSystem`/`JobSystem`/`NameGenerator` |

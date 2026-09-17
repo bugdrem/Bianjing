@@ -8,14 +8,14 @@ namespace Bianjing;
 /// 128² 内存草图（世界生成第一步，仅存在于生成期）：先在低分辨率上定宏观大势，
 /// 再由 WorldGenerator 上采样映射到 1025² 顶点高度场。步骤：
 /// ① 趋势场——西北高东南低的对角线性梯度 + 低幅 fBm 平原缓起伏；
-/// ② 峰点——西北半包围带撒随机高度峰点（峰心距任一图缘 ≥ 峰半径，山体不贴图缘；避中心圆），高斯锥取高叠加；
-/// ③ 山脊——近邻峰对之间连线抬脊（鞍部下凹 + 沿脊起伏），群山连绵不成孤包；
-/// ④ 低矮独立山——山区带之外（中部/东南）撒零星山包，不连脊；
-/// ⑤ 草图级水力侵蚀收尾；
-/// ⑥ 河流定线（批次六十一起）：侵蚀后沿最陡下降走线，只存路径不压地形——
-///    预览画线所见即所得，RiverGenerator 把定线放大为引导线在成品地形上循坡细化。
-/// 批次五十~六十草图不规划河湖（不压谷/不压湖盆）——地形生成保持纯粹，
-/// 水系走线只记录路径，不写高度场。
+/// ② 主峰——西北山区带内撒 1~2 座极高主峰（角向谐波破圆锥对称，成山汇），鹤立鸡群；
+/// ③ 普通峰点——西北半包围带撒随机高度峰点，高斯锥取高叠加；
+/// ④ 山脊——近邻峰对之间连线抬脊（鞍部下凹 + 沿脊起伏），群山连绵不成孤包；
+/// ⑤ 低矮丘陵——按「远离既有峰群」选点成簇撒布（东北/西南/中部/东南都落），带两道坡度守卫；
+/// ⑥ 草图级水力侵蚀收尾；
+/// ⑦ 示意河网——在草图上跑一遍轻量 FlowRouter+RiverNetwork，仅供新游戏预览画蓝线。
+/// 批次六十九：草图不再规划水系实体（河湖改在成品地形上按真实汇流求解，见 RiverGenerator），
+/// 草图只负责山形；示意河网只画预览、不参与地形，且放在最后执行（不消耗影响地形的 rng）。
 /// 坐标单位=草图格（1 格 = SketchScale 米），高度单位=米。
 /// </summary>
 public class WorldSketch
@@ -26,146 +26,28 @@ public class WorldSketch
     /// <summary>草图高度（米，行主序 y*S+x）。</summary>
     public float[] H;
 
-    /// <summary>峰点（草图坐标 + 峰高）：山脊连接与河源定位（峰间鞍部）共用。</summary>
-    public List<(Vector2 pos, float h)> Peaks = new();
+    /// <summary>峰点（草图坐标 + 峰高 + 高斯锥半径草图格数）：山脊连接与丘陵避让共用。</summary>
+    public List<(Vector2 pos, float h, float r)> Peaks = new();
 
-    /// <summary>河流定线（草图坐标点列，8 邻连续）：供预览画线与全图循坡细化（×8 放大为引导线）。</summary>
-    public List<List<Vector2I>> Rivers = new();
+    /// <summary>主峰（草图坐标 + 目标峰高 + 半径米）：WorldGenerator 侵蚀后据此二次隆升补回削顶。</summary>
+    public List<(Vector2 pos, float h, float rMeters)> PrimaryPeaks = new();
 
-    /// <summary>已定河流路径格（全部河的并集）：后定之河踩线即汇流终止，防路径交叉。</summary>
-    private readonly HashSet<int> _riverCells = new();
+    /// <summary>示意河网（草图格点列）：仅供新游戏预览画蓝线；与成品水系同源算法，但分辨率仅 8m/格。</summary>
+    public List<List<Vector2I>> PreviewRivers = new();
 
-    /// <summary>构建草图：按 ①→⑥ 顺序执行（纯内存数据，可在后台线程运行）。</summary>
+    /// <summary>构建草图：按 ①→⑦ 顺序执行（纯内存数据，可在后台线程运行）。</summary>
     public static WorldSketch Build(Random rng)
     {
         var sk = new WorldSketch { H = new float[S * S] };
         sk.LayTrendAndPlain(rng);
+        sk.ScatterPrimaryPeaks(rng);
         sk.ScatterPeaks(rng);
         sk.LinkRidges(rng);
         sk.ScatterLowHills(rng);
         // 草图级侵蚀：小规模水滴冲刷宏观形态（笔刷半径 1，分辨率低无需摊开）
         HydraulicEroder.Erode(sk.H, S, TerrainConfig.ErodeDropletsSketch, 1, rng);
-        sk.WalkRivers(rng); // ⑥ 河流定线：侵蚀完成后循坡走线（只存路径，不压地形）
+        sk.TracePreviewRivers(rng); // ⑦ 示意河网：放在最后，不消耗影响地形的 rng
         return sk;
-    }
-
-    // ---- ⑥ 河流定线（批次六十一：预览所见即所得，全图循坡细化）----
-
-    /// <summary>河流定线：峰间鞍部取源（海拔降序，RiverCount 条），逐条循坡走线至图缘；
-    /// 路径格互相视为水体（后河撞前河即汇流）。只存路径不压地形。</summary>
-    private void WalkRivers(Random rng)
-    {
-        var sources = PickSources(rng);
-        foreach (var src in sources)
-        {
-            var path = TracePath(src);
-            if (path.Count < WaterConfig.MinRiverPathCells / (int)Scale)
-                continue; // 过短弃线（同全图语义：不足 MinRiverPathCells 世界格）
-            Rivers.Add(path);
-            foreach (var p in path)
-                _riverCells.Add(p.Y * S + p.X);
-        }
-    }
-
-    /// <summary>河源候选：每峰与最近邻峰的中点（鞍部），按草图海拔降序取 RiverCount 条。</summary>
-    private List<Vector2I> PickSources(Random rng)
-    {
-        var candidates = new List<Vector2>();
-        for (int i = 0; i < Peaks.Count; i++)
-        {
-            float bestD = float.MaxValue;
-            Vector2 mid = default;
-            for (int j = 0; j < Peaks.Count; j++)
-            {
-                if (j == i) continue;
-                float d = Peaks[j].pos.DistanceTo(Peaks[i].pos);
-                if (d < bestD)
-                {
-                    bestD = d;
-                    mid = (Peaks[i].pos + Peaks[j].pos) / 2f;
-                }
-            }
-            // 候选间距 ≥ 40 世界格（同全图语义），防源点扎堆
-            if (bestD < float.MaxValue && candidates.TrueForAll(s => s.DistanceTo(mid) > 40f / Scale))
-                candidates.Add(mid);
-        }
-        candidates.Sort((a, b) =>
-            H[(int)b.Y * S + (int)b.X].CompareTo(H[(int)a.Y * S + (int)a.X])); // 海拔高者先走（成干流）
-
-        int count = Math.Min(candidates.Count,
-            WaterConfig.RiverCountMin + rng.Next(WaterConfig.RiverCountMax - WaterConfig.RiverCountMin + 1));
-        var sources = new List<Vector2I>();
-        for (int i = 0; i < count; i++)
-            sources.Add(new Vector2I(
-                Math.Clamp((int)candidates[i].X, 1, S - 2),
-                Math.Clamp((int)candidates[i].Y, 1, S - 2)));
-        return sources;
-    }
-
-    /// <summary>单条走线（草图格中心高上循坡）：8 邻取未访问的最低格；洼地/平地向东南强制滑行
-    /// （维持西北→东南大势，不设上限——必达图缘，河流不在中途断流）；踩到既有河线即汇流终止；出图缘终止。</summary>
-    private List<Vector2I> TracePath(Vector2I source)
-    {
-        var path = new List<Vector2I>();
-        var visited = new HashSet<int>();
-        int x = source.X, y = source.Y;
-
-        for (int step = 0; step < S * 4; step++)
-        {
-            if (x < 1 || y < 1 || x >= S - 1 || y >= S - 1)
-            {
-                path.Add(new Vector2I(x, y));
-                break; // 出图缘：河口
-            }
-            var cur = new Vector2I(x, y);
-            path.Add(cur);
-            visited.Add(y * S + x);
-
-            // 汇流检测（离源 4 步后才检——4 草图格≈32m，同全图 32 格语义，防源头自撞）
-            if (step > 4 && _riverCells.Contains(y * S + x))
-                break;
-
-            // 8 邻中选未走过的最低格（前河路径格视为水体，不入候选）
-            int bx = 0, by = 0;
-            float bestH = float.MaxValue;
-            for (int oy = -1; oy <= 1; oy++)
-            {
-                for (int ox = -1; ox <= 1; ox++)
-                {
-                    if (ox == 0 && oy == 0) continue;
-                    int nx = x + ox, ny = y + oy;
-                    if (nx < 0 || ny < 0 || nx >= S || ny >= S
-                        || visited.Contains(ny * S + nx) || _riverCells.Contains(ny * S + nx))
-                        continue;
-                    float h = H[ny * S + nx];
-                    if (h < bestH)
-                    {
-                        bestH = h;
-                        bx = ox; by = oy;
-                    }
-                }
-            }
-            float curH = H[y * S + x];
-            if (bestH >= curH - 0.0001f)
-            {
-                // 洼地/平地：向东南强制滑行（东/东南/南三邻取最低），维持大势；不设上限——必达图缘
-                bx = 1; by = 1;
-                float hE = H[y * S + x + 1];
-                float hS = H[(y + 1) * S + x];
-                float hSE = H[(y + 1) * S + x + 1];
-                if (hE <= hS && hE <= hSE && !visited.Contains(y * S + x + 1)) { bx = 1; by = 0; }
-                else if (hS <= hSE && !visited.Contains((y + 1) * S + x)) { bx = 0; by = 1; }
-            }
-            if (bx == 0 && by == 0)
-            {
-                // 前向三邻全堵（visited/河线围困）：强行向东南，必达图缘
-                bx = 1; by = 1;
-                if (visited.Contains(y * S + x + 1) || _riverCells.Contains(y * S + x + 1)) { bx = 0; by = 1; }
-                else if (visited.Contains((y + 1) * S + x) || _riverCells.Contains((y + 1) * S + x)) { bx = 1; by = 0; }
-            }
-            x += bx; y += by;
-        }
-        return path;
     }
 
     // ---- ① 趋势场 + 平原缓起伏 ----
@@ -186,7 +68,92 @@ public class WorldSketch
         }
     }
 
-    // ---- ② 峰点撒布（西北半包围带，离图缘留边）----
+    // ---- ② 主峰（一两张王牌，突破普通峰高上限）----
+
+    /// <summary>在山区带内撒主峰：拒绝采样（带内、避中心圆、主峰间留 PrimaryPeakMinSeparation），
+    /// 峰高按 PrimaryPeakHeight 抽取并<b>超填</b> PrimaryPeakOverbuild——侵蚀会削顶，
+    /// 由 WorldGenerator 在侵蚀后按 PrimaryPeaks 二次隆升补回。
+    /// 形体用「角向谐波高斯锥」（RaiseLobedCone）：半径随方位角做 3 阶 + 2 阶谐波调制，
+    /// 长出山脊凸出与沟谷凹入，不再是俯视图里一眼假的完美圆锥。</summary>
+    private void ScatterPrimaryPeaks(Random rng)
+    {
+        float bandCells = TerrainConfig.MountainBandDepth / Scale;
+        float exclCells = TerrainConfig.CenterExclusionRadius / Scale;
+        float sepCells = TerrainConfig.PrimaryPeakMinSeparation / Scale;
+        var center = new Vector2(S / 2f, S / 2f);
+
+        for (int i = 0; i < TerrainConfig.PrimaryPeakCount; i++)
+        {
+            float rMeters = Mathf.Lerp(TerrainConfig.PrimaryPeakRadiusMin, TerrainConfig.PrimaryPeakRadiusMax,
+                (float)rng.NextDouble());
+            float rCells = rMeters / Scale;
+            float margin = rCells * TerrainConfig.PeakEdgeMarginFactor;
+
+            Vector2 pos = default;
+            bool ok = false;
+            for (int tries = 0; tries < 160 && !ok; tries++)
+            {
+                pos = new Vector2(
+                    margin + (float)rng.NextDouble() * (S - 2 * margin),
+                    margin + (float)rng.NextDouble() * (S - 2 * margin));
+                ok = Math.Min(pos.X, pos.Y) < bandCells
+                    && pos.DistanceTo(center) > exclCells
+                    && FarFromPrimaryPeaks(pos, sepCells);
+            }
+            if (!ok)
+                continue; // 采不中即放弃（数量随缘，不硬凑）
+
+            float peakH = Mathf.Lerp(TerrainConfig.PrimaryPeakHeightMin,
+                    TerrainConfig.PrimaryPeakHeightMax, (float)rng.NextDouble())
+                + TerrainConfig.PrimaryPeakOverbuild;
+
+            Peaks.Add((pos, peakH, rCells)); // 入峰群：参与连脊，主峰与群山相连成山汇
+            PrimaryPeaks.Add((pos, peakH - TerrainConfig.PrimaryPeakOverbuild, rMeters));
+            double phase3 = rng.NextDouble() * Math.PI * 2;
+            double phase2 = rng.NextDouble() * Math.PI * 2;
+            RaiseLobedCone(pos, peakH, rCells, phase3, phase2);
+        }
+    }
+
+    private bool FarFromPrimaryPeaks(Vector2 pos, float sepCells)
+    {
+        foreach (var (p, _, _) in PrimaryPeaks)
+        {
+            if (p.DistanceTo(pos) < sepCells)
+                return false;
+        }
+        return true;
+    }
+
+    /// <summary>角向谐波高斯锥：有效半径按方位角做 3 阶 + 2 阶谐波调制（幅度 PrimaryPeakLobeAmp），
+    /// 衰减 exp(-3(d/lobeR)²)——山体沿山脊伸得更远、在沟谷方向收得更早，
+    /// 俯视轮廓不再是圆；取高不叠加。</summary>
+    private void RaiseLobedCone(Vector2 pos, float peakH, float rCells, double phase3, double phase2)
+    {
+        float lobe = TerrainConfig.PrimaryPeakLobeAmp;
+        int r = Mathf.CeilToInt(rCells * (1f + lobe));
+        for (int oy = -r; oy <= r; oy++)
+        {
+            for (int ox = -r; ox <= r; ox++)
+            {
+                int px = (int)pos.X + ox, py = (int)pos.Y + oy;
+                if (px < 0 || py < 0 || px >= S || py >= S)
+                    continue;
+                float dist = new Vector2(ox, oy).Length();
+                double theta = Math.Atan2(oy, ox);
+                float lobeR = rCells * (1f + lobe * (0.6f * (float)Math.Sin(3 * theta + phase3)
+                                                   + 0.4f * (float)Math.Sin(2 * theta + phase2)));
+                if (dist > lobeR)
+                    continue;
+                float d = dist / lobeR;
+                float hh = peakH * MathF.Exp(-3f * d * d);
+                if (H[py * S + px] < hh)
+                    H[py * S + px] = hh;
+            }
+        }
+    }
+
+    // ---- ③ 普通峰点（西北半包围带，离图缘留边）----
 
     /// <summary>在山区带内撒峰点（拒绝采样：贴西/北缘的带内、峰心距任一图缘 ≥ 峰半径×系数、
     /// 避中心圆、峰间留距），高斯锥取高叠加——「山体尽量不贴地图边缘」由边距保证。</summary>
@@ -219,7 +186,7 @@ public class WorldSketch
                 continue; // 采不中即放弃该峰（数量随缘，不硬凑）
 
             float peakH = Mathf.Lerp(TerrainConfig.PeakHeightMin, TerrainConfig.PeakHeightMax, (float)rng.NextDouble());
-            Peaks.Add((pos, peakH));
+            Peaks.Add((pos, peakH, rCells));
             RaiseGaussianCone(pos, peakH, rCells);
         }
     }
@@ -248,16 +215,33 @@ public class WorldSketch
     private float NearestPeakDist(Vector2 pos)
     {
         float best = float.MaxValue;
-        foreach (var (p, _) in Peaks)
+        foreach (var (p, _, _) in Peaks)
             best = Math.Min(best, p.DistanceTo(pos));
         return best;
     }
 
-    // ---- ③ 山脊连接 ----
+    /// <summary>某点受既有峰群的影响强度（0~1）：取所有峰高斯包络的最大值。
+    /// 丘陵选点据此避让——「远离峰群」比旧判据「东南象限」更贴近真实地貌，
+    /// 于是东北/西南/中部只要有空档都能落小山。</summary>
+    private float PeakInfluence(Vector2 pos)
+    {
+        float best = 0f;
+        foreach (var (p, _, r) in Peaks)
+        {
+            float d = p.DistanceTo(pos) / Math.Max(0.001f, r);
+            if (d > 1f)
+                continue;
+            float v = MathF.Exp(-3f * d * d);
+            if (v > best)
+                best = v;
+        }
+        return best;
+    }
+
+    // ---- ④ 山脊连接 ----
 
     /// <summary>近邻峰对之间连脊：脊高两端峰高插值、中段鞍部下凹、沿脊正弦起伏；
-    /// 余弦横截面取高叠加——峰点由脊串联成连绵山脉，不再是孤立土包。
-    /// （草图已无河湖，不再做水域拦截判定。）</summary>
+    /// 余弦横截面取高叠加——峰点由脊串联成连绵山脉，不再是孤立土包。</summary>
     private void LinkRidges(Random rng)
     {
         var linked = new HashSet<(int, int)>();
@@ -285,7 +269,7 @@ public class WorldSketch
 
     /// <summary>沿峰对连线抬脊：逐点余弦横截面取高（脊心高 → 缘 0），
     /// 脊高 = 两端峰高插值 × 鞍部包络（两端 1 → 中点 SaddleFactor）× 正弦起伏。</summary>
-    private void RaiseRidge((Vector2 pos, float h) a, (Vector2 pos, float h) b, Random rng)
+    private void RaiseRidge((Vector2 pos, float h, float r) a, (Vector2 pos, float h, float r) b, Random rng)
     {
         float hwCells = TerrainConfig.RidgeHalfWidth / Scale;
         int hw = Mathf.CeilToInt(hwCells);
@@ -323,38 +307,115 @@ public class WorldSketch
         }
     }
 
-    // ---- ④ 低矮独立山（中部/东南平原上的零星山包）----
+    // ---- ⑤ 低矮丘陵（全图点缀：东北/西南/中部/东南皆可，成簇出现）----
 
-    /// <summary>山区带之外撒低矮独立山：不入 Peaks（不连脊、不作河源），
-    /// 拒绝采样避开山区带/中心圆/图缘，高斯锥叠加——平原不再一马平川，又不挡城建大局。</summary>
+    /// <summary>成簇撒低矮丘陵：先选组心（避开既有峰群 PeakInfluence、避中心圆、离图缘留边），
+    /// 再在组内散布 2~4 座小山——天然丘陵多半成群，均匀撒点反而不像。
+    /// 每座山落点前过两道守卫：① 现状坡角 ≤ LowHillMaxSiteSlopeDeg（不在陡坡上堆锥）；
+    /// ② 高宽比 ≤ LowHillMaxAspect（矮胖不尖刺，不超安息角）。</summary>
     private void ScatterLowHills(Random rng)
     {
-        int count = TerrainConfig.LowHillCountMin + rng.Next(TerrainConfig.LowHillCountMax - TerrainConfig.LowHillCountMin + 1);
-        float bandCells = TerrainConfig.MountainBandDepth / Scale;
+        int want = TerrainConfig.LowHillCountMin
+            + rng.Next(TerrainConfig.LowHillCountMax - TerrainConfig.LowHillCountMin + 1);
+        int clusters = TerrainConfig.LowHillClusterMin
+            + rng.Next(TerrainConfig.LowHillClusterMax - TerrainConfig.LowHillClusterMin + 1);
         float exclCells = TerrainConfig.CenterExclusionRadius / Scale;
+        float spreadCells = TerrainConfig.LowHillClusterSpread / Scale;
         var center = new Vector2(S / 2f, S / 2f);
+        int placed = 0;
 
-        for (int i = 0; i < count; i++)
+        for (int c = 0; c < clusters && placed < want; c++)
         {
-            float rCells = Mathf.Lerp(TerrainConfig.LowHillRadiusMin, TerrainConfig.LowHillRadiusMax, (float)rng.NextDouble()) / Scale;
-            float margin = rCells * TerrainConfig.PeakEdgeMarginFactor;
-
-            Vector2 pos = default;
+            // 组心：受峰群影响弱、避中心圆、离图缘留边
+            Vector2 hub = default;
             bool ok = false;
-            for (int tries = 0; tries < 60 && !ok; tries++)
+            for (int tries = 0; tries < 80 && !ok; tries++)
             {
-                pos = new Vector2(
-                    margin + (float)rng.NextDouble() * (S - 2 * margin),
-                    margin + (float)rng.NextDouble() * (S - 2 * margin));
-                // 山区带之外（中部/东南才落）、避中心圆
-                ok = Math.Min(pos.X, pos.Y) >= bandCells
-                    && pos.DistanceTo(center) > exclCells;
+                hub = new Vector2(4 + (float)rng.NextDouble() * (S - 8), 4 + (float)rng.NextDouble() * (S - 8));
+                ok = PeakInfluence(hub) < TerrainConfig.LowHillMaxPeakInfluence
+                    && hub.DistanceTo(center) > exclCells;
             }
             if (!ok)
                 continue;
 
-            float hillH = Mathf.Lerp(TerrainConfig.LowHillHeightMin, TerrainConfig.LowHillHeightMax, (float)rng.NextDouble());
-            RaiseGaussianCone(pos, hillH, rCells);
+            int groupSize = Math.Min(want - placed, 2 + rng.Next(3)); // 每组 2~4 座
+            for (int i = 0; i < groupSize; i++)
+            {
+                Vector2 pos = hub;
+                if (i > 0)
+                {
+                    double a = rng.NextDouble() * Math.PI * 2;
+                    float d = (float)rng.NextDouble() * spreadCells;
+                    pos = hub + new Vector2(d * (float)Math.Cos(a), d * (float)Math.Sin(a));
+                }
+                if (pos.X < 0 || pos.Y < 0 || pos.X >= S || pos.Y >= S)
+                    continue;
+
+                float rMeters = Mathf.Lerp(TerrainConfig.LowHillRadiusMin, TerrainConfig.LowHillRadiusMax,
+                    (float)rng.NextDouble());
+                float rCells = rMeters / Scale;
+                if (SiteSlopeDeg(pos) > TerrainConfig.LowHillMaxSiteSlopeDeg)
+                    continue; // 现状已是陡坡：不堆锥（免形成超安息角的孤立尖刺）
+
+                float hillH = Mathf.Lerp(TerrainConfig.LowHillHeightMin, TerrainConfig.LowHillHeightMax,
+                    (float)rng.NextDouble());
+                hillH = Mathf.Min(hillH, rMeters * TerrainConfig.LowHillMaxAspect); // 高宽比守卫
+                RaiseGaussianCone(pos, hillH, rCells);
+                placed++;
+            }
         }
+    }
+
+    /// <summary>落点现状坡角（度）：取四邻高差最大值按 SketchScale 米换算。</summary>
+    private float SiteSlopeDeg(Vector2 pos)
+    {
+        int x = Math.Clamp((int)pos.X, 1, S - 2), y = Math.Clamp((int)pos.Y, 1, S - 2);
+        float h0 = H[y * S + x];
+        float drop = Mathf.Max(
+            Mathf.Max(Mathf.Abs(H[y * S + x + 1] - h0), Mathf.Abs(H[y * S + x - 1] - h0)),
+            Mathf.Max(Mathf.Abs(H[(y + 1) * S + x] - h0), Mathf.Abs(H[(y - 1) * S + x] - h0)));
+        return Mathf.RadToDeg(Mathf.Atan(drop / Scale));
+    }
+
+    // ---- ⑦ 示意河网（仅供预览画线）----
+
+    /// <summary>在草图上跑一遍轻量 FlowRouter + RiverNetwork（128²，8m/格），得到示意河网。
+    /// 成品水系在 512² 成品地形上另算（见 WorldGenerator），此处只是宏观骨架示意，
+    /// 但同源算法保证「大河大致在这些位置」。放在 Build 最后执行，不消耗影响地形的 rng。</summary>
+    private void TracePreviewRivers(Random rng)
+    {
+        var flow = FlowRouter.Build(H, S, Scale, 1);
+        var rivers = RiverNetwork.Build(flow, SampleH, rng);
+        foreach (var river in rivers)
+        {
+            var pts = new List<Vector2I>();
+            int lastX = -1, lastY = -1;
+            foreach (var p in river.Points)
+            {
+                // RiverNetwork 以「基础场格」为单位输出，草图基础场即 128² 网格，可直接取整
+                int px = (int)p.X, py = (int)p.Y;
+                if (px < 0 || py < 0 || px >= S || py >= S)
+                    continue;
+                if (px == lastX && py == lastY)
+                    continue; // 低分辨率下折线点常落在同一格：去重
+                lastX = px; lastY = py;
+                pts.Add(new Vector2I(px, py));
+            }
+            if (pts.Count > 1)
+                PreviewRivers.Add(pts);
+        }
+    }
+
+    /// <summary>草图高度双线性采样（连续格坐标，格心为 x+0.5）：RiverNetwork 蛇曲吸附用。</summary>
+    private float SampleH(float cx, float cy)
+    {
+        float fx = cx - 0.5f, fy = cy - 0.5f;
+        int ix = Mathf.FloorToInt(fx), iy = Mathf.FloorToInt(fy);
+        float tx = fx - ix, ty = fy - iy;
+        int x0 = Math.Clamp(ix, 0, S - 1), x1 = Math.Clamp(ix + 1, 0, S - 1);
+        int y0 = Math.Clamp(iy, 0, S - 1), y1 = Math.Clamp(iy + 1, 0, S - 1);
+        float a = H[y0 * S + x0], b = H[y0 * S + x1];
+        float c = H[y1 * S + x0], d = H[y1 * S + x1];
+        return Mathf.Lerp(Mathf.Lerp(a, b, tx), Mathf.Lerp(c, d, tx), ty);
     }
 }

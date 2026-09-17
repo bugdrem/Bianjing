@@ -77,13 +77,14 @@ public partial class Stall : Node3D
             if (!gs.Demand.IsShort(s.GoodsId))
                 continue;
             double sell = System.Math.Min(s.Amount, budget);
-            double taken = Inv.Take(s.GoodsId, sell);
+            double taken = Inv.TakeBatch(s.GoodsId, sell, out var st);
             if (taken <= 0)
                 continue;
             // 货进本地商铺/驿站库存（无则直接被城消费）
+            // （批次九十五：带着货郎一路运来的时效状态入库，外城货同样会坏）
             var shop = FirstShopOrInn(gs);
             if (shop != null)
-                shop.StoreGoodsForce(s.GoodsId, taken);
+                shop.Inv.StoreForceBatch(s.GoodsId, taken, st);
             long cost = (long)(taken * Goods.PriceOf(s.GoodsId));
             gs.Money -= cost; // 城市付钱给外城货郎
             gs.Ledger?.Add("外来摆摊", -cost);

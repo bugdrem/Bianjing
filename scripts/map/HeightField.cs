@@ -48,6 +48,18 @@ public class HeightField
         return Mathf.Lerp(Mathf.Lerp(a, b, tx), Mathf.Lerp(c, d, tx), tz);
     }
 
+    /// <summary>连续格坐标处的地面高：格 (x,y) 的中心为 (x+0.5, y+0.5)，双线性插值四邻顶点。
+    /// 水系生成（河网折线/湖泊前沿）在亚格精度上采样地形用，与 SampleWorld 同源。</summary>
+    public float SampleCell(float cx, float cy)
+    {
+        float fx = cx - 0.5f, fy = cy - 0.5f;
+        int ix = Mathf.FloorToInt(fx), iy = Mathf.FloorToInt(fy);
+        float tx = fx - ix, ty = fy - iy;
+        float a = VertexH(ix, iy), b = VertexH(ix + 1, iy);
+        float c = VertexH(ix, iy + 1), d = VertexH(ix + 1, iy + 1);
+        return Mathf.Lerp(Mathf.Lerp(a, b, tx), Mathf.Lerp(c, d, tx), ty);
+    }
+
     /// <summary>格中心高度：四角顶点均值（渲染物件/建筑的 Y 基准）。</summary>
     public float CellCenterH(Vector2I c) =>
         (VertexH(c.X, c.Y) + VertexH(c.X + 1, c.Y) + VertexH(c.X, c.Y + 1) + VertexH(c.X + 1, c.Y + 1)) * 0.25f;

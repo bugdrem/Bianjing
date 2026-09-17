@@ -239,6 +239,50 @@ public static class Goods
         return 1.0;
     }
 
+    // ===== 统一定价（批次九十四接线）=====
+    //
+    // 此前 StockPriceFactor 备好了阈值与档位却全项目零调用：铺面售价恒等于「基价 × 固定倍率」，
+    // 库存多寡对价格毫无影响，需求 §6.3 的「满仓折价、缺货溢价」从未生效。
+    // 本批次把定价收敛为下面三个方法，全部买卖点一律经此取值，不再各自手写乘法（此前正是各写各的，
+    // 才出现「家庭自动购粮 1.5 倍、村民带单采买 1.0 倍」同货不同价）。
+    //
+    //   零售价 RetailPrice —— 家庭买走自用（散买，含买入加价）
+    //   批发价 BuyerPrice  —— 买方为铺面/工坊：生产性补料、向居民收货
+    //
+    // 库存信号取「整仓占用率」（Inv.Total / Inv.Capacity）：与配置注释「库存 / 容量」同义，
+    // 不为分品类定价臆造分母。铺面囤积 → 折价出货；铺面空仓 → 溢价收货，
+    // 价格于是自动向生产端传导（仓空则收货价高，刺激上游多产）。
+
+    /// <summary>建筑的库存占用率（0~1）：整仓占用比，容量未设（≤0）视为 0。</summary>
+    public static double FillRateOf(BuildingInstance b) => b.Inv.Capacity > 0
+        ? System.Math.Clamp(b.Inv.Total / b.Inv.Capacity, 0.0, 1.0)
+        : 0.0;
+
+    /// <summary>定价用的库存倍率：容量未设（≤0，非贸易建筑）时取平价，
+    /// 否则 0% 占用会被误判成「缺货」而加价。</summary>
+    private static double FactorOf(BuildingInstance b) => b.Inv.Capacity > 0
+        ? StockPriceFactor(System.Math.Clamp(b.Inv.Total / b.Inv.Capacity, 0.0, 1.0))
+        : 1.0;
+
+    /// <summary>零售单价（文）：基价 × 买入加价 × 库存联动倍率 —— 家庭零买自用价。</summary>
+    public static long RetailPrice(BuildingInstance seller, string goodsId) =>
+        Scale(PriceOf(goodsId) * BuyMarkup, FactorOf(seller));
+
+    /// <summary>批发单价（文）：基价 × 库存联动倍率 —— 买方议价：工坊生产性补料、
+    /// 铺面向居民收货同用此价；买方满仓压价、空仓抬价。</summary>
+    public static long BuyerPrice(BuildingInstance buyer, string goodsId) =>
+        Scale(PriceOf(goodsId), FactorOf(buyer));
+
+    /// <summary>按倍率折算单价：四舍五入取整（旧版 long 直接截断，低价货的溢价档被抹平），
+    /// 基价为正时保底 ≥1 文（防折价把 2 文的废料折成 0 文白送）。</summary>
+    private static long Scale(double price, double factor)
+    {
+        if (price <= 0)
+            return 0;
+        return System.Math.Max(1,
+            (long)System.Math.Round(price * factor, System.MidpointRounding.AwayFromZero));
+    }
+
     public static readonly Dictionary<string, string> DisplayName = new()
     {
         [Grain]  = "粮食",
