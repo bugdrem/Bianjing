@@ -102,8 +102,14 @@ public class GoodsSystem
                 && (gs.CurMonth < FarmlandConfig.HarvestStartMonth || gs.CurMonth > FarmlandConfig.HarvestEndMonth))
                 continue;
 
-            int workers = workersOf.TryGetValue(b.Id, out var list) ? list.Count : 0;
-            double yield = workers * b.Def.YieldPerWorker * gs.TechFactor("harvest"); // 农学科技加成
+            // 批次九十五：产量按"劳动当量"（人数 × 各自健康折算）而非人头数——
+            // 病弱的农夫同样亩产更低，与工坊加工的折算同源（Citizen.LaborFactor）
+            bool hasWorkers = workersOf.TryGetValue(b.Id, out var list);
+            double labor = 0;
+            if (hasWorkers)
+                foreach (var w in list)
+                    labor += w.LaborFactor;
+            double yield = labor * b.Def.YieldPerWorker * gs.TechFactor("harvest"); // 农学科技加成
             if (yield <= 0)
                 continue;
 

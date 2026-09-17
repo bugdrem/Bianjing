@@ -28,7 +28,42 @@
 - **踩坑记录**：`const bool` 配置开关会被编译器折叠加，使关闭分支被判"不可达代码"（CS0162）→ 改用 `static readonly`。`GoodsStack.Fresh` 的**字段初始化器 `= 100f` 不可省**，否则旧存档缺该字段时反序列化默认 0，全部库存瞬间"已失效"。
 - 新增文件：`configs/TimelinessConfig.cs`、`sim/timeliness/{TimedState,TimedModifier,TimedRules,TimedRegistry,TimelinessSystem}.cs`、`specs/TIMELINESS.md`。
 - 影响文件：`sim/Inventory.cs`（分批并堆 + 最差优先 + `ConsumeEffective`）、`sim/GoodsSystem.cs`、`core/GameState.cs`、`agents/CitizenAgent.cs`、`visitors/{Stall,VisitorSystem}.cs`、`ui/InspectPanel.cs`、`Main.cs`。`GoodsStack` 新增三字段（自动随存档序列化，字段初始化器保证旧档读出为"全新"）。
-- **后续批次**：② 房屋 + 道路（道路须稀疏存储，`Cell` 是 dense struct 不能加字段）；③ 植物 + 动物 + 人；④ 恢复动作 + NPC 自救决策 + 配方状态条件 + 完整面板。
+#### 批次②（同日续做）：房屋 + 道路接入
+
+- **房屋双轴**：硬轴新增 `BuildingInstance.UsedLifespan`（按 Category 给寿限：官署 14400 / 工商民居 7200 / 田块 3600 游戏日；天然建筑、朝廷机构、王爷府豁免），由 `TimelinessSystem.TickBuildings` 推进。软轴沿用既有 `Condition`（0~100，与货品同尺度、同阶段语义、同 `TimedRules.StageOf` 判定），仍由 `MaintenanceSystem` 驱动——它有修缮匠与住户集资两条既有的回滚通路，不必搬家。
+- **修缮即翻新**：新增 `RepairAccum`，**累计修复量每满 100% 记一次大修**（`RenewCount++`），驱动与货品完全相同的 `寿限 ×0.65^n` 折扣——"老房子越修越难维持"由此自然成立。用累计量而非逐次计数，是因为日常养护是逐旬小额回血，逐次计数会瞬间顶到上限、寿限直接归零。
+- **两条坍塌路径统一**由 `MaintenanceSystem.Collapse` 判定（软轴破败归零 / 硬轴寿限到寿）。刻意不把拆房逻辑放进衰减器，免得住户失所、业权清理等收尾逻辑散成两处。
+- **道路稀疏状态**：`GameState.RoadStates`（`Dictionary<int, TimedState>`，键为格索引）。**不能放进 `Cell`**——Cell 是 struct 且活在 100 万格 dense 数组里，加字段会让整图内存成倍增长；道路通常仅几千格，字典开销可忽略。建档/清除挂在 `RegisterRoadCell`/`UnregisterRoadCell` 上，所有铺路、拆路、降级路径自动覆盖。
+- **道路双轴**：软轴=路况（主 360 / 辅 240 / 小路 120 游戏日，叠加临水与季节修正），乘进移速（`0.55 + 0.45 × EffectOf`，下限防止路况归零让通行瘫痪），接入 `CitizenAgent` 与 `ForeignVisitor` 两处移速计算；硬轴=寿限（主 720 / 辅 480 / 小路 240），耗尽由 `DegradeRoad` 降一级（主→辅→小路→冻结最差）。**刻意不拆除道路**：拆路会破坏玩家路网与"建筑临路"判定，代价远大于收益，"变成纯粹垃圾"改由"还能走但极慢"表达。
+- **道路可见反馈**：路面顶点色按路况朝土褐插值（`ChunkGeometryBuilder.RoadWornColor`）——移速变化玩家未必察觉，颜色变暗发土一眼就能看出该养护哪段。且**仅在跨阶段门槛时广播 `CellChanged`**（逐日全标脏等于每天重建整张地图），退化为"阶段式视觉变化"，恰好与三阶段语义一致。
+- **存档**：`BuildingSave` 加 `UsedLifespan`/`RenewCount`/`RepairAccum`；`MapSave` 加与 `RoadCells` 平行的 `RoadFresh`/`RoadUsed`（读档须在 `RegisterRoadCell` 之后写回，否则会被"新铺路面 = 全新状态"覆盖）。**刻意不升 `FormatVersion`**——新字段都有安全默认值（满鲜度 / 全新结构 / 无路况记录即全新路），旧档读入即"万物如新"，行为合理，不必让玩家存档作废。
+- **面板**：建筑页显示「完好 78% 失修 · 大修 2 次 · 结构余 186 年」；剩余不足三年改用"日"。
+- 已知待办：道路尚无养护机制（修缮匠目前只修建筑），故寿限刻意设得长；养路并入批次④。
+- 影响文件：`build/BuildingDef.cs`、`sim/MaintenanceSystem.cs`、`sim/timeliness/TimelinessSystem.cs`、`core/GameState.cs`、`map/layers/ChunkGeometryBuilder.cs`、`agents/CitizenAgent.cs`、`visitors/ForeignVisitor.cs`、`save/{SaveData,SaveService}.cs`、`ui/InspectPanel.cs`、`configs/TimelinessConfig.cs`。
+
+#### 批次③（同日续做）：植物 + 动物 + 人接入
+
+- **植物（树木）**：软轴沿用既有 `Hp`（砍伐扣血 → 闲置延迟后逐日自愈）——这套"延迟后回滚"本就与统一机制同形，故不重写；新增 `VigorPercent`（Hp / MaxHp × 100）接入统一阶段判定与效果折算，但**保留 Hp 的绝对值**，以免抹掉"老树更耐砍"（MaxHp 随树龄增长）这一既有玩法。新增硬轴 `UsedLifespan`（10800 游戏日 = 300 游戏年），到寿枯死倒伏并掉落木材（死木质次，出材减半：`MaxHp × WoodPerHp × 0.5`）。效果落点：产果量 `FruitPerDay × VigorFactor`。
+- **动物**：新增软轴 `Fresh`（体况，季节驱动：冬季 −1.8/日、其余 +0.42/日）。**两值刻意配成"略微入不敷出"**——年净 ≈ −4.9 点，从满值滑到下限约 15 游戏年，恰好等于寿限（15 游戏年），于是"动物一生从肥壮走到羸弱"自然成立，无需额外规则；若回复值调大（如 +0.9），体况会在春季就回满、全年贴着上限，季节波动形同虚设。新增硬轴：年龄到寿老死，与既有"随机自然减员"**并存**（后者代表意外与天敌，让种群有不确定性）。效果落点：繁育率 ×`BreedFactor`、猎获出肉 ×`YieldFactor`，两者都设下限，**避免体况归零导致种群自我灭绝**。
+- **人**：`Citizen.Health` 此前恒为 100——`LifeConfig` 的注释自陈"健康系统接入后自动生效"，但全项目无任何地方降低过它，于是死亡率放大系数永远是 1.0，也没接任何产出。现由 `TimelinessSystem.TickPeople` 推动：断炊 −3/日、受冻 −2/日、温饱 +5/日（约 20 游戏日回满）。**效果落点 = `LaborFactor`（0.35 + 0.65 × EffectOf(Health)）**，接进田间收获（`GoodsSystem.TickMonth`）与工坊加工（`CraftingSystem`）——两处都由"数人头"改为"算劳动当量"（人数 × 各自健康折算）。硬轴沿用既有年龄（Gompertz 死亡率曲线 + 达最大寿数必亡），无需新建。
+- **实际手感**：饥荒不再只扣兴致，而是直接削弱全城产能——病弱的农夫亩产低、病弱的工匠出活少，形成迟滞但真实的恶性循环。
+- **踩坑**：`MathF` 没有 `Clamp` 重载（用 `Math.Clamp`）；`AnimalObj.Fresh` 的字段初始化器 `= 100f` 不可省（同 `GoodsStack.Fresh`，否则旧档全图动物瞬间被判"极瘦弱"、繁育率跌到下限量）。
+- **面板**：村民页显示「健康 82（劳动 88%）」；树木页显示「茁壮 93% / 衰颓 / 濒枯」；动物页新增「体况：肥壮 78%」。三处共用同一个 `StageLabel`（六类实体同一套阶段语义，标签构造也共用一处）。
+- 影响文件：`objects/Obj.cs`、`sim/{PlantGrowthSystem,WildlifeSystem,CraftingSystem,GoodsSystem}.cs`、`sim/timeliness/TimelinessSystem.cs`、`citizens/Citizen.cs`、`core/GameState.cs`、`ui/InspectPanel.cs`、`configs/TimelinessConfig.cs`。存档无结构变更（植物/动物的新字段随 Obj 子类自动序列化）。
+
+#### 批次④（同日续做）：恢复动作 + 操作入口 + NPC 自救 + 失效处置 + 道路养护
+
+- **恢复动作表**（`TimelinessConfig.RenewSpecs`）：回锅（烧饼，耗柴薪）、重腌（腌货，耗精盐）、澄清（酒，无辅料）、烘干（柴薪，耗木炭）、晾晒（兽皮）、复晒（草药）。恢复量刻意是"**拉回到固定值**"而非"+N 点"——连续使用会迅速失效（第二次鲜度本就没掉多少，拉到同一个值等于白费一次寿限折扣），玩家自然会挑时机，不需要额外规则禁止滥用。
+- **执行入口**（新增 `sim/timeliness/RenewAction.cs`）：`Apply`（恢复动作）/ `Salvage`（失效处置）/ `WorthRenewing`（NPC 触发判据）。**关键实现细节：改完状态必须重新归档**——`SameBand` 的档位随鲜度与翻新次数改变，须先摘出旧批、再按新状态 `StoreForceBatch` 入库；直接改字段会让这批货赖在错误的档里，后续合并与面板显示都会失真。
+- **玩家入口**：面板物品行尾的 `[url=renew:货品id]回锅[/url]` / `[url=salvage:货品id]处置[/url]` 链接，`MetaClicked` 就地执行并重建当前页（`RefreshCurrent`）。建筑库存与**地面堆都支持**——露天堆坏得最快，更该能就近处置。复用既有 BBCode 链接机制与 `OnMetaClicked`，不动面板结构。
+- **NPC 自救**（`TimelinessSystem.AutoRenew`）：每日替民居打理家务。触发线是"鲜度跌到 40 以下**且**翻新未超 2 次"——**居民不会不计后果地反复翻新把自己的寿限耗光**。只对有人住的民居生效（`HousingCapacity > 0`），商铺货架与官仓廪留给店主与玩家操心。
+- **「失效后可作他用」的落点**：`Salvage` 按 0.3 比例把已失效批次降级为 `Goods.Scrap`（废料，燃料类货品，可当柴烧）。硬轴寿限耗尽时系统会自动做同样的事（`ConvertToScrap`），`Salvage` 是让玩家/NPC **提前**出手、趁早腾出仓容。
+- **道路养护**：修缮匠修完建筑后若还有工量余量，转去把全城路况最差的一格补到满（与"修最破的那一座"同策略——均摊会让每条路都修不好）。此前道路只老化、无人养护，这也是批次②留下的待办。
+- **面板**：物品行尾按当前状态显示可用操作（进入非满值段才出现动作链接、失效段才出现"处置"），操作结果写入公告栏（kind = `goods`）。
+- 影响文件：`configs/TimelinessConfig.cs`、`sim/timeliness/{RenewAction,TimelinessSystem}.cs`、`sim/MaintenanceSystem.cs`、`ui/InspectPanel.cs`。存档无新字段（`RenewCount` 在批次①已随档）。
+
+- **四批次全部完成**：① 内核 + 货品 → ② 房屋 + 道路 → ③ 植物 + 动物 + 人 → ④ 恢复动作与操作入口。
+  仍未做的（见 `specs/TIMELINESS.md` §8.1）：配方状态条件、加工输入按鲜度折算、售价按鲜度折算。
 
 ---
 

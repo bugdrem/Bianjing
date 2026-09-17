@@ -88,6 +88,141 @@ public static class TimelinessConfig
     /// <summary>降级为废料的产出比例（份废料 / 份原物）。</summary>
     public const float ExpiryScrapRatio = 0.3f;
 
+    // ===== 房屋（建筑）：软轴沿用既有 Condition，硬轴为新增的结构寿命 =====
+
+    /// <summary>
+    /// 房屋硬轴基础寿限（游戏日，按 category）。
+    /// 房屋寿限刻意设得远长于一局游戏——它是"长期存档"的压力而非即时惩罚；
+    /// 真正让玩家感受到的是软轴（Condition 失修，无人修缮约 432 日破败）。
+    /// 但修缮会累积"大修次数"从而折损寿限（见 <see cref="BuildingRepairPerRenew"/>），
+    /// 常用"翻新透支未来"的同一套机制：老房子会越修越难维持。
+    /// </summary>
+    public static float BuildingSpanDays(string category) => category switch
+    {
+        "official" => 14400f,  // 官署宫殿：400 游戏年
+        "grown" => 7200f,      // 民居/商铺/工坊：200 游戏年
+        "field" => 3600f,      // 田块：100 游戏年
+        "court" => 0f,         // 朝廷机构：豁免（与既有"朝廷自理"一致）
+        _ => 7200f,
+    };
+
+    /// <summary>累计修复量达到此值即记为一次"大修"（驱动翻新惩罚：寿限 ×0.65^n）。
+    /// 逐旬小额修缮累加到 100 才计一次，避免"每日养护"被当成天天翻新。</summary>
+    public const float BuildingRepairPerRenew = 100f;
+
+    // ===== 恢复动作（翻新）：回锅 / 烘干 / 重腌 =====
+
+    /// <summary>
+    /// 各货品的恢复手段。<b>核心不是"回血"，而是"用总寿命换当下品质"</b>——
+    /// 每次执行都会让 <c>RenewCount</c> +1，于是寿限 ×0.65^n、衰减速率 ×1.8^n 复合叠加
+    /// （见 <see cref="RenewSpanPenalty"/> / <see cref="RenewRatePenalty"/>）。
+    /// 递减收益自然涌现，不需要额外规则去禁止无限回锅。
+    ///
+    /// 未登记在此的货品没有恢复手段（铁器锈了就是锈了、盐受潮只能认）。
+    /// </summary>
+    public static readonly Dictionary<string, RenewSpec> RenewSpecs = new()
+    {
+        // 熟食回锅：烧柴薪再热一遍（用户举例的原型）
+        { Goods.Flatbread, new RenewSpec("回锅", 85f, Goods.Wood, 0.20) },
+        // 腌货重腌：补盐回鲜
+        { Goods.Cured, new RenewSpec("重腌", 80f, Goods.RefinedSalt, 0.10) },
+        // 酒澄清：不需辅料，但同样透支（越澄清越易酸败）
+        { Goods.Wine, new RenewSpec("澄清", 85f, "", 0f) },
+        // 柴薪烘干：湿柴回燥（用户举例的第二个原型）
+        { Goods.Wood, new RenewSpec("烘干", 90f, Goods.Charcoal, 0.08) },
+        // 兽皮晾晒：受潮的生皮可晾回
+        { Goods.Hide, new RenewSpec("晾晒", 85f, "", 0f) },
+        // 草药复晒
+        { Goods.Herb, new RenewSpec("复晒", 80f, "", 0f) },
+    };
+
+    /// <summary>NPC 自动抢救的触发线：鲜度低于此值（即已进入渐变衰减段过半）才值得动手。
+    /// 设得太高会让居民不停地翻新，反而把物品的寿限迅速耗光。</summary>
+    public const float AutoRenewBelowFresh = 40f;
+
+    /// <summary>NPC 自动抢救的次数上限（低于 <see cref="RenewMaxCount"/>）：
+    /// 居民不会不计后果地反复翻新——把寿限留给真正需要的时候。</summary>
+    public const int AutoRenewMaxCount = 2;
+
+    // ===== 道路：软轴=路况（影响移速），硬轴=寿限（耗尽降一级）=====
+
+    /// <summary>道路软轴天数：路况从满值衰减到 0 所需游戏日（按道路种类）。</summary>
+    public static float RoadSoftDays(RoadKind kind) => kind switch
+    {
+        RoadKind.Main => 360f,  // 主路有专人维护性铺装，最耐久
+        RoadKind.Side => 240f,
+        RoadKind.Lane => 120f,  // 土路小道最易被踩烂
+        _ => 240f,              // 桥面（RoadKind.None 但 HasRoad）
+    };
+
+    /// <summary>道路硬轴寿限（游戏日）：耗尽则降一级（主→辅→小路→冻结最差路况）。
+    /// <b>道路只降级不消失</b>——拆除会破坏玩家路网与建筑临路判定，代价远大于收益。</summary>
+    public static float RoadSpanDays(RoadKind kind) => kind switch
+    {
+        RoadKind.Main => 720f,
+        RoadKind.Side => 480f,
+        RoadKind.Lane => 240f,
+        _ => 720f,
+    };
+
+    /// <summary>最差路况下的移速倍率下限：路况归零也只是"走得慢"，不会让通行瘫痪。</summary>
+    public const float RoadMinSpeedFactor = 0.55f;
+
+    // ===== 植物（树木）：软轴沿用既有 Hp（归一化为生机百分比），硬轴为新增的自然寿限 =====
+
+    /// <summary>树木硬轴寿限（游戏日）：到寿枯死倒伏（掉落木材）。
+    /// 设得极长（300 游戏年）——一局游戏通常看不到树老死，它是长期存档的机制；
+    /// 玩家能感受到的是软轴（砍伐伤 + 闲置自愈）。</summary>
+    public const float PlantLifespanDays = 10800f;
+
+    /// <summary>枯死倒伏的木材产出比例（相对正常砍伐满血的产出）：死木质次，出材减半。
+    /// 实际份数 = MaxHp × VillagerConfig.WoodPerHp × 本比例。</summary>
+    public const float PlantDeathWoodRatio = 0.5f;
+
+    // ===== 动物：软轴=体况（季节驱动），硬轴=寿限（老死）=====
+
+    /// <summary>动物寿限（月，15 游戏年）：到寿老死，与既有"随机自然减员"并存
+    /// （后者代表意外、天敌与捕猎未遂，不改）。</summary>
+    public const int AnimalMaxAgeMonths = 180;
+
+    /// <summary>
+    /// 冬季每日体况变化（掉膘，负数）与其余季节的每日回复。
+    ///
+    /// 两值刻意配成"略微入不敷出"：一游戏年是 36 日（冬 10-12 月 = 9 日），
+    /// 年净变化 ≈ 9×(-1.8) + 27×(0.42) ≈ <b>-4.9 点</b>，
+    /// 于是体况从满值滑到下限约需 15 游戏年——恰好与
+    /// <see cref="AnimalMaxAgeMonths"/>（15 游戏年寿限）吻合：
+    /// 动物一生就是从肥壮走到羸弱，繁育与出肉随之递减，不需要额外规则。
+    /// 若回复值调大（如 +0.9），体况会在春季就回满、全年贴着上限，季节波动形同虚设。
+    /// </summary>
+    public const float AnimalVigorWinterDelta = -1.8f;
+
+    /// <summary>非冬季每日体况回复（见 <see cref="AnimalVigorWinterDelta"/> 的配比说明）。</summary>
+    public const float AnimalVigorGrowDelta = 0.42f;
+
+    /// <summary>体况下限：再瘦也不会归零（归零等于绝育，会把种群玩死）。</summary>
+    public const float AnimalVigorMin = 25f;
+
+    /// <summary>体况对繁育率的折算下限：体况最差时仍有此比例，避免种群自我灭绝。</summary>
+    public const float AnimalBreedVigorFloor = 0.25f;
+
+    /// <summary>体况对猎获野味量的折算下限：瘦猎物仍能出一部分肉。</summary>
+    public const float AnimalYieldVigorFloor = 0.45f;
+
+    // ===== 人：软轴=健康 Health（既有字段，此前恒满未生效），硬轴=年龄（既有 Gompertz 死亡曲线）=====
+
+    /// <summary>断炊时每日健康损耗。</summary>
+    public const float PersonHealthHungerLoss = 3f;
+
+    /// <summary>缺柴受冻时每日健康损耗。</summary>
+    public const float PersonHealthColdLoss = 2f;
+
+    /// <summary>温饱时每日健康恢复（约 20 游戏日回满）。</summary>
+    public const float PersonHealthRegen = 5f;
+
+    /// <summary>健康对劳动效率（加工产量、田间收获）的折算下限：重病仍能勉强干活。</summary>
+    public const float PersonLaborFloor = 0.35f;
+
     /// <summary>季节速率倍率（按游戏月查表，春季与未列月份为基准 1.0）。</summary>
     public static float SeasonRateMul(int month) => month switch
     {
@@ -165,4 +300,38 @@ public readonly struct TimedBaseline
 
     /// <summary>是否只参与软轴（无硬轴寿限）。</summary>
     public bool SoftOnly => LifespanDays <= 0f;
+}
+
+/// <summary>
+/// 单种货品的恢复手段（"翻新"）：一次动作把鲜度拉回 <see cref="RestoreTo"/>，
+/// 代价是 <c>RenewCount</c> +1 —— 寿限与衰减速率此后按复合惩罚恶化。
+///
+/// 刻意<b>不按比例恢复</b>（不是"+30 点"而是"拉回到 85%"）：
+/// 这样连续使用会迅速失效——第二次回锅时鲜度本就没掉多少，
+/// 拉到同一个值等于白费一次寿限折扣，玩家自然会挑时机。
+/// </summary>
+public readonly struct RenewSpec
+{
+    /// <summary>动作名（UI 显示用："回锅"、"烘干"）。</summary>
+    public readonly string Verb;
+
+    /// <summary>恢复到的新鲜度（取 max：已高于此值则不降）。</summary>
+    public readonly float RestoreTo;
+
+    /// <summary>每次消耗的辅料货品 id（空串表示不需辅料）。</summary>
+    public readonly string FuelGoodsId;
+
+    /// <summary>每份货品消耗的辅料份数。</summary>
+    public readonly double FuelPerUnit;
+
+    public RenewSpec(string verb, float restoreTo, string fuelGoodsId, double fuelPerUnit)
+    {
+        Verb = verb;
+        RestoreTo = restoreTo;
+        FuelGoodsId = fuelGoodsId;
+        FuelPerUnit = fuelPerUnit;
+    }
+
+    /// <summary>是否需要辅料。</summary>
+    public bool NeedsFuel => !string.IsNullOrEmpty(FuelGoodsId) && FuelPerUnit > 0;
 }

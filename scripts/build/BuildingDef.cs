@@ -212,9 +212,21 @@ public class BuildingInstance : Obj
     [JsonIgnore]
     public List<Door> Doors;
 
-    /// <summary>完好度 0-100：人造建筑逐月老化，修缮恢复，归零坍塌。</summary>
+    /// <summary>完好度 0-100：人造建筑逐月老化，修缮恢复，归零坍塌。
+    /// <b>即房屋的时效软轴</b>（批次九十五）：与货品 <c>GoodsStack.Fresh</c> 同尺度同阶段语义
+    /// （≥60 全效果 / 15~60 渐变衰减 / &lt;15 已失效），阶段判定统一走 <see cref="TimedRules.StageOf"/>。</summary>
     public float Condition = 100f;
-    
+
+    /// <summary>硬轴：已耗用的结构寿限（游戏日，批次九十五，只增不减）。</summary>
+    public float UsedLifespan;
+
+    /// <summary>大修次数：累计修复量每满 100% 记一次，驱动寿限的复合折扣 ×0.65^n
+    /// （与货品"回锅/烘干"同一套翻新机制：<b>每次翻新都透支未来</b>，老房子越修越难维持）。</summary>
+    public int RenewCount;
+
+    /// <summary>累计修复量余数（满 <see cref="TimelinessConfig.BuildingRepairPerRenew"/> 进位为一次大修）。</summary>
+    public float RepairAccum;
+
     /// <summary>废弃标志：grown 建筑无人居住时置位，可供新居民重建入住，并为后期邻居合并扩建预留钩子。</summary>
     public bool Abandoned;
 

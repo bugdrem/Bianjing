@@ -16,7 +16,7 @@ public class CraftingSystem
 
     public void TickDay(GameState gs)
     {
-        var workersOf = CountWorkers(gs);
+        var laborOf = BuildLaborIndex(gs);
 
         foreach (var b in gs.Buildings.Values)
         {
@@ -24,8 +24,8 @@ public class CraftingSystem
             if (b.Def.Id != "workshop" || b.Def.JobSlotsAt(b.Level) <= 0)
                 continue;
 
-            int workers = workersOf.TryGetValue(b.Id, out var n) ? n : 0;
-            if (workers <= 0)
+            double labor = laborOf.TryGetValue(b.Id, out var n) ? n : 0;
+            if (labor <= 0.0001)
                 continue;
 
             // 在产货品：专营品 + 升级增补副营品（ExtraGoods，见 ZoneGrowthSystem.ExtendSpecialties）
@@ -41,9 +41,9 @@ public class CraftingSystem
                     continue;
                 int fuelAt = Goods.FuelAt(spec, b.Level); // 每份耗柴薪量（0 = 不耗）
 
-                // 本次最多可产：受工人产能（含工艺科技加成与工坊效率）与最紧缺原料存量限制，
+                // 本次最多可产：受"劳动当量产能"（人数 × 各自健康折算，含工艺科技与工坊效率）与最紧缺原料存量限制，
                 // 燃料同样限产；不再受成品库容卡产——消耗原料份数≥产出份数，加工不会增加仓储占用
-                double byWorkers = workers * CraftPerWorkerDay * gs.TechFactor("craft")
+                double byWorkers = labor * CraftPerWorkerDay * gs.TechFactor("craft")
                     * b.Def.EfficiencyAt(b.Level);
                 double byInputs = double.MaxValue;
                 foreach (var kv in inputs)
@@ -68,13 +68,17 @@ public class CraftingSystem
         }
     }
 
-    /// <summary>建筑 Id → 在岗雇工人数。</summary>
-    private static Dictionary<int, int> CountWorkers(GameState gs)
+    /// <summary>
+    /// 建筑 Id → 在岗工人的<b>劳动当量</b>（批次九十五：人数 × 各自健康折算，而非单纯人头数）。
+    /// 病弱的工人产出少，于是"城里闹饥荒"会直接体现在工坊产量上——
+    /// 这是人的时效软轴（健康）在劳动端的落点，与货品的"有效量折算"是同一个思路。
+    /// </summary>
+    private static Dictionary<int, double> BuildLaborIndex(GameState gs)
     {
-        var map = new Dictionary<int, int>();
+        var map = new Dictionary<int, double>();
         foreach (var c in gs.Citizens.Values)
             if (c.JobKind == JobKind.Employed && c.WorkplaceId >= 0)
-                map[c.WorkplaceId] = map.GetValueOrDefault(c.WorkplaceId) + 1;
+                map[c.WorkplaceId] = map.GetValueOrDefault(c.WorkplaceId) + c.LaborFactor;
         return map;
     }
 }

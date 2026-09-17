@@ -46,6 +46,9 @@ public class PlantObj : Obj
     /// <summary>当前砍伐血量（新植时由 AddPlant 补满至 MaxHp）。</summary>
     public float Hp = BaseHp;
 
+    /// <summary>硬轴：已耗寿限（游戏日，批次九十五）。到寿则枯死倒伏、化为木材。</summary>
+    public float UsedLifespan;
+
     /// <summary>距上次被砍的天数：达到恢复延迟后逐日回血（被砍即清零）。</summary>
     public int IdleDays;
 
@@ -57,6 +60,21 @@ public class PlantObj : Obj
     /// <summary>满血上限：随树龄增长但增速递减（公式见 PlantConfig.MaxHpAt：
     /// 0月=20，1年≈47，2年=60，5年≈77，20年≈93）。</summary>
     public float MaxHp => PlantConfig.MaxHpAt(GrowthMonths);
+
+    /// <summary>
+    /// 软轴的归一化值 0~100（批次九十五）：<see cref="Hp"/> 相对当前上限的百分比。
+    /// 用它接入统一的阶段判定与效果折算（<see cref="TimedRules"/>）；
+    /// 而 Hp 本身保持绝对值——"老树更耐砍"（MaxHp 随树龄增长）是既有玩法，不该被归一化抹掉。
+    /// </summary>
+    public float VigorPercent => MaxHp > 0f
+        ? System.Math.Clamp(Hp / MaxHp * 100f, 0f, 100f)
+        : 100f;
+
+    /// <summary>软轴阶段（与货品/房屋同一套语义：全效果 / 渐变衰减 / 已失效）。</summary>
+    public FreshStage Stage => TimedRules.StageOf(VigorPercent);
+
+    /// <summary>软轴效果折算系数 0~1：树越虚弱，产果与出材越少。</summary>
+    public float VigorFactor => TimedRules.EffectOf(VigorPercent);
 }
 
 /// <summary>动物实体：在树林附近随机活动与繁育（WildlifeSystem 驱动），可被猎人捕获。</summary>
@@ -68,6 +86,27 @@ public class AnimalObj : Obj
     /// 生成时按 Id 轮转分配（GameState.AddAnimal），七种外形均布出现；
     /// 旧存档无此字段时反序列化为默认 0，不影响读档。</summary>
     public int Kind;
+
+    /// <summary>
+    /// 软轴：体况 0~100（批次九十五）。冬季掉膘、春夏回膘，影响繁育率与猎获出肉。
+    /// <b>字段初始化器 = 100f 不可省</b>——旧存档缺该字段时保留满膘；
+    /// 若默认 0，全图动物会瞬间被判成"极瘦弱"，繁育率跌到下限量。
+    /// </summary>
+    public float Fresh = 100f;
+
+    /// <summary>软轴效果折算系数 0~1（体况 → 通用效果，与货品/树木同一套曲线）。</summary>
+    public float VigorFactor => TimedRules.EffectOf(Fresh);
+
+    /// <summary>体况对繁育率的折算（有下限，避免体况归零导致种群绝育自灭）。</summary>
+    public float BreedFactor => TimelinessConfig.AnimalBreedVigorFloor
+        + (1f - TimelinessConfig.AnimalBreedVigorFloor) * VigorFactor;
+
+    /// <summary>体况对猎获出肉量的折算（有下限：瘦猎物仍能出一部分肉）。</summary>
+    public float YieldFactor => TimelinessConfig.AnimalYieldVigorFloor
+        + (1f - TimelinessConfig.AnimalYieldVigorFloor) * VigorFactor;
+
+    /// <summary>是否已到寿（硬轴：年龄达 <see cref="TimelinessConfig.AnimalMaxAgeMonths"/>）。</summary>
+    public bool LifespanSpent => AgeMonths >= TimelinessConfig.AnimalMaxAgeMonths;
 }
 
 /// <summary>

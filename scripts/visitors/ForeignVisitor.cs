@@ -163,8 +163,9 @@ public partial class ForeignVisitor : Node3D
     private void MoveAlongPath(float dt)
     {
         var cell = MapGrid.WorldToCell(Position);
+        // 路面速度再乘路况系数（批次九十五）：外城来客同样受本城道路年久失修的影响
         float speedFactor = MapGrid.InBounds(cell) && _gs.Map.CellAt(cell).HasRoad
-            ? MovementConfig.RoadSpeedFactor(_gs.Map.CellAt(cell).RoadKind)
+            ? MovementConfig.RoadSpeedFactor(_gs.Map.CellAt(cell).RoadKind) * _gs.RoadQualityFactor(cell)
             : MovementConfig.OffRoadFactor;
         float step = MovementConfig.BaseSpeed * speedFactor * dt;
         var before = Position;

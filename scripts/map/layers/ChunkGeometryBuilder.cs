@@ -24,6 +24,10 @@ public static class ChunkGeometryBuilder
     private static readonly Color TrunkColor = new(0.38f, 0.30f, 0.22f);
     /// <summary>路面顶面顶点色：中性近白，砖色/明暗全由砖纹贴图承载（贴图×顶点色）。</summary>
     private static readonly Color RoadTopColor = new(0.97f, 0.96f, 0.93f);
+
+    /// <summary>失修路面的目标色（批次九十五）：路况越差，路面越朝这个土褐色靠。
+    /// 作为道路老化的<b>可见反馈</b>——移速变慢玩家未必察觉，颜色变暗发土一眼就能看出该养护哪段。</summary>
+    private static readonly Color RoadWornColor = new(0.52f, 0.46f, 0.38f);
     /// <summary>路缘地基立面顶点色：暗灰，乘砖纹后读作台基侧壁。</summary>
     private static readonly Color RoadSideColor = new(0.30f, 0.29f, 0.27f);
 
@@ -73,7 +77,10 @@ public static class ChunkGeometryBuilder
                             RoadKind.Lane => geo.RoadLane,
                             _ => geo.RoadSide,
                         };
-                        AddDrapedQuad(hf, road, x, y, WorldConfig.RoadSurfaceLift, RoadTopColor);
+                        // 批次九十五：路面颜色随路况变暗发土（道路时效软轴的可见反馈）
+                        float roadQ = gs.RoadQualityFactor(new Vector2I(x, y));
+                        AddDrapedQuad(hf, road, x, y, WorldConfig.RoadSurfaceLift,
+                            RoadTopColor.Lerp(RoadWornColor, 1f - roadQ));
                         AddRoadFoundation(gs, hf, road, x, y, RoadSideColor);
                     }
                 }

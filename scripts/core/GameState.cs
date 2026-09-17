@@ -126,6 +126,14 @@ public class GameState
     public List<Vector2I> RoadCells { get; } = new();
     private readonly Dictionary<Vector2I, int> _roadIndex = new();
 
+    /// <summary>
+    /// 道路时效状态（批次九十五，稀疏：仅存有路格，键为格索引）。
+    /// <b>不能放进 <see cref="Cell"/></b>——Cell 是 struct 且活在 100 万格的密集数组里，
+    /// 给它加字段会让整张地图的内存成倍增长；而道路通常只有几千格，字典开销可忽略。
+    /// 无记录视为全新路面。
+    /// </summary>
+    public Dictionary<int, TimedState> RoadStates { get; } = new();
+
     /// <summary>坐标→列表序号的反查，支撑 O(1) 尾交换删除。</summary>
     public void RegisterRoadCell(Vector2I c, bool raiseEdgeEvent = true)
     {
@@ -133,12 +141,54 @@ public class GameState
             return;
         _roadIndex[c] = RoadCells.Count;
         RoadCells.Add(c);
+        // 新铺路面从全新状态起算（已存在则上面已早退，不清零既有路况）
+        RoadStates[CellIndex(c)] = TimedState.New;
         RegisterEdgeCell(c, raiseEdgeEvent);
+    }
+
+    /// <summary>该格的路况系数 0~1（乘在道路种类的移速上）：无记录视为全新路，返回 1。</summary>
+    public float RoadQualityFactor(Vector2I c)
+    {
+        if (!RoadStates.TryGetValue(CellIndex(c), out var st))
+            return 1f;
+        // 路况差只是"走得慢"：以 RoadMinSpeedFactor 为下限，避免路况归零让通行瘫痪
+        float eff = TimedRules.EffectOf(st.Fresh);
+        return TimelinessConfig.RoadMinSpeedFactor + (1f - TimelinessConfig.RoadMinSpeedFactor) * eff;
+    }
+
+    /// <summary>该格路况明细（无记录返回全新状态，供面板显示）。</summary>
+    public TimedState RoadStateOf(Vector2I c)
+        => RoadStates.TryGetValue(CellIndex(c), out var st) ? st : TimedState.New;
+
+    /// <summary>
+    /// 道路寿限耗尽：降一级（主→辅→小路），小路降无可降则重置状态继续以小路形态残存。
+    /// <b>刻意不拆除道路</b>——拆路会破坏玩家路网与"建筑临路"判定，代价远大于收益；
+    /// 硬轴"变成纯粹垃圾"在此体现为"还能走但极慢"。
+    /// </summary>
+    public void DegradeRoad(Vector2I c)
+    {
+        ref var cell = ref Map.CellAt(c);
+        if (!cell.HasRoad || cell.HasBridge)
+            return; // 桥面不参与降级（kind 为 None，无更差等级）
+
+        RoadKind next = cell.RoadKind switch
+        {
+            RoadKind.Main => RoadKind.Side,
+            RoadKind.Side => RoadKind.Lane,
+            _ => RoadKind.Lane, // 已是最低级：仅重置状态
+        };
+        cell.RoadKind = next;
+        cell.LaneOwnerId = -1; // 降级后的路不再归属任何建筑（与升级时的处理一致）
+        Roads.SetRoad(c, true, next); // 同步寻路权重
+        // 降级即重修：路况重置为全新、寿限重新起算（所以是"降级"而非"损毁"）
+        RoadStates[CellIndex(c)] = TimedState.New;
+        EventBus.RaiseCellChanged(c);
     }
 
     public void UnregisterRoadCell(Vector2I c)
     {
         UnregisterEdgeCell(c);
+        RoadStates.Remove(CellIndex(c));
         if (!_roadIndex.Remove(c, out int i))
             return;
         var last = RoadCells[^1];
@@ -375,6 +425,9 @@ public class GameState
         cell.RoadKind = kind;
         cell.LaneOwnerId = -1;
         Roads.SetRoad(c, true, kind); // 同步寻路权重：主路代价低，居民偏好走主路
+        // 批次九十五：升级即重新铺装——路况刷新为全新、寿限重新起算。
+        // 升级受 RoadRank 单向约束（高级覆盖低级），无法反复升级来无限续命。
+        RoadStates[CellIndex(c)] = TimedState.New;
         EventBus.RaiseCellChanged(c);
     }
 
@@ -839,12 +892,13 @@ public class GameState
         return a;
     }
 
-    /// <summary>捕获动物（打猎）：猎物在倒地处化为野味堆（一担），等待猎人拾取；返回是否成功。</summary>
+    /// <summary>捕获动物（打猎）：猎物在倒地处化为野味堆（一担），等待猎人拾取；返回是否成功。
+    /// 批次九十五：出肉量按体况折算——瘦猎物出的肉少（冬末打猎收益随之下降）。</summary>
     public bool HarvestAnimal(int id)
     {
         if (!Animals.Remove(id, out var prey))
             return false;
-        DropOnGround(new Vector2I(prey.X, prey.Y), Goods.Game, Goods.LoadUnits);
+        DropOnGround(new Vector2I(prey.X, prey.Y), Goods.Game, Goods.LoadUnits * prey.YieldFactor);
         EventBus.RaiseWildlifeChanged();
         return true;
     }

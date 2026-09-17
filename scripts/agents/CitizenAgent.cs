@@ -1537,7 +1537,10 @@ public partial class CitizenAgent : Node3D
         if (inBounds && GameState.I.Map.CellAt(cell).HasRoad)
         {
             // 路面按种类快慢（主路快/辅路常速/小路慢/桥面常速），取自 MovementConfig
-            speedFactor = MovementConfig.RoadSpeedFactor(GameState.I.Map.CellAt(cell).RoadKind);
+            // 路面按种类快慢（主路快/辅路常速/小路慢/桥面常速），取自 MovementConfig；
+            // 批次九十五：再乘该格路况系数——年久失修的路照样让人走不快（路况即道路的时效软轴）
+            speedFactor = MovementConfig.RoadSpeedFactor(GameState.I.Map.CellAt(cell).RoadKind)
+                * GameState.I.RoadQualityFactor(cell);
         }
         else
         {

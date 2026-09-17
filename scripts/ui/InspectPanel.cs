@@ -225,7 +225,75 @@ public partial class InspectPanel : FrostedPanel
         {
             ShowFamily(fam);
             RestoreBack(back);
+            return;
         }
+
+        // 批次九十五：库存操作链接（挂物品行尾）——恢复动作与失效处置
+        const string renewPrefix = "renew:";
+        if (s.StartsWith(renewPrefix))
+        {
+            ApplyInventoryAction(s[renewPrefix.Length..], renew: true, back);
+            return;
+        }
+        const string salvagePrefix = "salvage:";
+        if (s.StartsWith(salvagePrefix))
+        {
+            ApplyInventoryAction(s[salvagePrefix.Length..], renew: false, back);
+            return;
+        }
+    }
+
+    /// <summary>
+    /// 执行面板上的库存操作（批次九十五）：恢复动作（回锅/烘干）或失效处置（降级为废料），
+    /// 完成后重建当前建筑页并把结果写入公告栏。
+    /// 操作只作用于<b>面板当前打开的这座建筑</b>的库存——面板上的链接本就来自那一页。
+    /// </summary>
+    private void ApplyInventoryAction(string goodsId, bool renew, (BackKind Kind, int Id) back)
+    {
+        var gs = GameState.I;
+        // 目标可能是建筑库存，也可能是地面物资堆——露天堆坏得最快，更该让玩家就近处置
+        Inventory inv = null;
+        if (_buildingId >= 0 && gs.Buildings.TryGetValue(_buildingId, out var b))
+            inv = b.Inv;
+        else if (_pileCell >= 0 && gs.Piles.TryGetValue(_pileCell, out var pile))
+            inv = pile.Inv;
+        if (inv == null)
+            return;
+
+        bool ok = renew
+            ? RenewAction.Apply(inv, goodsId, out string msg)
+            : RenewAction.Salvage(inv, goodsId, out msg);
+        if (msg != "")
+            gs.PostNews("goods", (ok ? "" : "未能处理：") + msg);
+
+        RefreshCurrent(); // 状态与档位已变，重建当前页
+        RestoreBack(back);
+    }
+
+    /// <summary>按当前目标重建面板页（库存操作后刷新用）。</summary>
+    private void RefreshCurrent()
+    {
+        var gs = GameState.I;
+        if (_buildingId >= 0 && gs.Buildings.TryGetValue(_buildingId, out var b))
+            ShowBuilding(b);
+        else if (_pileCell >= 0 && gs.Piles.TryGetValue(_pileCell, out var pile))
+            RenderPile(pile);
+    }
+
+    /// <summary>
+    /// 单批货物的可用操作链接（批次九十五）：恢复动作（回锅/烘干/晾晒）与失效处置。
+    /// 用 BBCode <c>[url=]</c> 挂在物品行尾、点击就地执行——复用既有的 MetaClicked 机制，不动面板结构。
+    /// </summary>
+    private static string ActionLinks(GoodsStack s)
+    {
+        var parts = new List<string>();
+        if (RenewAction.SpecOf(s.GoodsId, out var spec)
+            && s.Stage != FreshStage.Full
+            && s.RenewCount < TimelinessConfig.RenewMaxCount)
+            parts.Add($"[url=renew:{s.GoodsId}]{spec.Verb}[/url]");
+        if (s.Stage == FreshStage.Spent)
+            parts.Add($"[url=salvage:{s.GoodsId}]处置[/url]");
+        return parts.Count > 0 ? "  " + string.Join(" ", parts) : "";
     }
 
     // ---- 面板内跳转与返回（批次七十二）----
@@ -464,7 +532,7 @@ public partial class InspectPanel : FrostedPanel
         if (c.CarriedItems.Count > 0)
             sb.AppendLine($"携带：{string.Join("、", c.CarriedItems.Select(Goods.NameOf))}");
         sb.AppendLine($"正在：{ActivityName(c.Activity)}{PackLine(c)}");
-        sb.AppendLine($"疲劳 {c.Fatigue:F0} / 兴致 {c.Fun:F0}");
+        sb.AppendLine($"疲劳 {c.Fatigue:F0} / 兴致 {c.Fun:F0} / 健康 {HealthTag(c)}");
 
         // 需求
         sb.AppendLine("—— 需求 ——");
@@ -628,7 +696,7 @@ public partial class InspectPanel : FrostedPanel
         if (b.Def.Id == PrinceMansionConfig.DefId)
             sb.AppendLine("王府地标：不设健康度，永不老化");
         else
-            sb.AppendLine($"等级 {b.Level}/{b.Def.MaxLevel}  完好 {b.Condition:F0}%");
+            sb.AppendLine($"等级 {b.Level}/{b.Def.MaxLevel}  完好 {b.Condition:F0}%  {BuildingStageTag(b)}");
         sb.AppendLine($"建于：{(b.BuiltYear > 0 ? $"第{b.BuiltYear}年 {b.BuiltMonth}月" : "不详")}");
         if (b.Specialty != "")
         {
@@ -720,7 +788,7 @@ public partial class InspectPanel : FrostedPanel
                 // 仓房时效环境：NoRoof 露棚 / 有顶室内（与 TimelinessSystem 判定同口径）
                 var storePlace = b.Def.NoRoof ? TimedPlace.OpenShed : TimedPlace.Sheltered;
                 foreach (var s in b.Inv.Stacks)
-                    sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日 · {TimedTag(gs, s.GoodsId, s.State, storePlace, b.X, b.Y)}）");
+                    sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（存 {s.AgeDays} 日 · {TimedTag(gs, s.GoodsId, s.State, storePlace, b.X, b.Y)}）{ActionLinks(s)}");
             }
         }
 
@@ -774,7 +842,7 @@ public partial class InspectPanel : FrostedPanel
         var sb = new System.Text.StringBuilder();
         sb.AppendLine($"树龄：{p.GrowthMonths / 12} 年 {p.GrowthMonths % 12} 月");
         sb.AppendLine(p.Mature ? "长势：已成树" : $"长势：幼树（{p.GrowthRatio * 100:F0}%）");
-        sb.AppendLine($"木质：{p.Hp:F0}/{p.MaxHp:F0}（砍伐扣减，久不被砍缓慢恢复）");
+        sb.AppendLine($"木质：{p.Hp:F0}/{p.MaxHp:F0}  {VigorTag(p)}（砍伐扣减，久不被砍缓慢恢复）");
         if (p.IsFruitTree)
             sb.AppendLine(p.Mature
                 ? $"挂果：{p.FruitStock:F1}/{PlantObj.FruitCap:F0} 份（挂满过熟会落果）"
@@ -795,6 +863,7 @@ public partial class InspectPanel : FrostedPanel
         sb.AppendLine(a.AgeMonths >= 12 ? $"月龄：{a.AgeMonths / 12} 岁零 {a.AgeMonths % 12} 月" : $"月龄：{a.AgeMonths} 个月");
         sb.AppendLine($"阶段：{LifeStageOf(a.AgeMonths)}");
         sb.AppendLine("习性：倚林而栖，日间小范围游走觅食");
+        sb.AppendLine($"体况：{VigorTag(a)}（冬季掉膘、春夏回膘，影响繁育与猎获出肉）");
         sb.AppendLine("可由猎户捕获，倒地化为野味供拾取");
         _body.Text = sb.ToString().TrimEnd();
     }
@@ -804,6 +873,37 @@ public partial class InspectPanel : FrostedPanel
         ageMonths < 6 ? "幼崽"
         : ageMonths < 12 ? "亚成年"
         : "成年";
+
+    /// <summary>
+    /// 树木生机标签（批次九十五）：软轴 = 当前木质 ÷ 上限的百分比，阶段与货品同一套语义。
+    /// 生机低的树产果少、出材少（落点见 PlantObj.VigorFactor）。
+    /// </summary>
+    private static string VigorTag(PlantObj p)
+        => StageLabel(p.Stage, "茁壮", "衰颓", "濒枯", p.VigorPercent);
+
+    /// <summary>
+    /// 动物体况标签（批次九十五）：冬季掉膘、春夏回膘；体况影响繁育率与猎获出肉量。
+    /// </summary>
+    private static string VigorTag(AnimalObj a)
+        => StageLabel(TimedRules.StageOf(a.Fresh), "肥壮", "偏瘦", "羸弱", a.Fresh);
+
+    /// <summary>三阶段着色标签（六类实体共用同一套阶段语义，故标签构造也共用一处）。</summary>
+    private static string StageLabel(FreshStage stage, string full, string waning, string spent, float percent)
+    {
+        string color = stage switch
+        {
+            FreshStage.Full => "#2f7d4f",
+            FreshStage.Waning => "#b8860b",
+            _ => "#b03a2e",
+        };
+        string label = stage switch
+        {
+            FreshStage.Full => full,
+            FreshStage.Waning => waning,
+            _ => spent,
+        };
+        return $"[color={color}]{label} {percent:F0}%[/color]";
+    }
 
     /// <summary>地面物资堆页：堆内逐货明细（标题随主要货品，果堆即显「果品堆」）。</summary>
     private void RenderPile(ItemPileObj pile)
@@ -830,7 +930,7 @@ public partial class InspectPanel : FrostedPanel
         // 批次九十五：地面堆按露天计时效（临水的堆坏得更快），与 TimelinessSystem 同口径
         var gs = GameState.I;
         foreach (var s in pile.Inv.Stacks)
-            sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日 · {TimedTag(gs, s.GoodsId, s.State, TimedPlace.Ground, pile.X, pile.Y)}）");
+            sb.AppendLine($"{Goods.NameOf(s.GoodsId)}  {s.Amount:F1} 份（落地 {s.AgeDays} 日 · {TimedTag(gs, s.GoodsId, s.State, TimedPlace.Ground, pile.X, pile.Y)}）{ActionLinks(s)}");
         _body.Text = sb.ToString().TrimEnd();
     }
 
@@ -927,6 +1027,65 @@ public partial class InspectPanel : FrostedPanel
             ? $"[color=#7a5c1e]· 翻新 {st.RenewCount} 次[/color]"
             : "";
         return $"{fresh} · {span} {renew}".TrimEnd();
+    }
+
+    /// <summary>游戏年换算（1 年 = 12 月 × 3 旬 = 36 游戏日）。</summary>
+    private const float DaysPerGameYear = TimeConfig.DaysPerMonth * TimeConfig.MonthsPerYear;
+
+    /// <summary>
+    /// 村民健康标签（批次九十五）：健康是"人"的时效软轴，与货品/房屋共用同一套阶段语义，
+    /// 并顺带显示它对劳动效率的折算——病弱的人干活慢，这件事在工坊产量与田间收成上看得见。
+    /// </summary>
+    private static string HealthTag(Citizen c)
+    {
+        string color = TimedRules.StageOf(c.Health) switch
+        {
+            FreshStage.Full => "#2f7d4f",
+            FreshStage.Waning => "#b8860b",
+            _ => "#b03a2e",
+        };
+        return $"[color={color}]{c.Health:F0}[/color]（劳动 {c.LaborFactor * 100:F0}%）";
+    }
+
+    /// <summary>
+    /// 房屋的时效标签（批次九十五）：软轴阶段（完好/失修/濒塌）+ 大修次数 + 结构剩余寿限。
+    /// 房屋与货品<b>共用同一套阶段语义</b>（<see cref="TimedRules.StageOf"/>）与翻新折扣，
+    /// 只是"新鲜度"在这里叫完好度（Condition）、"翻新"叫大修。
+    /// </summary>
+    private static string BuildingStageTag(BuildingInstance b)
+    {
+        string tag = TimedRules.StageOf(b.Condition) switch
+        {
+            FreshStage.Full => "[color=#2f7d4f]完好[/color]",
+            FreshStage.Waning => "[color=#b8860b]失修[/color]",
+            _ => "[color=#b03a2e]濒塌[/color]",
+        };
+        if (b.RenewCount > 0)
+            tag += $"[color=#7a5c1e] 大修{b.RenewCount}次[/color]";
+
+        float remain = BuildingLifeRemain(b);
+        if (remain < 0f)
+            return tag;
+        // 剩余不足三年时改用"日"，免得住户对"还剩 0.4 年"没有实感
+        tag += remain < DaysPerGameYear * 3f
+            ? $" [color=#b03a2e]结构余 {remain:F0} 日[/color]"
+            : $" 结构余 {remain / DaysPerGameYear:F0} 年";
+        return tag;
+    }
+
+    /// <summary>房屋结构剩余寿限（游戏日）：豁免类（天然/朝廷/王府）或未设寿限返回 -1。
+    /// 判定口径与 <c>MaintenanceSystem.LifespanSpent</c> 保持一致。</summary>
+    private static float BuildingLifeRemain(BuildingInstance b)
+    {
+        if (b.Def.Natural || b.Def.Category == "court" || b.Def.Id == PrinceMansionConfig.DefId)
+            return -1f;
+        float span = TimelinessConfig.BuildingSpanDays(b.Def.Category);
+        if (span <= 0f)
+            return -1f;
+        // 每次大修都折损结构寿限（与货品"回锅/烘干"同一套复合惩罚）
+        int n = System.Math.Min(b.RenewCount, TimelinessConfig.RenewMaxCount);
+        float total = span * System.MathF.Pow(TimelinessConfig.RenewSpanPenalty, n);
+        return System.Math.Max(0f, total - b.UsedLifespan);
     }
 
     /// <summary>家产模块（批次七十一）：独立小节「—— 家产 ——」+ 金额，不再缀在户主/田主名后。</summary>

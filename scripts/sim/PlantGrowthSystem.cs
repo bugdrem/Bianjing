@@ -32,8 +32,9 @@ public class PlantGrowthSystem
                 continue; // 只有果树才挂果，普通树只出木材
             if (p.FruitStock < PlantObj.FruitCap)
             {
-                // 树上果实逐日缓慢增长（未掉落前属于树上仓储）
-                p.FruitStock = Math.Min(PlantObj.FruitCap, p.FruitStock + FruitPerDay);
+                // 树上果实逐日缓慢增长（未掉落前属于树上仓储）；
+                // 批次九十五：按生机折算——虚弱/半枯的树产果更少（树越被砍越歉收）
+                p.FruitStock = Math.Min(PlantObj.FruitCap, p.FruitStock + FruitPerDay * p.VigorFactor);
             }
             else if (_rng.NextDouble() < DropChance)
             {

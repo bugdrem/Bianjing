@@ -116,9 +116,17 @@ public class Citizen
     /// <summary>兴趣值 0-100，闲逛/玩耍积攒。</summary>
     public float Fun = 50f;
 
-    /// <summary>健康值 0-100（预埋接口）：默认满值；后续健康系统会随疾病/伤病/营养下降，
-    /// 并经死亡率放大系数影响寿命（见 LifecycleSystem.HealthMortalityFactor）。</summary>
+    /// <summary>健康值 0-100（批次九十五起真正生效）：断炊与受冻逐日损耗、温饱缓慢恢复
+    /// （推进见 TimelinessSystem.TickPeople）。经死亡率放大系数影响寿命
+    /// （见 LifecycleSystem.HealthMortalityFactor），并经 <see cref="LaborFactor"/> 影响劳动效率。</summary>
     public float Health = 100f;
+
+    /// <summary>
+    /// 健康对劳动效率的折算 0~1（批次九十五）：重病者干活慢，落到田间收获与工坊加工两处产量。
+    /// 有下限 <see cref="TimelinessConfig.PersonLaborFloor"/>——病着也还能勉强干活，不至于产出归零。
+    /// </summary>
+    public float LaborFactor => TimelinessConfig.PersonLaborFloor
+        + (1f - TimelinessConfig.PersonLaborFloor) * TimedRules.EffectOf(Health);
 
     /// <summary>当前活动（表现层同步，读档后恢复）。</summary>
     public ActivityType Activity = ActivityType.RestHome;

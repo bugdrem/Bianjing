@@ -40,6 +40,15 @@ public class WildlifeSystem
         if (gs.Animals.Count == 0)
             return;
 
+        // 批次九十五：动物时效软轴=体况。冬季掉膘、春夏回膘（季节取自游戏月，与农田休耕同口径）。
+        // 瘦弱的个体繁育更少、被捕后出肉也更少——种群数量因此随季节自然波动。
+        bool winter = gs.CurMonth >= 10;
+        float vigorDelta = winter
+            ? TimelinessConfig.AnimalVigorWinterDelta
+            : TimelinessConfig.AnimalVigorGrowDelta;
+        foreach (var a in gs.Animals.Values)
+            a.Fresh = Math.Clamp(a.Fresh + vigorDelta, TimelinessConfig.AnimalVigorMin, 100f);
+
         var occupied = BuildOccupied(gs);
         bool changed = false;
 
@@ -79,9 +88,10 @@ public class WildlifeSystem
         {
             a.AgeMonths++;
 
-            // 繁育：总数未到林地上限时就近产仔（不依赖个体性别/性状）
+            // 繁育：总数未到林地上限时就近产仔（不依赖个体性别/性状）；
+            // 批次九十五：繁育率按体况折算——瘦弱个体少生，冬末种群自然收缩
             if (canBreed && gs.Animals.Count + newborns.Count < max
-                && _rng.NextDouble() < BreedChance)
+                && _rng.NextDouble() < BreedChance * a.BreedFactor)
             {
                 var spot = BestNearbyCell(gs, new Vector2I(a.X, a.Y), 4, occupied);
                 if (spot != null)
@@ -91,7 +101,9 @@ public class WildlifeSystem
                 }
             }
 
-            if (_rng.NextDouble() < NaturalDeathChance)
+            // 自然减员：既有随机项（意外/天敌）之外，批次九十五新增硬轴——年龄到寿必死。
+            // 两者并存：随机项让种群有不确定性，寿限保证个体不会永生。
+            if (a.LifespanSpent || _rng.NextDouble() < NaturalDeathChance)
                 deaths.Add(a.Id);
         }
 

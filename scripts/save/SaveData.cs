@@ -72,6 +72,12 @@ public class MapSave
     /// <summary>v24：与 RoadCells 一一对应的小路归属建筑 Id（非小路格/无主为 -1；批次六十六小路独立个体）。</summary>
     public List<int> LaneOwnerIds = new();
 
+    /// <summary>批次九十五：与 RoadCells 一一对应的道路时效状态——路况（软轴，影响移速）与已耗寿限
+    /// （硬轴，耗尽降一级）。<b>道路状态不能放进 Cell</b>（Cell 是 struct 且在 100 万格 dense 数组里），
+    /// 故与 RoadCells 平行独立成列，稀疏存储。</summary>
+    public List<float> RoadFresh = new();
+    public List<float> RoadUsed = new();
+
     public List<int> ZoneCells = new();
     public List<int> ZoneTypes = new();
     public List<int> WaterCells = new();
@@ -121,4 +127,10 @@ public class BuildingSave
 
     /// <summary>v24：升级增补的副营货品（商铺/工坊升级多品种）。</summary>
     public List<string> ExtraGoods = new();
+
+    /// <summary>批次九十五：结构寿限已耗（游戏日）与大修次数、累计修复量余数——房屋的时效硬轴，
+    /// 与货品的 Fresh/UsedLifespan/RenewCount 同构（<c>Condition</c> 即其软轴，见字段上方）。</summary>
+    public float UsedLifespan;
+    public int RenewCount;
+    public float RepairAccum;
 }

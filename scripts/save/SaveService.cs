@@ -18,6 +18,10 @@ public static class SaveService
 {
     /// <summary>v21：水位改逐格变化（Cell.WaterH 随地势、下限 0），新增 WaterLevels 随档；旧档无水位数据，拒读。</summary>
     public const int FormatVersion = 25; // 批次九十一：旬历（Day 1-3 为旬）+ Citizen.AgeYears 独立字段
+    // 批次九十五（时效系统）：新增 GoodsStack 时效三字段 / BuildingInstance 结构寿限 / MapSave 道路路况。
+    // **刻意不升版本号**——三者都有安全默认值（满鲜度、全新结构、无路况记录即全新路面），
+    // 旧档读入即为"万物如新"，行为合理，不必让玩家存档作废。
+    // 注意 GoodsStack.Fresh 依赖字段初始化器 = 100f，缺它旧档会被判成"全部已失效"。
     /// <summary>F5/F9 快速存档槽。</summary>
     public const string QuickSlot = "quick";
     /// <summary>自动存档槽。</summary>
@@ -220,6 +224,10 @@ public static class SaveService
             map.RoadCells.Add(rc.Y * MapGrid.Size + rc.X);
             map.RoadKinds.Add((int)gs.Map.CellAt(rc).RoadKind); // 与 RoadCells 一一对应
             map.LaneOwnerIds.Add(gs.Map.CellAt(rc).LaneOwnerId); // v24：小路归属随档（非小路为 -1）
+            // 批次九十五：道路时效状态随档（无记录视为全新路，写 100/0 兜住）
+            var rst = gs.RoadStateOf(rc);
+            map.RoadFresh.Add(rst.Fresh);
+            map.RoadUsed.Add(rst.UsedLifespan);
         }
         foreach (var zc in gs.BuildableCells.Concat(gs.FarmlandCells))
         {
@@ -258,6 +266,8 @@ public static class SaveService
                 SizeX = b.SizeX, SizeY = b.SizeY,
                 OwnerCitizenId = b.OwnerCitizenId,
                 ExtraGoods = b.ExtraGoods,
+                // 批次九十五：房屋时效硬轴（结构寿限）与大修计数随档
+                UsedLifespan = b.UsedLifespan, RenewCount = b.RenewCount, RepairAccum = b.RepairAccum,
             });
 
         var citizens = new List<Citizen>(gs.Citizens.Values);
@@ -439,6 +449,14 @@ public static class SaveService
             cell.LaneOwnerId = i < (map.LaneOwnerIds?.Count ?? 0) ? map.LaneOwnerIds[i] : -1;
             gs.Roads.SetRoad(c, true, cell.RoadKind); // 含寻路权重重建（主路代价低）
             gs.RegisterRoadCell(c, false); // 重建增量道路格索引（读档期静默，避免后台线程广播事件跨线程触碰 HUD）
+            // 批次九十五：道路时效状态随档恢复——必须在 RegisterRoadCell 之后写，
+            // 否则会被"新铺路面 = 全新状态"覆盖掉路况与寿限
+            if (i < (map.RoadFresh?.Count ?? 0))
+                gs.RoadStates[GameState.CellIndex(c)] = new TimedState
+                {
+                    Fresh = map.RoadFresh[i],
+                    UsedLifespan = i < (map.RoadUsed?.Count ?? 0) ? map.RoadUsed[i] : 0f,
+                };
         }
         for (int i = 0; i < map.ZoneCells.Count; i++)
         {
@@ -504,6 +522,10 @@ public static class SaveService
                 SizeY = bs.SizeY,
                 OwnerCitizenId = bs.OwnerCitizenId,
                 ExtraGoods = bs.ExtraGoods ?? new List<string>(),
+                // 批次九十五：房屋时效硬轴随档（旧档缺字段即为 0 = 全新结构，不会误判为已到寿）
+                UsedLifespan = bs.UsedLifespan,
+                RenewCount = bs.RenewCount,
+                RepairAccum = bs.RepairAccum,
             };
             gs.Buildings[b.Id] = b;
             // 按实例占地标格（住宅扩建后大于定义占地）

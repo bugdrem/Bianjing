@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using Godot;
 
 namespace Bianjing;
 
@@ -72,8 +73,48 @@ public class MaintenanceSystem
 
             float amount = Math.Min(budget, 100f - worst.Condition);
             worst.Condition += amount;
+            AccumRepair(worst, amount); // 批次九十五：累计大修量——修得越多，结构寿限折得越狠
             budget -= amount;
         }
+
+        // 批次九十五：建筑修完后若还有余力，转去养路——此前道路只老化、无人养护。
+        // 与"修最破的那一座"同策略：一次把余量全补到路况最差的一格上（均摊会让每条路都修不好）。
+        if (budget > 0f)
+            RepairWorstRoad(gs, budget);
+    }
+
+    /// <summary>
+    /// 修缮匠养路：把剩余工量补到全城路况最差的一格。路况跨过阶段门槛时才广播重建
+    /// （与 <c>TimelinessSystem.TickRoads</c> 同口径——逐日全标脏等于每天重建整张地图）。
+    /// </summary>
+    private static void RepairWorstRoad(GameState gs, float budget)
+    {
+        if (gs.RoadCells.Count == 0)
+            return;
+
+        Vector2I worst = default;
+        float worstFresh = float.MaxValue;
+        foreach (var c in gs.RoadCells)
+        {
+            float f = gs.RoadStateOf(c).Fresh;
+            if (f >= 100f)
+                continue;
+            if (f < worstFresh)
+            {
+                worstFresh = f;
+                worst = c;
+            }
+        }
+        if (worstFresh >= 100f)
+            return; // 全城路面都完好，工量省下
+
+        var st = gs.RoadStateOf(worst);
+        float amount = Math.Min(budget, 100f - st.Fresh);
+        bool stageChanged = TimedRules.StageOf(st.Fresh) != TimedRules.StageOf(st.Fresh + amount);
+        st.Fresh += amount;
+        gs.RoadStates[GameState.CellIndex(worst)] = st;
+        if (stageChanged)
+            EventBus.RaiseCellChanged(worst); // 路面颜色随阶段变化，需要重建该分块
     }
 
     /// <summary>住宅/工商：居住者按人头出修缮钱，无人居住则任其荒废。</summary>
@@ -116,15 +157,53 @@ public class MaintenanceSystem
             // 批次八十七：回血按实收比例折算（旧版无条件全额回血——住户见底时等于免费维修，
             // 摊派收入与修缮服务脱钩；实收不足则建筑照常老化，终至坍塌回收）
             if (feeTotal > 0)
+            {
+                float before = b.Condition;
                 b.Condition = Math.Min(100f, b.Condition + ResidentRepairAmount / Days * paidTotal / feeTotal);
+                AccumRepair(b, b.Condition - before); // 批次九十五：住户集资修缮同样计入大修量
+            }
         }
+    }
+
+    /// <summary>
+    /// 累计修复量：每满 <see cref="TimelinessConfig.BuildingRepairPerRenew"/> 记为一次"大修"。
+    /// 大修次数越高，结构寿限被 ×0.65^n 折得越狠——与货品"回锅/烘干"是同一套翻新机制：
+    /// <b>每次翻新都透支未来</b>，所以老房子会越修越难维持，终须重建。
+    /// 用"累计量"而非"每次修缮都计数"，是因为日常养护是逐旬小额回血，逐次计数会瞬间爆表。
+    /// </summary>
+    private static void AccumRepair(BuildingInstance b, float amount)
+    {
+        if (amount <= 0f)
+            return;
+        b.RepairAccum += amount;
+        while (b.RepairAccum >= TimelinessConfig.BuildingRepairPerRenew)
+        {
+            b.RepairAccum -= TimelinessConfig.BuildingRepairPerRenew;
+            b.RenewCount++;
+        }
+    }
+
+    /// <summary>
+    /// 结构寿限是否已耗尽（批次九十五）：与 <see cref="BuildingInstance.RenewCount"/> 的复合折扣联算。
+    /// 天然建筑、朝廷机构、王爷府豁免（与既有"不老化"口径一致）。
+    /// </summary>
+    private static bool LifespanSpent(BuildingInstance b)
+    {
+        if (b.Def.Natural || b.Def.Category == "court" || b.Def.Id == PrinceMansionConfig.DefId)
+            return false;
+        float span = TimelinessConfig.BuildingSpanDays(b.Def.Category);
+        if (span <= 0f)
+            return false;
+        int n = Math.Min(b.RenewCount, TimelinessConfig.RenewMaxCount);
+        return b.UsedLifespan >= span * MathF.Pow(TimelinessConfig.RenewSpanPenalty, n);
     }
 
     private static void Collapse(GameState gs)
     {
         List<BuildingInstance> fallen = null;
         foreach (var b in gs.Buildings.Values)
-            if (b.Condition <= 0f)
+            // 两条坍塌路径（批次九十五）：软轴破败归零（无人修缮）或硬轴寿限耗尽（结构到寿）
+            if (b.Condition <= 0f || LifespanSpent(b))
                 (fallen ??= new List<BuildingInstance>()).Add(b);
         if (fallen == null)
             return;
