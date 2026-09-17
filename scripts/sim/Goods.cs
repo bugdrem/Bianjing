@@ -185,43 +185,52 @@ public static class Goods
     public static double ByproductAt(string id, int level) =>
         Recipes.TryGetValue(id, out var r) ? r.ByproductAt(level) : 0;
 
-    /// <summary>每份基价（文，居民卖出价；买入价为基价 × BuyMarkup）。
-    /// 物价锚点（需求 §9）：烧饼≈1文、柴薪 3文/捆、猪肉 10文/斤、工匠月薪 800~1200文。
+    /// <summary>
+    /// 每份基价（文，<b>居民卖出价 / 铺面收购价</b>；零售价为基价 × BuyMarkup）。
+    ///
+    /// <b>物价锚定（批次九十五重定）</b>：一升米 = 10 文 = 够普通人一天的用量（见
+    /// <c>EconomyConfig.FoodPerDay = 1</c>）。铺面零售 20 文上下，再按库存与鲜度浮动
+    /// （<see cref="RetailPrice"/> / <see cref="BuyerPrice"/>）。
+    ///
+    /// 其余货品全部由该锚推导，规则是<b>成品价 = 原料价 + 燃料价 + 约 22 文加工附加值</b>——
+    /// 这样各条加工链的每工日毛利落在同一量级（35~56 文/工日），
+    /// 不会再出现"做烧饼 4 文、做成衣 205 文"那种悬殊（旧表的最大失衡）。
     /// </summary>
     public static readonly Dictionary<string, long> BasePrice = new()
     {
-        // 食物/燃料
-        [Grain] = 10,
-        [Wood]  = 3,
-        [Fruit] = 6,
-        [Game]  = 18,
-        [Flatbread] = 15, // 烧饼（粮加工溢价）
-        [Charcoal]  = 8,  // 木炭（柴加工溢价）
-        // 原料
-        [Log]     = 5,
-        [Hide]    = 22,
-        [Herb]    = 25,
-        [RawSalt] = 15,
-        [IronOre] = 20,
-        [Stone]   = 8,
-        [Yeast]   = 12,
-        // 中间品
-        [Planks]      = 18,
-        [Leather]     = 40,
-        [RefinedSalt] = 40,
-        [IronIngot]   = 55,
-        // 成品
-        [Timber]    = 50,
-        [Wine]      = 45,
-        [Ironware]  = 140,
-        [Cured]     = 60,
-        [Furniture] = 100,
-        [Clothing]  = 150,
-        [Medicine]  = 80,
-        // 流民随身物（非买卖品，仅价值折入资产）
-        [Weapon] = 80,
-        [Book]   = 30,
-        [Scrap]  = 2,  // 废料（加工副产，价低可当柴烧）
+        // ---- 食物 / 燃料（锚点层）----
+        [Grain] = 10,      // 锚：一升 = 一人一天口粮
+        [Wood]  = 6,       // 一份可烧约三日
+        [Water] = 1,       // 家庭自取，近乎免费（不入交易链）
+        [Fruit] = 12,      // 时令副食，略高于主粮
+        [Game]  = 45,      // 肉食，约 4.5 倍主粮
+        [Flatbread] = 35,  // 粮10 + 柴6 + 工19
+        [Charcoal]  = 35,  // 柴2份12 + 工23（热值远高于柴）
+        // ---- 原料 ----
+        [Log]     = 8,
+        [Hide]    = 25,
+        [Herb]    = 30,
+        [RawSalt] = 20,    // 盐自古贵于米
+        [IronOre] = 30,
+        [Stone]   = 12,
+        [Yeast]   = 20,
+        // ---- 中间品（原料 + 燃料 6 + 工 22）----
+        [Planks]      = 30,  // 8 + 22
+        [Leather]     = 55,  // 25 + 6 + 22
+        [RefinedSalt] = 50,  // 20 + 6 + 22
+        [IronIngot]   = 60,  // 30 + 6 + 22
+        // ---- 成品（中间品 + 燃料 + 工 22）----
+        [Timber]    = 55,   // 30 + 22
+        [Wine]      = 40,   // 10 + 22（另有陈酿溢价，按等级配方耗粮更多）
+        [Ironware]  = 90,   // 60 + 6 + 22
+        [Cured]     = 120,  // 45 + 50 + 22
+        [Furniture] = 60,   // 30 + 22
+        [Clothing]  = 80,   // 55 + 22
+        [Medicine]  = 55,   // 30 + 22
+        // ---- 流民随身物（非买卖品，仅价值折入资产）----
+        [Weapon] = 120,
+        [Book]   = 60,
+        [Scrap]  = 3,  // 废料（加工副产，价低可当柴烧）
     };
 
     /// <summary>买入价倍率（去商铺购买比自产贵）：转发自 EconomyConfig。</summary>
@@ -264,14 +273,30 @@ public static class Goods
         ? StockPriceFactor(System.Math.Clamp(b.Inv.Total / b.Inv.Capacity, 0.0, 1.0))
         : 1.0;
 
-    /// <summary>零售单价（文）：基价 × 买入加价 × 库存联动倍率 —— 家庭零买自用价。</summary>
-    public static long RetailPrice(BuildingInstance seller, string goodsId) =>
-        Scale(PriceOf(goodsId) * BuyMarkup, FactorOf(seller));
+    /// <summary>
+    /// 鲜度对售价的折算（批次九十五）：全效果段不打折，衰减段随效果线性下滑，
+    /// 最低保留 <see cref="EconomyConfig.FreshPriceFloor"/>——坏了也有残值（还能当饲料、燃料、堆肥）。
+    ///
+    /// 这条堵的是时效系统最大的漏洞：此前铺面按基价照收，玩家可以把快失效的货
+    /// 全数卖给 NPC 铺面，把时间风险<b>无损转嫁</b>出去，整套"物品会变坏"形同虚设。
+    /// </summary>
+    public static double FreshPriceFactor(float freshness)
+    {
+        double eff = TimedRules.EffectOf(freshness);
+        return EconomyConfig.FreshPriceFloor + (1.0 - EconomyConfig.FreshPriceFloor) * eff;
+    }
 
-    /// <summary>批发单价（文）：基价 × 库存联动倍率 —— 买方议价：工坊生产性补料、
-    /// 铺面向居民收货同用此价；买方满仓压价、空仓抬价。</summary>
-    public static long BuyerPrice(BuildingInstance buyer, string goodsId) =>
-        Scale(PriceOf(goodsId), FactorOf(buyer));
+    /// <summary>零售单价（文）：基价 × 买入加价 × 库存联动倍率 × 鲜度折价 —— 家庭零买自用价。
+    /// 鲜度取该铺该货的加权平均（同货多批时按份数加权，见 <see cref="Inventory.FreshnessOf"/>）。</summary>
+    public static long RetailPrice(BuildingInstance seller, string goodsId) =>
+        Scale(PriceOf(goodsId) * BuyMarkup,
+            FactorOf(seller) * FreshPriceFactor(seller.Inv.FreshnessOf(goodsId)));
+
+    /// <summary>批发单价（文）：基价 × 库存联动倍率 × 鲜度折价 —— 买方议价：工坊生产性补料、
+    /// 铺面向居民收货同用此价；买方满仓压价、空仓抬价。
+    /// <paramref name="freshness"/> 为<b>被交易那一批</b>的实际鲜度——收货方按质论价。</summary>
+    public static long BuyerPrice(BuildingInstance buyer, string goodsId, float freshness = 100f) =>
+        Scale(PriceOf(goodsId), FactorOf(buyer) * FreshPriceFactor(freshness));
 
     /// <summary>按倍率折算单价：四舍五入取整（旧版 long 直接截断，低价货的溢价档被抹平），
     /// 基价为正时保底 ≥1 文（防折价把 2 文的废料折成 0 文白送）。</summary>

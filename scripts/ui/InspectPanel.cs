@@ -811,7 +811,7 @@ public partial class InspectPanel : FrostedPanel
             sb.AppendLine($"配方（{b.Level}级）：{arrow}");
             // 批次九十四：价的来源分开标注——进料按「收价」（买方议价，工坊补料与向居民收货同价），
             // 出货按「零售价」（家庭零买价，含买入加价），两者都随本仓占用率浮动
-            sb.AppendLine($"需料：{string.Join("、", inputs.Select(kv => $"{Goods.NameOf(kv.Key)} {b.Inv.AmountOf(kv.Key):F1}份（收价 {Goods.BuyerPrice(b, kv.Key)}文）"))}");
+            sb.AppendLine($"需料：{string.Join("、", inputs.Select(kv => $"{Goods.NameOf(kv.Key)} {b.Inv.AmountOf(kv.Key):F1}份（有效 {b.Inv.EffectiveAmountOf(kv.Key):F1} · 收价 {Goods.BuyerPrice(b, kv.Key, b.Inv.FreshnessOf(kv.Key))}文）"))}");
             sb.AppendLine($"产出：{Goods.NameOf(b.Specialty)} {b.Inv.AmountOf(b.Specialty):F1}份（零售 {Goods.RetailPrice(b, b.Specialty)}文）");
             double eff = b.Def.EfficiencyAt(b.Level);
             if (eff != 1.0)

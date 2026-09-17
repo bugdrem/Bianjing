@@ -6,7 +6,8 @@ namespace Bianjing;
 /// 每旬结算：建筑维护费、官粮消耗、铸币；月俸由 Main.OnMonthPassed 触发；朝廷采购待后续对接。</summary>
 public class EconomySystem
 {
-    /// <summary>人均旬耗官粮：转发自 EconomyConfig。</summary>
+    /// <summary>人均每月官粮用度（份）：转发自 EconomyConfig。
+    /// 在 TickDay 里按 1/DaysPerMonth 逐旬摊——1 游戏月 ≙ 1 真实月，故与配置的真实月值同义。</summary>
     private static double FoodPerCapita => EconomyConfig.OfficialFoodPerCapita;
 
     public void TickDay(GameState gs)
@@ -87,7 +88,7 @@ public class EconomySystem
         double minted = 0;
         foreach (var c in gs.Citizens.Values)
             if (c.JobKind == JobKind.Employed && gs.Buildings.TryGetValue(c.WorkplaceId, out var wp))
-                minted += wp.Def.MintPerWorkerDay;
+                minted += TimeConfig.PerRealDay(wp.Def.MintPerWorkerDay); // 配置为"每真实日"，此处换算成每旬
         minted *= gs.TechFactor("mint");
         if (minted <= 0)
             return;

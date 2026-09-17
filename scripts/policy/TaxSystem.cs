@@ -12,15 +12,23 @@ namespace Bianjing;
 /// </summary>
 public class TaxSystem
 {
-    /// <summary>每栋建筑的土地税月计税额（文，对应 3% 默认税率下的实收额；需求 §4.3）。</summary>
+    /// <summary>
+    /// 每栋建筑的土地税月计税额（文，对应默认税率 3% 下的实收额）。
+    ///
+    /// <b>批次九十五整体放大 6~10 倍</b>（旧税基与物价完全脱节：一栋商铺月税 50 文，
+    /// 而它雇一个店员就要 1500 文/月）；<b>批次九十八再随"1 游戏旬 = 10 真实日"的新尺度 ×10</b>。
+    ///
+    /// 现行基准：民居 L1 月税 600 文 ≈ 一月口粮（300 文）的两倍；
+    /// 一栋住三口的民居连同家计合计约 1500 文/月，占双职工家庭收入（≈7000 文）的 21%。
+    /// </summary>
     public static long BuildingTaxBase(BuildingDef def, int level)
     {
         return def.Id switch
         {
-            "house"    => level switch { 1 => 10, 2 => 25, 3 => 50, _ => 10 },
-            "mansion"  => level switch { 1 => 80, 2 => 150, 3 => 300, _ => 80 },
-            "workshop" => level switch { 1 => 40, 2 => 80, 3 => 150, _ => 40 },
-            "shop"     => level switch { 1 => 50, 2 => 100, 3 => 200, _ => 50 },
+            "house"    => level switch { 1 => 600, 2 => 1500, 3 => 3000, _ => 600 },
+            "mansion"  => level switch { 1 => 4000, 2 => 8000, 3 => 16000, _ => 4000 },
+            "workshop" => level switch { 1 => 2000, 2 => 4000, 3 => 8000, _ => 2000 },
+            "shop"     => level switch { 1 => 3000, 2 => 6000, 3 => 12000, _ => 3000 },
             _ => 0,
         };
     }

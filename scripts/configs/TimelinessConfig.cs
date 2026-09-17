@@ -239,44 +239,51 @@ public static class TimelinessConfig
     public static readonly Dictionary<string, TimedBaseline> Baselines = new()
     {
         // ---- 食物：易腐，短期（10~24 日 ≈ 现实 3~8 分钟）----
-        { Goods.Game,      new TimedBaseline(10f,   30f) },   // 野味：生肉最易腐
-        { Goods.Water,     new TimedBaseline(6f,    18f) },   // 饮水：隔日即馊
-        { Goods.Flatbread, new TimedBaseline(15f,   45f) },   // 烧饼：回锅的主力对象
-        { Goods.Fruit,     new TimedBaseline(24f,   60f) },   // 果品
-        { Goods.Cured,     new TimedBaseline(90f,  360f) },   // 腌货：加工换来耐放
-        { Goods.Grain,     new TimedBaseline(120f, 480f) },   // 粮食：谷物耐放（中期囤积主体）
-        { Goods.Wine,      new TimedBaseline(300f, 1800f) },  // 酒：越陈越耐
+        // ---- 食物 ----
+        // 生鲜：无稳定期——一离枝、一离火就开始劣变
+        { Goods.Game,      new TimedBaseline(10f,   30f,   0f) },   // 野味：生肉最易腐
+        { Goods.Water,     new TimedBaseline(6f,    18f,   0f) },   // 饮水：隔日即馊
+        { Goods.Flatbread, new TimedBaseline(15f,   45f,   0f) },   // 烧饼：回锅的主力对象
+        { Goods.Fruit,     new TimedBaseline(24f,   60f,   0f) },   // 果品
+        // 耐储：有稳定期——腌过、酿过、晒过的东西才存得住
+        { Goods.Cured,     new TimedBaseline(90f,  360f,  30f) },   // 腌货：仓房约 2 年后才开始变味
+        // ★ 粮食（谷物）：本表的基准案例——仓房 2.96 年转入打折、6.32 年不可食用
+        //   平台 48 ÷ 0.45 = 107 日 = 2.96 年（此前完全不变质）
+        //   鲜度 15 落在 (48 + 0.85×64) ÷ 0.45 = 228 日 = 6.32 年（此后不可食，可作饲料/堆肥）
+        //   鲜度 0 落在 112 ÷ 0.45 = 249 日 = 6.91 年；硬轴 480÷0.45 = 21.3 年才彻底消亡
+        { Goods.Grain,     new TimedBaseline(112f, 480f,  48f) },
+        { Goods.Wine,      new TimedBaseline(300f, 1800f, 90f) },   // 酒：越陈越耐，稳定期最长
 
         // ---- 燃料：柴薪的"鲜度"即燥度，湿柴热量低（烘干可救）----
-        { Goods.Wood,      new TimedBaseline(240f,   0f) },   // 柴薪：只受潮、不消亡
-        { Goods.Charcoal,  new TimedBaseline(600f,   0f) },   // 木炭：经烧制，极稳
+        { Goods.Wood,      new TimedBaseline(240f,   0f,   0f) },   // 柴薪：受潮是渐进的，无稳定期
+        { Goods.Charcoal,  new TimedBaseline(600f,   0f, 120f) },   // 木炭：经烧制，极稳
 
         // ---- 木作：木材缓慢朽坏 ----
-        { Goods.Log,       new TimedBaseline(300f, 1800f) },
-        { Goods.Planks,    new TimedBaseline(600f,   0f) },
-        { Goods.Timber,    new TimedBaseline(600f,   0f) },
-        { Goods.Furniture, new TimedBaseline(900f,   0f) },
+        { Goods.Log,       new TimedBaseline(300f, 1800f,  60f) },
+        { Goods.Planks,    new TimedBaseline(600f,   0f,  150f) },
+        { Goods.Timber,    new TimedBaseline(600f,   0f,  150f) },
+        { Goods.Furniture, new TimedBaseline(900f,   0f,  240f) },
 
         // ---- 金工：锈蚀极慢 ----
-        { Goods.IronIngot, new TimedBaseline(1200f,  0f) },
-        { Goods.Ironware,  new TimedBaseline(1800f,  0f) },
-        { Goods.Weapon,    new TimedBaseline(1800f,  0f) },
+        { Goods.IronIngot, new TimedBaseline(1200f,  0f,  480f) },
+        { Goods.Ironware,  new TimedBaseline(1800f,  0f,  720f) },
+        { Goods.Weapon,    new TimedBaseline(1800f,  0f,  720f) },
 
         // ---- 皮纺：生皮最急（鞣制后即稳）----
-        { Goods.Hide,      new TimedBaseline(20f,   60f) },
-        { Goods.Leather,   new TimedBaseline(900f,   0f) },
-        { Goods.Clothing,  new TimedBaseline(1200f,  0f) },
+        { Goods.Hide,      new TimedBaseline(20f,   60f,   0f) },   // 生皮：立即开始腐
+        { Goods.Leather,   new TimedBaseline(900f,   0f, 360f) },
+        { Goods.Clothing,  new TimedBaseline(1200f,  0f, 480f) },
 
         // ---- 医药：药材会失药效，丸药有明确保质期 ----
-        { Goods.Herb,      new TimedBaseline(45f,  150f) },
-        { Goods.Medicine,  new TimedBaseline(300f, 900f) },
+        { Goods.Herb,      new TimedBaseline(45f,  150f,   0f) },   // 药材：开始失药效便一路下滑
+        { Goods.Medicine,  new TimedBaseline(300f, 900f,  60f) },
 
         // ---- 盐业：结晶物只受潮 ----
-        { Goods.RawSalt,      new TimedBaseline(900f,  0f) },
-        { Goods.RefinedSalt,  new TimedBaseline(1800f, 0f) },
+        { Goods.RawSalt,      new TimedBaseline(900f,  0f, 360f) },
+        { Goods.RefinedSalt,  new TimedBaseline(1800f, 0f, 720f) },
 
         // ---- 杂项：酒曲是活物、会失活 ----
-        { Goods.Yeast,     new TimedBaseline(90f,  270f) },
+        { Goods.Yeast,     new TimedBaseline(90f,  270f,   0f) },
     };
 }
 
@@ -286,20 +293,36 @@ public static class TimelinessConfig
 /// </summary>
 public readonly struct TimedBaseline
 {
-    /// <summary>鲜度从满值（100）衰减到 0 所需游戏日。</summary>
+    /// <summary>鲜度从满值（100）衰减到 0 所需游戏日（<b>含稳定期</b>）。</summary>
     public readonly float FreshDays;
 
     /// <summary>硬轴总寿限（游戏日）。<b>0 表示不设硬轴</b>（只衰减、永不消亡）。</summary>
     public readonly float LifespanDays;
 
-    public TimedBaseline(float freshDays, float lifespanDays)
+    /// <summary>
+    /// 稳定期（游戏日，<b>露天基准</b>）：此前鲜度<b>完全不衰减</b>，之后才开始线性下滑。
+    ///
+    /// 这是"耐储物"的真实形态——稻谷是"三年不变质"，而不是"三年里慢慢掉到六成"，
+    /// 两者对玩家的体验完全不同（前者可以放心囤，后者要天天盯着）。
+    /// 生鲜类（野味、烧饼、生皮）没有稳定期，故默认 0。
+    ///
+    /// ⚠️ 单位是<b>露天基准日</b>：仓房内实际可存 = 本值 ÷ <see cref="ShelteredRateMul"/>(0.45)。
+    /// 例如粮食平台 48 → 仓房约 107 日 = <b>2.96 年</b>、露天 48 日 = 1.33 年。
+    /// </summary>
+    public readonly float PlateauDays;
+
+    public TimedBaseline(float freshDays, float lifespanDays, float plateauDays = 0f)
     {
         FreshDays = freshDays;
         LifespanDays = lifespanDays;
+        PlateauDays = plateauDays;
     }
 
     /// <summary>是否只参与软轴（无硬轴寿限）。</summary>
     public bool SoftOnly => LifespanDays <= 0f;
+
+    /// <summary>稳定期后用于衰减的时长（游戏日）：平台期不参与衰减，故须扣除。</summary>
+    public float DecayDays => System.MathF.Max(0.0001f, FreshDays - PlateauDays);
 }
 
 /// <summary>

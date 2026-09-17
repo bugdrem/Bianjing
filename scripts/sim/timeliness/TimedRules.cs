@@ -57,21 +57,45 @@ public static class TimedRules
         if (baseline.FreshDays <= 0f && baseline.LifespanDays <= 0f)
             return new TimedResolved(0f, 0f, -1f, 1f, FreshStage.Full, true);
 
-        // 翻新惩罚复合叠加：每多翻新一次，寿限再打一次折、衰减再放大一次
+        // 翻新惩罚复合叠加：每多翻新一次，寿限再打一次折、老化再加速一次
         int n = Math.Min(st.RenewCount, TimelinessConfig.RenewMaxCount);
         float renewSpan = MathF.Pow(TimelinessConfig.RenewSpanPenalty, n);
         float renewRate = MathF.Pow(TimelinessConfig.RenewRatePenalty, n);
 
         bool softOnly = baseline.LifespanDays <= 0f;
         float span = softOnly ? 0f : baseline.LifespanDays * rates.LifespanSpan * renewSpan;
-        // 基线速率 = 满值 100 在 FreshDays 内耗尽的斜率（点/游戏日）
-        float freshRate = baseline.FreshDays <= 0f
-            ? 0f
-            : 100f / baseline.FreshDays * rates.FreshRate * renewRate;
+        // 老化速率倍率：环境（仓房 0.45 / 露天 1.0）× 翻新惩罚
+        float agingRate = rates.FreshRate * renewRate;
         // 剩余寿限必须夹紧：环境会实时改变 span，未夹紧时可能出现负数
         float remain = softOnly ? -1f : MathF.Max(0f, span - st.UsedLifespan);
+        // 鲜度由累积龄期派生（稳定期内恒为 100），而非逐日扣减
+        float fresh = FreshOf(st.FreshAgeDays, baseline);
 
-        return new TimedResolved(span, freshRate, remain, EffectOf(st.Fresh), StageOf(st.Fresh), softOnly);
+        return new TimedResolved(span, agingRate, remain, EffectOf(fresh), StageOf(fresh), softOnly);
+    }
+
+    /// <summary>
+    /// 由累积老化龄期算鲜度：<b>稳定期内恒为 100，之后线性下降到 0</b>。
+    ///
+    /// 这就是"稻谷三年不变质"的落点——谷物的真实储存曲线是"先长期稳定、之后加速劣变"，
+    /// 而不是从入库第一天就线性下滑（后者对玩家意味着"要天天盯着"，
+    /// 前者意味着"可以放心囤三年"）。两者的数值可以调成一样，体验却完全不同。
+    /// </summary>
+    public static float FreshOf(float freshAgeDays, in TimedBaseline baseline)
+    {
+        if (baseline.FreshDays <= 0f)
+            return 100f;
+        float decayAge = MathF.Max(0f, freshAgeDays - baseline.PlateauDays);
+        return Math.Clamp(100f * (1f - decayAge / baseline.DecayDays), 0f, 100f);
+    }
+
+    /// <summary>由目标鲜度反算对应的老化龄期——翻新动作"把鲜度拉回某个值"时用。</summary>
+    public static float AgeForFresh(float targetFresh, in TimedBaseline baseline)
+    {
+        if (baseline.FreshDays <= 0f)
+            return 0f;
+        float decay = (1f - Math.Clamp(targetFresh, 0f, 100f) / 100f) * baseline.DecayDays;
+        return baseline.PlateauDays + decay;
     }
 
     /// <summary>软轴分档（用于合并判定）：按 <see cref="TimelinessConfig.FreshBandSize"/> 向下取整。</summary>

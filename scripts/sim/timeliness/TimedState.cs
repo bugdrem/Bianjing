@@ -27,8 +27,18 @@ public enum FreshStage
 /// </summary>
 public struct TimedState
 {
-    /// <summary>软轴：当前新鲜度 0~100（100 = 刚产出）。</summary>
+    /// <summary>
+    /// 软轴：当前新鲜度 0~100（100 = 刚产出）。
+    /// <b>这是派生值</b>——由 <see cref="FreshAgeDays"/> 与货品基线（含稳定期）算出，
+    /// 每日推进时刷新。保留为字段，是为了让面板、定价、翻新等读取点不必各自重算。
+    /// </summary>
     public float Fresh;
+
+    /// <summary>
+    /// 软轴累积老化龄期（游戏日，受环境影响：仓房累积慢、露天累积快）。
+    /// <b>稳定期内它照常累积，但鲜度不下降</b>——这就是"稻谷三年不变质"的实现方式。
+    /// </summary>
+    public float FreshAgeDays;
 
     /// <summary>硬轴：已耗用的寿限（游戏日，单调累积，与软轴独立计时）。</summary>
     public float UsedLifespan;
@@ -55,7 +65,8 @@ public readonly struct TimedResolved
     /// <summary>当前硬轴寿限阈值（游戏日）；<b>≤0 表示该物不设硬轴</b>（永不消亡）。</summary>
     public readonly float Span;
 
-    /// <summary>当前软轴衰减速率（鲜度点 / 游戏日）。</summary>
+    /// <summary>当前软轴老化速率倍率（1.0 = 每日老化一日；有顶仓房约 0.45、露天 1.0）。
+    /// 它累积到 <see cref="TimedState.FreshAgeDays"/> 上，鲜度再由龄期派生（见 TimedRules.FreshOf）。</summary>
     public readonly float FreshRate;
 
     /// <summary>当前硬轴剩余寿限（游戏日，已夹紧到 ≥0）；&lt;0 表示无硬轴。</summary>

@@ -229,12 +229,14 @@ public class TimelinessSystem
             var gctx = new TimedContext(TimedEntityKind.Goods, s.GoodsId, ctx.Place, ctx.CellIndex,
                 ctx.Month, ctx.NearWater);
             var rates = TimedRegistry.Compute(gctx);
-            var st = new TimedState { Fresh = s.Fresh, UsedLifespan = s.UsedLifespan, RenewCount = s.RenewCount };
+            var st = s.State;
             var r = TimedRules.Resolve(st, rates, s.GoodsId);
 
-            // 软轴：新鲜度按当前速率滑落
+            // 软轴：累积老化龄期（稳定期内照常累积，但鲜度不下降——鲜度由龄期派生，
+            // 见 TimedRules.FreshOf，这就是"稻谷三年不变质"的实现）
             if (r.FreshRate > 0f)
-                st.Fresh = MathF.Max(0f, st.Fresh - r.FreshRate);
+                st.FreshAgeDays += r.FreshRate;
+            st.Fresh = TimedRules.FreshOf(st.FreshAgeDays, TimedRules.BaselineOf(s.GoodsId));
 
             // 硬轴：有硬轴才累积（无硬轴的货品永不消亡，如柴薪、木炭）
             if (!r.SoftOnly)
@@ -247,8 +249,7 @@ public class TimelinessSystem
                 continue;
             }
 
-            s.Fresh = st.Fresh;
-            s.UsedLifespan = st.UsedLifespan;
+            s.SetState(st);
         }
     }
 

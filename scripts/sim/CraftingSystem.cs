@@ -11,8 +11,8 @@ namespace Bianjing;
 /// </summary>
 public class CraftingSystem
 {
-    /// <summary>每名在岗工人每日加工产量（份）：转发自 EconomyConfig。</summary>
-    private static double CraftPerWorkerDay => EconomyConfig.CraftPerWorkerDay;
+    /// <summary>每名在岗工人每游戏旬的加工产量（份）：配置为"每真实日"，此处乘前台压缩比换算成每旬。</summary>
+    private static double CraftPerWorkerDay => TimeConfig.PerRealDay(EconomyConfig.CraftPerWorkerDay);
 
     public void TickDay(GameState gs)
     {
@@ -45,21 +45,25 @@ public class CraftingSystem
                 // 燃料同样限产；不再受成品库容卡产——消耗原料份数≥产出份数，加工不会增加仓储占用
                 double byWorkers = labor * CraftPerWorkerDay * gs.TechFactor("craft")
                     * b.Def.EfficiencyAt(b.Level);
+                // 批次九十五：按"有效量"而非实物量算可产数——陈粮酿酒要耗更多粮（鲜度折算），
+                // 否则"故意把粮放陈再加工"会变成一条纯赚的套利路径
                 double byInputs = double.MaxValue;
                 foreach (var kv in inputs)
-                    byInputs = Math.Min(byInputs, b.Inv.AmountOf(kv.Key) / kv.Value); // 每份耗 kv.Value 份原料
+                    byInputs = Math.Min(byInputs, b.Inv.EffectiveAmountOf(kv.Key) / kv.Value); // 每份耗 kv.Value 份有效原料
                 if (fuelAt > 0)
-                    byInputs = Math.Min(byInputs, b.Inv.AmountOf(Goods.Wood) / fuelAt);
+                    byInputs = Math.Min(byInputs, b.Inv.EffectiveAmountOf(Goods.Wood) / fuelAt); // 湿柴要多烧
 
                 double make = Math.Min(byWorkers, byInputs);
                 if (make <= 0.0001)
                     continue;
 
                 // 扣原料、扣燃料、入成品，副产品（废料）随产出按等级比率入坊（超限入库：总占用只减不增）
+                // 扣料同样按有效量折算：ConsumeEffective 会取出更多实物来凑够所需有效量
+                // （鲜度 50% 的粮要耗双份，湿柴同理）
                 foreach (var kv in inputs)
-                    b.TakeGoods(kv.Key, make * kv.Value);
+                    b.Inv.ConsumeEffective(kv.Key, make * kv.Value);
                 if (fuelAt > 0)
-                    b.TakeGoods(Goods.Wood, make * fuelAt);
+                    b.Inv.ConsumeEffective(Goods.Wood, make * fuelAt);
                 b.StoreGoodsForce(spec, make);
                 double byp = Goods.ByproductAt(spec, b.Level);
                 if (byp > 0)

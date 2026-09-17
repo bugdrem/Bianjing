@@ -72,7 +72,11 @@ public static class RenewAction
         inv.Stacks.Remove(batch);
         if (fuel > 0)
             inv.Take(spec.FuelGoodsId, fuel); // 辅料自身也按最差优先取用
-        st.Fresh = System.MathF.Max(st.Fresh, spec.RestoreTo);
+        // 恢复 = 把累积龄期回退到"目标鲜度"对应的位置（只减不增：已比目标更新就不动）
+        float restored = System.MathF.Max(st.Fresh, spec.RestoreTo);
+        st.FreshAgeDays = System.MathF.Min(st.FreshAgeDays,
+            TimedRules.AgeForFresh(restored, TimedRules.BaselineOf(goodsId)));
+        st.Fresh = restored;
         st.RenewCount++;
         inv.StoreForceBatch(goodsId, amount, st);
 

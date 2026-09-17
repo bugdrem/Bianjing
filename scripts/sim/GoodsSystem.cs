@@ -12,10 +12,12 @@ namespace Bianjing;
 /// </summary>
 public class GoodsSystem
 {
-    /// <summary>每人每旬口粮 / 柴薪 / 饮水消耗（份）：转发自 EconomyConfig。</summary>
-    private static double FoodPerDay => EconomyConfig.FoodPerDay;
-    private static double FuelPerDay => EconomyConfig.FuelPerDay;
-    private static double WaterPerDay => EconomyConfig.WaterPerDay;
+    /// <summary>每人每游戏旬的口粮 / 柴薪 / 饮水消耗（份）：
+    /// 配置里是"每真实日"（1 升米 = 一人一天），此处经前台压缩比换成每旬（= 10 真实日）。
+    /// 改前台节奏只需改 <c>TimeConfig.RealDaysPerGameDay</c>，本处与配置均不必动。</summary>
+    private static double FoodPerDay => TimeConfig.PerRealDay(EconomyConfig.FoodPerDay);
+    private static double FuelPerDay => TimeConfig.PerRealDay(EconomyConfig.FuelPerDay);
+    private static double WaterPerDay => TimeConfig.PerRealDay(EconomyConfig.WaterPerDay);
 
     /// <summary>口粮扣减优先级：先吃主粮，再果品，最后野味。</summary>
     private static readonly string[] FoodOrder = { Goods.Grain, Goods.Fruit, Goods.Game };
@@ -67,7 +69,8 @@ public class GoodsSystem
         {
             if (gs.MilestoneLevel < need.MilestoneRequired)
                 break; // TierNeeds 按里程碑升序排列，后面的更不满足
-            double left = need.PerDay;
+            // 分级需求同样按"每真实日"配置，此处换算成每旬（批次九十八时间换算层）
+            double left = TimeConfig.PerRealDay(need.PerDay);
             foreach (var id in need.GoodsIds)
             {
                 if (home != null)

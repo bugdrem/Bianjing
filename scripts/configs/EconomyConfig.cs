@@ -11,11 +11,12 @@ public static class EconomyConfig
 {
     // ===== 货币注入（外部输入） =====
 
-    /// <summary>开府安家银：开局一次性发放（文）。</summary>
-    public const long SettlementGrant = 100_000;
+    /// <summary>开府安家银：开局一次性发放（文）。按新尺度（工人月薪 2000~7000）给到能撑起开局营造。</summary>
+    public const long SettlementGrant = 1_000_000;
 
-    /// <summary>王爷月俸：每月按时入国库（文/月），前期核心现金流。</summary>
-    public const long PrinceMonthlySalary = 8_000;
+    /// <summary>王爷月俸：每月按时入国库（文/真实月），前期核心现金流。
+    /// 与工匠月薪（2000~7000）拉开一个量级，才撑得起官署与宫殿的营造。</summary>
+    public const long PrinceMonthlySalary = 60_000;
 
     /// <summary>朝廷赏赐区间（文/次），任务触发时随机浮动。</summary>
     public const long CourtRewardMin = 5_000;
@@ -30,39 +31,55 @@ public static class EconomyConfig
 
     // ===== 货担与价差 =====
 
-    /// <summary>一担几份（居民单次搬运量，Goods.LoadUnits 转发于此）。</summary>
-    public const double LoadUnits = 5;
+    /// <summary>一担几份（居民单次搬运量，Goods.LoadUnits 转发于此）。
+    /// <b>批次九十八：5 → 30</b>——30 份正好是一人一月的口粮（30 真实日 × 1 升），
+    /// 于是"一担"重新等于"一月吃食"这个直观量。
+    /// ⚠️ 它同时决定砍树产出（<c>WoodPerHp = LoadUnits / ChopDamage</c>，即"一斧恰好一担"的换算），
+    /// 改动后已复算木料供需。</summary>
+    public const double LoadUnits = 30;
 
-    /// <summary>买入价倍率（去商铺购买比自产贵）。</summary>
-    public const double BuyMarkup = 1.5;
+    /// <summary>
+    /// 买入价倍率（去商铺购买比自产贵）。
+    /// <b>锚定（批次九十五重定）</b>：一升米基价 10 文、铺面零售 20 文上下，
+    /// 故本值 = 2.0；其余货品零售价同比例，再按库存联动与鲜度浮动。
+    /// </summary>
+    public const double BuyMarkup = 2.0;
 
     /// <summary>未登记基价的货品兜底单价（文，Goods.PriceOf 用）。</summary>
     public const long DefaultPrice = 10;
 
     // ===== 消耗 =====
 
-    /// <summary>人均旬耗官粮（份，官库赈济储备，区别于家中口粮；批次七十八：0.2→0.05——
-    /// 官粮不再是人人每旬的口粮，而是官府赈济/公务用度，补给靠朝廷粮饷 + 农田田赋）。</summary>
-    public const double OfficialFoodPerCapita = 0.05;
+    /// <summary>人均每月官粮用度（份，官库赈济储备，区别于家中口粮）：官府赈济与公务用度，
+    /// 补给靠朝廷粮饷 + 农田田赋。批次九十八随新尺度 ×10（0.05 → 0.5）。</summary>
+    public const double OfficialFoodPerCapita = 0.5;
 
-    /// <summary>朝廷粮饷（批次七十八）：朝廷按人口每月拨入官仓的官粮（份/人/月，凭空生成）——
-    /// 官粮从此有稳定补给，不再只靠开局存量耗尽即饥荒；农田田赋为额外增收。</summary>
-    public const double CourtFoodAmmoPerCapitaMonth = 3;
+    /// <summary>朝廷粮饷：朝廷按人口每月拨入官仓的官粮（份/人/月，凭空生成）。
+    /// 批次九十八随新尺度 ×10（3 → 30，够一人一个月的赈济口粮）。</summary>
+    public const double CourtFoodAmmoPerCapitaMonth = 30;
 
-    /// <summary>官仓储量上限（份/人，≈ 半年赈济储备：消耗 0.05 份/人/旬 × 3 旬 × 6 月 = 0.9）：
+    /// <summary>官仓储量上限（份/人，≈ 半年赈济储备：0.5 份/月 × 6 月 = 3）：
     /// 朝廷粮饷/田赋进官仓按此封顶（批次八十七），超限少拨少收——旧版官粮净流入无限膨胀，
     /// 且需求账本把官粮计入 grain 库存后缺粮判定永不触发。</summary>
-    public const double CourtFoodCapPerCapita = 0.9;
+    public const double CourtFoodCapPerCapita = 3;
 
     /// <summary>田赋（批次七十三/八十五）：农田 grain 收成按此比例入官粮，余下散落田面归村民——
     /// 官粮此前只有开局存量、无任何产出（buildings.json 无 foodOutput 定义），耗尽即永久饥荒、全民早亡；
     /// 批次八十五 0.2→0.1：农田改发固定工资后，种田家庭现金收入大头是工钱而非卖粮，田赋减半补农户收成。</summary>
     public const double GrainTaxShare = 0.1;
 
-    /// <summary>每人每旬口粮 / 柴薪 / 饮水消耗（份，家中库存；批次九十一：日值×7/3 保年耗不变）。</summary>
-    public const double FoodPerDay = 0.2333;
-    public const double FuelPerDay = 0.07;
-    public const double WaterPerDay = 0.2333;
+    /// <summary>
+    /// 每人每<b>真实日</b>的口粮 / 柴薪 / 饮水消耗（份，家中库存）。
+    /// 锚：1 份 = 1 升，一升米够普通人一天 —— 故口粮 1.0/真实日；
+    /// 柴薪 0.3（一份约烧三日）、饮水 1.0（井河自取，不入交易链）。
+    ///
+    /// ⚠️ 单位是<b>真实日</b>（1 游戏旬 = 10 真实日），结算处经 <c>TimeConfig.PerRealDay</c> 换算成每旬。
+    /// 于是实际每人每游戏旬吃 10 升、每游戏月（≙ 1 真实月）吃 30 升 = <b>300 文</b>，
+    /// 与"工人月薪 2000~7000 文"的比例（6.7~23 倍）正好落在史料区间内。
+    /// </summary>
+    public const double FoodPerDay = 1.0;
+    public const double FuelPerDay = 0.3;
+    public const double WaterPerDay = 1.0;
 
     /// <summary>断炊 / 缺柴时每旬兴致扣减。</summary>
     public const float HungerFunPenalty = 1f;
@@ -82,11 +99,13 @@ public static class EconomyConfig
     /// <summary>田面收成最多集中成几堆（防 1m 格下散出上百小堆拖垮拾运与渲染）。</summary>
     public const int HarvestMaxPiles = 8;
 
-    /// <summary>每名在岗工人每旬加工产量（份，工坊/商铺；批次九十一：日值×7/3 保年产量不变）。</summary>
+    /// <summary>每名在岗工人每<b>真实日</b>加工产量（份）：结算处经 <c>TimeConfig.PerRealDay</c> 换算成每旬。
+    /// 1.8667 × 10 ≈ 18.7 份 / 旬 / 工。</summary>
     public const double CraftPerWorkerDay = 1.8667;
 
-    /// <summary>地面物资堆单堆容量（份），满堆后多余收成烂在地里。</summary>
-    public const double PileCapacity = 40;
+    /// <summary>地面物资堆单堆容量（份），满堆后多余收成烂在地里。
+    /// 批次九十八：40 → 240（合 8 担）——新尺度下一担 30 份，旧容量只装得下一担出头。</summary>
+    public const double PileCapacity = 240;
 
     // ===== 商铺/工坊 =====
 
@@ -105,10 +124,31 @@ public static class EconomyConfig
     public const double StockLowThreshold = 0.2;    // ≤20% 涨价
     public const double StockLowPremium = 1.1;       // ×1.1（涨价 10%）
 
+    // ===== 鲜度折价（批次九十五：陈货卖不出新货价）=====
+
+    /// <summary>
+    /// 鲜度对售价的折算下限：鲜度耗尽（效果折算为 0）时仍保留此比例的售价。
+    /// 不设 0 是为了留住残值——东西坏了不等于一文不值（还能当饲料、堆肥、烧火）。
+    ///
+    /// 这条堵的是时效系统的最大漏洞：此前铺面按基价照收，
+    /// 玩家可以把快失效的货全卖给 NPC 铺面，把时间风险<b>无损转嫁</b>出去，
+    /// 于是整套"物品会变坏"的机制形同虚设。
+    /// </summary>
+    public const double FreshPriceFloor = 0.5;
+
     // ===== 家计与就业（原 JobsConfig 并入）=====
 
-    /// <summary>每人每月生活开销（文，逐旬按 1/DaysPerMonth 扣，先扣公产不足再成员分摊）。</summary>
-    public const long LivingCostPerCapita = 200;
+    /// <summary>
+    /// 每人每月生活开销（文/<b>真实月</b>，逐旬按 1/DaysPerMonth 扣，先扣公产不足再成员分摊，实收入官库）。
+    ///
+    /// <b>批次九十五：200 → 30；批次九十八随新尺度 ×10 → 300。</b>
+    /// 它对齐"一人一月口粮的价值"（30 真实日 × 1 升 × 10 文 = 300 文），定位为官府专营摊派。
+    ///
+    /// 旧值 200 的问题不在"收"而在<b>名实不符</b>：家庭口粮本就单独付货款给铺面，这笔"柴米官营"等于收第二遍钱。
+    /// 但当时判它"是生活成本的 6.7 倍"用错了尺度（把 1 游戏旬当成 1 真实日）——
+    /// 按正确尺度，一月米钱本就是 300 文，故现在的 300 才是名实相符。
+    /// </summary>
+    public const long LivingCostPerCapita = 300;
 
     /// <summary>无岗可寻时转入上山谋生（伐木/采摘/打猎）的概率（批次九十一：等比×7/3 超界，
     /// 改按「不上山」概率等比——闲逛/待业节奏不变：1-(1-0.6)×3/7≈0.83）。</summary>
@@ -145,13 +185,13 @@ public static class EconomyConfig
     /// <summary>建筑每月老化量（完好度，天然建筑不老化）。</summary>
     public const float BuildingAgingPerMonth = 0.7f;
 
-    /// <summary>每名修缮匠每月修复量 / 每月官府料钱（文）。</summary>
+    /// <summary>每名修缮匠每月修复量 / 每月官府料钱（文/真实月；批次九十八随尺度 ×10）。</summary>
     public const float RepairPerWorker = 25f;
-    public const long RepairWorkerCost = 100;
+    public const long RepairWorkerCost = 1_000;
 
-    /// <summary>居住者集资每月修复量 / 每位居住者每月修缮摊派（文）。</summary>
+    /// <summary>居住者集资每月修复量 / 每位居住者每月修缮摊派（文/真实月；批次九十八 ×10）。</summary>
     public const float ResidentRepairAmount = 5f;
-    public const long RepairFeePerResident = 15;
+    public const long RepairFeePerResident = 150;
 
     // ===== 税制（批次五十六重写：三税种定额+浮动模型，详见 TaxSystem）=====
 
@@ -188,6 +228,6 @@ public static class EconomyConfig
     /// <summary>宅邸三级名称。</summary>
     public static readonly string[] MansionLevelNames = { "小宅", "中宅", "大院" };
 
-    /// <summary>耕地价格（文/牛）：与宅基地同档。</summary>
-    public const long CattlePrice = 10_000;
+    /// <summary>耕地价格（文/牛）：与宅基地同档。批次九十八随尺度 ×10。</summary>
+    public const long CattlePrice = 100_000;
 }

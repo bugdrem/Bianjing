@@ -1145,7 +1145,7 @@ public partial class CitizenAgent : Node3D
                 if (_buyGoodsId != "" && gs.Buildings.TryGetValue(_buySourceId, out var src))
                 {
                     long price = _supplyBuildingId >= 0
-                        ? Goods.BuyerPrice(src, _buyGoodsId)
+                        ? Goods.BuyerPrice(src, _buyGoodsId, src.Inv.FreshnessOf(_buyGoodsId))
                         : Goods.RetailPrice(src, _buyGoodsId);
                     // 商税（批次七十五）：买家按成交额另付税入官库（可买量按含税价估算防超支）
                     double taxRate = gs.Taxes.TradeTaxRate;
@@ -1196,7 +1196,7 @@ public partial class CitizenAgent : Node3D
                         if (put > 0 && s.GoodsId == _consignGoodsId)
                             // 成品卖给商铺：铺面付款（批次九十四：买方议价 × 库存联动倍率，并按成交额代扣商税）
                             gs.PayFromBuildingTaxed(dest, C,
-                                (long)(Goods.BuyerPrice(dest, s.GoodsId) * put), gs.Taxes.TradeTaxRate);
+                                (long)(Goods.BuyerPrice(dest, s.GoodsId, s.Fresh) * put), gs.Taxes.TradeTaxRate);
                         C.Pack.Take(s.GoodsId, put);
                         stored += put;
                     }
@@ -1314,7 +1314,7 @@ public partial class CitizenAgent : Node3D
                     else
                         // 铺面能付多少付多少（批次九十四：买方议价 × 库存联动倍率，并按成交额代扣商税入官库）
                         gs.PayFromBuildingTaxed(shop, C,
-                            (long)(Goods.BuyerPrice(shop, s.GoodsId) * accepted), gs.Taxes.TradeTaxRate);
+                            (long)(Goods.BuyerPrice(shop, s.GoodsId, s.Fresh) * accepted), gs.Taxes.TradeTaxRate);
                     C.Pack.Take(s.GoodsId, accepted);
                     amount -= accepted;
                 }

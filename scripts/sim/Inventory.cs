@@ -31,6 +31,12 @@ public class GoodsStack
     /// </summary>
     public float Fresh = 100f;
 
+    /// <summary>
+    /// 软轴累积老化龄期（游戏日，受环境影响）：鲜度由它派生（见 `TimedRules.FreshOf`）。
+    /// 稳定期内照常累积但不掉鲜度。默认 0 = 全新（旧档缺此字段即视为刚入库，安全）。
+    /// </summary>
+    public float FreshAgeDays;
+
     /// <summary>硬轴：已耗用的寿限（游戏日，单调累积，与环境无关）。</summary>
     public float UsedLifespan;
 
@@ -38,12 +44,19 @@ public class GoodsStack
     public int RenewCount;
 
     /// <summary>取本批的时效状态副本。</summary>
-    public TimedState State => new() { Fresh = Fresh, UsedLifespan = UsedLifespan, RenewCount = RenewCount };
+    public TimedState State => new()
+    {
+        Fresh = Fresh,
+        FreshAgeDays = FreshAgeDays,
+        UsedLifespan = UsedLifespan,
+        RenewCount = RenewCount,
+    };
 
     /// <summary>写入时效状态。</summary>
     public void SetState(in TimedState st)
     {
         Fresh = st.Fresh;
+        FreshAgeDays = st.FreshAgeDays;
         UsedLifespan = st.UsedLifespan;
         RenewCount = st.RenewCount;
     }
