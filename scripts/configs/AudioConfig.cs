@@ -28,6 +28,45 @@ public static class AudioConfig
     /// <summary>音效子目录。</summary>
     public const string SfxDir = "sfx/";
 
+    /// <summary>人群环境音子目录（嘈杂人声：相机靠近人群时按密度播放）。</summary>
+    public const string AmbienceDir = "ambience/";
+
+    /// <summary>
+    /// 人群环境音播放表（批次一百零四）：key = cue id，value = 文件名（相对 <see cref="AmbienceDir"/>）。
+    /// 多首轮流播 + 交叉淡变，避免单一循环听出重复。
+    ///
+    /// 素材同样来自 Mixkit（Interface 之外的 crowd 分类），选的都是「人声嘈杂」而非
+    /// 「欢呼/掌声」——要的是市井底噪，不是事件音。
+    /// </summary>
+    public static readonly Dictionary<string, string[]> Ambience = new()
+    {
+        { "crowd_day", new[] { "crowd_city.ogg", "crowd_restaurant.ogg", "crowd_talking.ogg", "crowd_street.ogg", "crowd_park.ogg", "crowd_fair.ogg" } },
+    };
+
+    /// <summary>环境音起效半径（米）：相机焦点在这个水平距离内开始出现人声。</summary>
+    public const float CrowdRadius = 14f;
+
+    /// <summary>环境音满额人数：半径内达到这么多市民时音量到顶。</summary>
+    public const int CrowdFullCount = 24;
+
+    /// <summary>夜间人群折扣：宵禁 + 人多在屋内，街上人声稀疏（挂在 <see cref="GameClock.IsNight"/> 上）。</summary>
+    public const float CrowdNightFactor = 0.35f;
+
+    /// <summary>环境音基准音量（0~1，再乘 Sfx 总线音量）：氛围层，压在 BGM 与提示音之下。</summary>
+    public const float AmbienceVolume = 0.5f;
+
+    /// <summary>环境音淡入时长（秒）：向人群走近时人声渐起。</summary>
+    public const float AmbienceFadeIn = 1.5f;
+
+    /// <summary>环境音淡出时长（秒）：离开人群时余音多留一会，比硬切自然。</summary>
+    public const float AmbienceFadeOut = 2.5f;
+
+    /// <summary>环境音换曲交叉淡变时长（秒）。</summary>
+    public const float AmbienceCrossFade = 0.8f;
+
+    /// <summary>环境音完全静默多久后停止播放器（秒）：避免长时间零音量的空转播放。</summary>
+    public const float AmbienceSilenceStop = 3f;
+
     /// <summary>主音量（0~1）。</summary>
     public const float MasterVolume = 0.8f;
 
@@ -125,6 +164,20 @@ public static class AudioConfig
     /// <summary>取音效某一 cue 的音量倍率；未配置返回 1。</summary>
     public static float SfxGain(string cue)
         => Sfx.TryGetValue(cue, out var v) ? v.Gain : 1f;
+
+    /// <summary>取环境音某一 cue 的文件名列表；未配置返回空数组。</summary>
+    public static string[] AmbienceFiles(string cue)
+        => Ambience.TryGetValue(cue, out var v) ? v : System.Array.Empty<string>();
+
+    /// <summary>取环境音某一 cue 的第 i 首全路径；越界返回空串。</summary>
+    public static string AmbiencePath(string cue, int index)
+    {
+        var files = AmbienceFiles(cue);
+        return index >= 0 && index < files.Length ? AssetRoot + AmbienceDir + files[index] : "";
+    }
+
+    /// <summary>是否配置了任何环境音。</summary>
+    public static bool HasAmbience => Ambience.Count > 0;
 
     /// <summary>是否配置了任何 BGM（false 时音频系统不建播放器，零开销）。</summary>
     public static bool HasMusic => Tracks.Count > 0;

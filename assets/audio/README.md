@@ -10,6 +10,7 @@
 assets/audio/
   music/     ← BGM（.mp3）
   sfx/       ← 交互音效（.wav）
+  ambience/  ← 人群环境音（.ogg）：相机靠近人群时按密度播放
 ```
 
 ## BGM（music/）
@@ -46,6 +47,23 @@ assets/audio/
 
 > 换用其他来源时注意：**CC-BY / OGA-BY 必须署名**（写进本表），
 > **CC-BY-SA / GPL 有传染性不能用**，许可不明的站不碰。
+
+## 人群环境音（ambience/）
+
+相机焦点 **14m 半径内**的市民数驱动音量（满额 24 人，夜间 ×0.35），六首轮流播 +
+0.8s 交叉淡变。选型标准是「人声嘈杂」而非「欢呼/掌声」——要市井底噪，不要事件音。
+原曲为 WAV（共 90MB），已转 OGG Vorbis（44.1kHz 立体声，边缘 0.3s 淡变）。
+
+| 文件 | 原曲 | 时长 |
+|---|---|---|
+| `crowd_city.ogg` | City downtown crowd ambience | 2:00 |
+| `crowd_restaurant.ogg` | Restaurant crowd talking ambience | 2:00 |
+| `crowd_talking.ogg` | Big crowd talking loop | 1:00 |
+| `crowd_street.ogg` | Street ambience with walking people | 0:47 |
+| `crowd_park.ogg` | Calm park with people and children | 1:37 |
+| `crowd_fair.ogg` | People in fair ambience and laughter | 0:15 |
+
+环境音走 **Sfx 总线**（随「音效音量」滑杆一起调节）。
 
 ## 没有文件时的兜底
 

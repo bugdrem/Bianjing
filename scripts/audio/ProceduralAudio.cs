@@ -264,13 +264,15 @@ public static class ProceduralAudio
     // ---- 对外入口：按 cue 生成 ----
 
     /// <summary>生成某个 cue 的程序化音频；未识别的 cue 返回一个通用短音。
-    /// music:* 走循环 Wrap（BGM 需要亮度，不柔化）；其余走 WrapSfx（柔化）。</summary>
+    /// music:* / amb:* 走循环 Wrap（BGM 需要亮度不柔化、环境音是长底噪）；其余走 WrapSfx（柔化）。</summary>
     public static AudioStreamWav Make(string cue)
     {
         var wave = Build(cue);
         return cue.StartsWith("music:", StringComparison.Ordinal)
             ? Wrap(wave, loop: true)
-            : WrapSfx(wave);
+            : cue.StartsWith("amb:", StringComparison.Ordinal)
+                ? Wrap(wave, loop: true)
+                : WrapSfx(wave);
     }
 
     /// <summary>
@@ -291,6 +293,9 @@ public static class ProceduralAudio
             => Music("guzheng"),
         "music:night_calm:0" or "music:night_calm:1" => Music("guqin"),
         "music:celebration:0" => Music("celebration"),
+
+        // —— 人群环境音（批次一百零四）：无素材文件时的合成「市井人声底噪」——
+        _ when cue.StartsWith("amb:", StringComparison.Ordinal) => Crowd(),
 
         // —— UI（亮度全部压到 0.5 以下：温而不尖）——
         "sfx:ui_click" => Pluck(587f, 0.14f, 0.45f, 9f),
@@ -375,6 +380,55 @@ public static class ProceduralAudio
         // 稀疏拨波峰均比极高，按 RMS 归一到"听得见"的响度（目标约 −18dBFS）
         NormalizeRms(wave, 0.12f);
         return wave;
+    }
+
+    /// <summary>
+    /// 人群底噪（批次一百零四）：无环境音素材文件时的合成兜底——「远处一群人说话」的嗡鸣。
+    ///
+    /// 人群声的物理特征与乐器正好相反，所以这里**不用拨弦**：
+    ///   ① **褐噪声**（白噪漏积分）——能量集中在低频，像一群人混在一起的嗡鸣，
+    ///      而不是某个人的嗓音；
+    ///   ② **话音频带**（一阶低通 1.4kHz + 一阶高通 180Hz）——人声清晰的 2~5kHz
+    ///      不在场（那是「近在耳边」的特征），远处人群只剩 200~1400Hz 的闷吵；
+    ///   ③ **双正弦缓慢调幅**（0.7Hz + 1.9Hz，深度约 ±45%）——人群的「涨落」：
+    ///      这边笑一阵、那边争两句，总体音量像潮汐一样起伏，而不是平稳噪声。
+    ///
+    /// 时长 45s 循环：兜底音不与素材文件同台（有文件就走文件），长度够避免听出循环。
+    /// </summary>
+    private static float[] Crowd()
+    {
+        const float Seconds = 45f;
+        int n = (int)(Rate * Seconds);
+        var buf = new float[n];
+
+        float brown = 0f;   // 褐噪声积分器
+        float lp = 0f;      // 低通状态（话音频带上沿）
+        float hp = 0f;      // 高通状态（话音频带下沿）
+        float lpK = 1f - Mathf.Exp(-Mathf.Tau * 1400f / Rate);
+        float hpK = 1f - Mathf.Exp(-Mathf.Tau * 180f / Rate);
+        // 两个慢调制源的相位固定（不用随机）：保证每次生成的底噪形态一致，可复现
+        const float Ph1 = 0.7f, Ph2 = 2.3f;
+
+        for (int i = 0; i < n; i++)
+        {
+            float t = (float)i / Rate;
+            float white = (float)(Rng.NextDouble() * 2.0 - 1.0);
+            brown = brown * 0.995f + white * 0.05f;          // 漏积分 → 褐噪声（−6dB/oct）
+            lp += (brown - lp) * lpK;                         // 上沿 1.4kHz
+            float band = lp - hp;                             // 减高通状态 = 带通
+            hp += band * hpK;                                 // 下沿 180Hz
+
+            // 双正弦调幅（0.55~1.45 倍）+ 极慢的第三层（让 45s 内也有大小潮）
+            float mod = 0.55f
+                + 0.28f * Mathf.Sin(Mathf.Tau * Ph1 * t)
+                + 0.17f * Mathf.Sin(Mathf.Tau * Ph2 * t + 1.1f)
+                + 0.10f * Mathf.Sin(Mathf.Tau * 0.11f * t + 2.7f);
+            buf[i] = band * mod;
+        }
+
+        NormalizeRms(buf, 0.10f);
+        FadeEdges(buf, 0.5f); // 循环接缝：比 BGM 更长的淡变，底噪循环更容易听出接缝
+        return buf;
     }
 
     /// <summary>庆典乐句：五声音阶上行琶音 + 低音鼓点，短促不循环。</summary>

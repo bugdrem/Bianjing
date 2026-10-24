@@ -73,6 +73,10 @@ public static class AudioBank
     public static AudioStream Music(string cue, int index)
         => Load($"music:{cue}:{index}", AudioConfig.TrackPath(cue, index));
 
+    /// <summary>取环境音 cue 的第 i 首（越界或未配置返回 null）。</summary>
+    public static AudioStream Ambience(string cue, int index)
+        => Load($"amb:{cue}:{index}", AudioConfig.AmbiencePath(cue, index));
+
     /// <summary>取音效 cue（未配置返回 null）。</summary>
     public static AudioStream Sfx(string cue)
         => Load($"sfx:{cue}", AudioConfig.SfxPath(cue));

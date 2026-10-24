@@ -35,6 +35,17 @@ public partial class GameAudio : Node
     private int _currentTrack;
     private float _musicFade;      // 淡变进度（秒）
 
+    // 人群环境音（批次一百零四）：相机靠近人群时按密度播放的嘈杂人声
+    private AudioStreamPlayer _ambA;
+    private AudioStreamPlayer _ambB;
+    private bool _ambUseA = true;
+    private int _ambTrack = -1;        // 当前播到第几首（−1 = 未起播）
+    private float _ambLevel;           // 平滑后的密度系数（0~1）
+    private float _ambTarget;          // 外部设置的目标密度
+    private float _ambFade = -1f;      // 换曲淡变进度（负 = 无换曲进行中）
+    private float _ambSilence;         // 持续零密度计时
+    private bool _ambStarted;          // 是否已起播过（首播直接进，不淡变）
+
     // 音效池
     private readonly List<AudioStreamPlayer> _sfxPool = new();
     private int _sfxCursor;
@@ -59,6 +70,12 @@ public partial class GameAudio : Node
         _musicB = NewPlayer(BusMusic, GameSettings.MusicVolume);
         AddChild(_musicA);
         AddChild(_musicB);
+
+        // 人群环境音：两个播放器做换曲交叉淡变（单循环听久了会听出重复，六首轮播 + 淡变）
+        _ambA = NewPlayer(BusSfx, 0f);
+        _ambB = NewPlayer(BusSfx, 0f);
+        AddChild(_ambA);
+        AddChild(_ambB);
 
         for (int i = 0; i < AudioConfig.MaxConcurrentSfx; i++)
         {
@@ -127,7 +144,6 @@ public partial class GameAudio : Node
         if (_musicA == null)
             return;
         float dt = (float)delta;
-
         // 淡变推进：_musicFade 从 0 → CrossFade 为淡入，负值为淡出
         if (_musicFade >= 0f && _musicFade < AudioConfig.CrossFade)
         {
@@ -158,6 +174,118 @@ public partial class GameAudio : Node
         var active = _useA ? _musicA : _musicB;
         if (_currentCue.Length > 0 && !active.Playing && _musicFade >= AudioConfig.CrossFade)
             NextTrack();
+
+        // 人群环境音：密度平滑 + 换曲交叉淡变
+        UpdateAmbience(dt);
+    }
+
+    // ---- 人群环境音（批次一百零四）----
+
+    /// <summary>
+    /// 设置当前相机周边的人群密度（0~1）。由 HUD 按 4Hz 扫描半径内市民数后调用；
+    /// 音量平滑（涨 1.5s / 退 2.5s）在这里逐帧推进，调用方无需关心过渡。
+    /// </summary>
+    public void SetCrowdLevel(float level)
+    {
+        _ambTarget = Mathf.Clamp(level, 0f, 1f);
+    }
+
+    /// <summary>当前人群环境音的实际音量系数（诊断/设置页展示用）。</summary>
+    public float CrowdLevel => _ambLevel;
+
+    private void UpdateAmbience(float dt)
+    {
+        if (_ambA == null)
+            return;
+
+        // ① 密度平滑：向目标靠拢。涨潮快、退潮慢——靠近人群时人声较快起，
+        //    走开时余音多留一会，避免"擦肩而过"式的抽摘感。
+        float rate = _ambTarget > _ambLevel
+            ? 1f / AudioConfig.AmbienceFadeIn
+            : 1f / AudioConfig.AmbienceFadeOut;
+        _ambLevel = Mathf.MoveToward(_ambLevel, _ambTarget, rate * dt);
+
+        float vol = _ambLevel * AudioConfig.AmbienceVolume;
+
+        // ② 长时间零密度：停掉播放器（空转播放器仍占一路音频混合，且再起播有初始延迟）
+        if (_ambLevel < 0.002f)
+        {
+            _ambSilence += dt;
+            _ambA.VolumeLinear = 0f;
+            _ambB.VolumeLinear = 0f;
+            if (_ambSilence >= AudioConfig.AmbienceSilenceStop)
+            {
+                _ambA.Stop();
+                _ambB.Stop();
+                _ambTrack = -1;
+                _ambFade = -1f;
+            }
+            return;
+        }
+        _ambSilence = 0f;
+
+        // ③ 从未起播（或刚被停过）→ 起播一首，淡变从下一帧推进
+        if (_ambTrack < 0)
+        {
+            StartAmbienceTrack(NextAmbienceIndex());
+            return;
+        }
+
+        // _ambUseA 指向「持有当前曲」的播放器（约定同 BGM：StartAmbienceTrack 里翻转）
+        var cur = _ambUseA ? _ambA : _ambB;
+        var nxt = _ambUseA ? _ambB : _ambA;
+
+        // ④ 换曲淡变推进中
+        if (_ambFade >= 0f)
+        {
+            _ambFade += dt;
+            float t = Mathf.Clamp(_ambFade / AudioConfig.AmbienceCrossFade, 0f, 1f);
+            cur.VolumeLinear = Mathf.Lerp(0f, vol, t);   // cur = 淡入的新曲
+            nxt.VolumeLinear = Mathf.Lerp(vol, 0f, t);  // nxt = 淡出的旧曲
+            if (t >= 1f)
+            {
+                nxt.Stop();
+                _ambFade = -1f;
+            }
+            return;
+        }
+
+        // ⑤ 正常播放：当前曲播完 → 换下一首（交叉淡变）；否则音量跟随密度
+        if (!cur.Playing)
+            StartAmbienceTrack(NextAmbienceIndex());
+        else
+        {
+            _ambA.VolumeLinear = vol;
+            _ambB.VolumeLinear = vol;
+        }
+    }
+
+    /// <summary>起播一首环境音到「另一个」播放器并置淡变流程（约定同 <see cref="StartTrack"/>）。</summary>
+    private void StartAmbienceTrack(int index)
+    {
+        var stream = AudioBank.Ambience("crowd_day", index);
+        if (stream == null)
+            return;
+        _ambTrack = index;
+        var into = _ambUseA ? _ambB : _ambA;   // 淡入到「另一个」播放器
+        into.Stream = stream;
+        into.VolumeLinear = 0f;
+        into.Play();
+        _ambUseA = !_ambUseA;
+        _ambFade = 0f;
+    }
+
+    /// <summary>下一首的索引：随机但不重复上一首（连续两首相同会听出"跳带"）。</summary>
+    private int NextAmbienceIndex()
+    {
+        int n = AudioConfig.AmbienceFiles("crowd_day").Length;
+        if (n <= 0)
+            return 0;
+        if (n == 1)
+            return 0;
+        int next;
+        do { next = GD.RandRange(0, n - 1); } while (next == _ambTrack);
+        return next;
     }
 
     // ---- 音效 ----

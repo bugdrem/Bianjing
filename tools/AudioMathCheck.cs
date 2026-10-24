@@ -214,6 +214,7 @@ static class Synth
         "sfx:pick_water" => Noise(0.34f, 0.45f, 0.05f, 0.7f),
         "sfx:pick_animal" => Mix((Tone(330f, 0.1f, 0.03f, 0.5f), 0f, 1f), (Tone(247f, 0.14f, 0.03f, 0.6f), 0.09f, 0.8f)),
         "sfx:pick_tree" => Noise(0.2f, 0.25f, 0.015f, 0.5f),
+        _ when cue.StartsWith("amb:", StringComparison.Ordinal) => Crowd(),
         "sfx:news" => Pluck(494f, 0.3f, 0.5f, 8f),
         "sfx:tech" => Mix(
             (Pluck(440f, 0.3f, 0.5f, 8f), 0f, 1f),
@@ -253,6 +254,34 @@ static class Synth
         FadeEdges(wave, 0.3f);
         NormalizeRms(wave, 0.12f);
         return wave;
+    }
+
+    public static float[] Crowd()
+    {
+        const float Seconds = 45f;
+        int n = (int)(Rate * Seconds);
+        var buf = new float[n];
+        float brown = 0f, lp = 0f, hp = 0f;
+        float lpK = 1f - Mathf.Exp(-Mathf.Tau * 1400f / Rate);
+        float hpK = 1f - Mathf.Exp(-Mathf.Tau * 180f / Rate);
+        const float Ph1 = 0.7f, Ph2 = 2.3f;
+        for (int i = 0; i < n; i++)
+        {
+            float t = (float)i / Rate;
+            float white = (float)(Rng.NextDouble() * 2.0 - 1.0);
+            brown = brown * 0.995f + white * 0.05f;
+            lp += (brown - lp) * lpK;
+            float band = lp - hp;
+            hp += band * hpK;
+            float mod = 0.55f
+                + 0.28f * Mathf.Sin(Mathf.Tau * Ph1 * t)
+                + 0.17f * Mathf.Sin(Mathf.Tau * Ph2 * t + 1.1f)
+                + 0.10f * Mathf.Sin(Mathf.Tau * 0.11f * t + 2.7f);
+            buf[i] = band * mod;
+        }
+        NormalizeRms(buf, 0.10f);
+        FadeEdges(buf, 0.5f);
+        return buf;
     }
 
     public static float[] Celebration(float gain)
@@ -462,6 +491,49 @@ class Program
                 if (!attackOk) Bad($"{cue} 包络起音 {attack * 1000f:F0}ms < 5ms（太冲）");
                 if (!peakOk) Bad($"{cue} 峰值 {peak:F3} 超限");
                 if (!audible) Bad($"{cue} 柔化后过轻");
+            }
+        }
+
+        Console.WriteLine("\n== H：人群底噪（无素材文件时的合成兜底，批次一百零四）==");
+        {
+            var w = Synth.Crowd();
+            var (rms, peak, nan, zcr) = Stats(w);
+            float secs = w.Length / (float)Synth.Rate;
+            float hf = HfRatio(w);
+
+            // 调制深度：按 1s 窗算 RMS，看标准差/均值——平稳噪声的标准差接近 0，
+            // 人群底噪必须有明显"涨落"（目标：变异系数 ≥ 0.10）
+            int win = Synth.Rate;
+            var wr = new List<float>();
+            for (int off = 0; off + win <= w.Length; off += win)
+                wr.Add(Rms(w, off, win));
+            float mean = 0f;
+            foreach (var v in wr) mean += v;
+            mean /= Math.Max(1, wr.Count);
+            float var = 0f;
+            foreach (var v in wr) var += (v - mean) * (v - mean);
+            var /= Math.Max(1, wr.Count);
+            float cv = mean > 1e-6f ? MathF.Sqrt(var) / mean : 0f;
+
+            // 循环接缝：0.5s 淡变后首尾样本应近零
+            float head0 = MathF.Abs(w[0]);
+            float tailEnd = MathF.Abs(w[w.Length - 1]);
+            float seam = MathF.Abs(w[w.Length - 1] - w[0]);
+
+            bool ok = rms >= 0.01f && peak <= 1.02f && !nan && secs >= 40f
+                && hf <= 0.15f && cv >= 0.10f && head0 < 0.01f && tailEnd < 0.01f && seam < 0.02f;
+            Console.WriteLine($"  {(ok ? "OK " : "FAIL")} crowd {secs:F0}s  RMS {rms:F4}  峰值 {peak:F3}  零穿 {zcr:F0}Hz  高频 {hf:F3}  涨落CV {cv:F3}  接缝 {seam:E2}");
+            if (!ok)
+            {
+                fails++;
+                if (rms < 0.01f) Bad("crowd 几乎静音");
+                if (peak > 1.02f) Bad("crowd 削顶");
+                if (nan) Bad("crowd 含 NaN");
+                if (secs < 40f) Bad($"crowd 时长 {secs:F0}s 过短");
+                if (hf > 0.15f) Bad($"crowd 高频占比 {hf:F3} > 0.15（不像远处人群，像近耳噪声）");
+                if (cv < 0.10f) Bad($"crowd 涨落变异系数 {cv:F3} < 0.10（是平稳噪声，没有人群的潮汐感）");
+                if (head0 >= 0.01f || tailEnd >= 0.01f) Bad("crowd 首尾样本非零（循环接缝爆音）");
+                if (seam >= 0.02f) Bad($"crowd 接缝步进 {seam:E2}");
             }
         }
 

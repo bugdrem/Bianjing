@@ -203,6 +203,7 @@ public partial class Hud : CanvasLayer
     }
 
     private float _bgmCheck;
+    private float _crowdScan;
 
     public override void _Process(double delta)
     {
@@ -217,6 +218,16 @@ public partial class Hud : CanvasLayer
             GameAudio.I?.PlayMusic(IsNight() ? "night_calm" : "market_day");
         }
 
+        // 人群环境音（批次一百零四）：4Hz 扫描相机焦点周边市民密度，交给音频导演平滑。
+        // 音量平滑在 GameAudio 里逐帧做，这里只负责报数——低频扫描 + 高频平滑，
+        // 比每帧遍历全城市民（上千个）便宜得多。
+        _crowdScan -= (float)delta;
+        if (_crowdScan <= 0f)
+        {
+            _crowdScan = 0.25f;
+            GameAudio.I?.SetCrowdLevel(CrowdLevel());
+        }
+
         if (_infoTimer <= 0f)
             return;
         _infoTimer -= (float)delta;
@@ -227,6 +238,36 @@ public partial class Hud : CanvasLayer
     /// <summary>是否夜间（供 BGM 选曲用）：直接用 GameClock.IsNight（光照昼夜联动同一判据，
     /// 不另抄一套时段名匹配——时段名是「平旦/隅中/日中/晡时/黄昏/夜半」六时制，硬匹配必漏）。</summary>
     private bool IsNight() => _clock != null && _clock.IsNight;
+
+    /// <summary>
+    /// 相机焦点周边的人群密度（0~1）：半径内市民数 ÷ 满额数，夜间打折（宵禁、人多在屋内）。
+    ///
+    /// 参照点取**相机云台的 Position**（焦点）而不是相机本身——相机挂在焦点后上方
+    /// （默认拉距下水平偏移约 26m），用相机会让人声圈整体偏离玩家正在看的地方。
+    /// </summary>
+    private float CrowdLevel()
+    {
+        var gs = GameState.I;
+        var rig = _build?.Rig;
+        if (gs == null || rig == null)
+            return 0f;
+        var focus = rig.Position;
+        float r2 = AudioConfig.CrowdRadius * AudioConfig.CrowdRadius;
+        int n = 0;
+        foreach (var p in gs.Citizens.Values)
+        {
+            if (!p.PosValid)
+                continue;
+            float dx = p.PosX - focus.X;
+            float dz = p.PosZ - focus.Z;
+            if (dx * dx + dz * dz <= r2)
+                n++;
+        }
+        float level = Mathf.Min(1f, n / (float)AudioConfig.CrowdFullCount);
+        if (IsNight())
+            level *= AudioConfig.CrowdNightFactor;
+        return level;
+    }
 
     public override void _UnhandledKeyInput(InputEvent e)
     {
