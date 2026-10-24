@@ -9,4 +9,10 @@
          0.22.0 旧档（含 saves/quick）全部 MDB_INVALID 不可读；早期开发版不考虑历史兼容，旧档作废 -->
     <PackageReference Include="LightningDB" Version="0.23.0" />
   </ItemGroup>
+
+  <ItemGroup>
+    <!-- tools/ 下是独立可跑的校验/工具脚本（自带 csproj、引用工程产出的 GodotSharp.dll），
+         不属游戏程序集，排除出默认编译项，否则顶级语句会撞上库程序的 OutputType -->
+    <Compile Remove="tools/**/*.cs" />
+  </ItemGroup>
 </Project>

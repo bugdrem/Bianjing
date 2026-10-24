@@ -29,6 +29,15 @@ public partial class BuildingLayer : MapLayer
     private Node3D _assetRoot;
     private readonly Dictionary<int, Node3D> _assetInstances = new();
 
+    /// <summary>复用空表：分流时清空某一侧层用，避免每次重建都分配新 List。</summary>
+    private static readonly List<Transform3D> EmptyXf = new();
+    private static readonly List<Color> EmptyCol = new();
+
+    /// <summary>模块化零件套件层：按槽位各一层 MultiMesh，与原始体角色层并列。
+    /// 某槽位配置了 GLB 零件时，该角色的变换分流到套件层；未配置的槽位为 null，继续走原始体层。
+    /// 两层不会同时渲染同一批变换（见 Rebuild 里的 FillRole 分流），故不重复绘制。</summary>
+    private MultiMeshInstance3D[] _kit;
+
     public override void Build()
     {
         // 顶点色受光材质共用一份；主体与门窗额外半透（见下）
@@ -67,6 +76,22 @@ public partial class BuildingLayer : MapLayer
         };
         _windows = Add(winMesh, "BldgWindows", castShadow: false);
         _walls = Add(Box(vcMat), "BldgWalls");
+
+        // 模块化零件套件：只为「配置了 GLB 的槽位」建层，未配置槽位零开销
+        _kit = new MultiMeshInstance3D[BuildingModelConfig.SlotCount];
+        if (BuildingModelConfig.HasKitPiece)
+        {
+            var meshes = BuildingKit.AllMeshes();
+            for (int i = 0; i < meshes.Length; i++)
+            {
+                if (meshes[i] == null)
+                    continue;
+                var mm = LayerKit.MakeMulti(meshes[i], useColors: true);
+                mm.Name = $"BldgKit_{(BuildingModelConfig.Slot)i}";
+                AddChild(mm);
+                _kit[i] = mm;
+            }
+        }
 
         _assetRoot = new Node3D { Name = "AssetBuildings" };
         AddChild(_assetRoot);
@@ -139,22 +164,59 @@ public partial class BuildingLayer : MapLayer
             }
         }
 
-        LayerKit.FillMultiMesh(_founds.Multimesh, ctx.Found.X, ctx.Found.C);
-        LayerKit.FillMultiMesh(_bodies.Multimesh, ctx.Body.X, ctx.Body.C);
-        LayerKit.FillMultiMesh(_roofs.Multimesh, ctx.Roof.X, ctx.Roof.C);
-        LayerKit.FillMultiMesh(_roofEnds.Multimesh, ctx.RoofEnd.X, ctx.RoofEnd.C);
-        LayerKit.FillMultiMesh(_eaves.Multimesh, ctx.Eave.X, ctx.Eave.C);
-        LayerKit.FillMultiMesh(_ridges.Multimesh, ctx.Ridge.X, ctx.Ridge.C);
-        LayerKit.FillMultiMesh(_pillars.Multimesh, ctx.Pillar.X, ctx.Pillar.C);
-        LayerKit.FillMultiMesh(_banners.Multimesh, ctx.Banner.X, ctx.Banner.C);
-        LayerKit.FillMultiMesh(_lanterns.Multimesh, ctx.Lantern.X, ctx.Lantern.C);
-        LayerKit.FillMultiMesh(_steps.Multimesh, ctx.Step.X, ctx.Step.C);
-        LayerKit.FillMultiMesh(_windows.Multimesh, ctx.Window.X, ctx.Window.C);
-        LayerKit.FillMultiMesh(_walls.Multimesh, ctx.Wall.X, ctx.Wall.C);
-        LayerKit.FillMultiMesh(_doors.Multimesh, doorXf, doorColor);
+        // 分流填充：某槽位配置了 GLB 零件 → 该角色的变换进套件层；否则进原始体角色层。
+        // 两层二选一，同一批变换不会被绘制两次。
+        FillRole(_founds, ctx.Found, 0);
+        FillRole(_steps, ctx.Step, 1);
+        FillRole(_bodies, ctx.Body, 2);
+        FillRole(_roofs, ctx.Roof, 3);
+        FillRole(_roofEnds, ctx.RoofEnd, 4);
+        FillRole(_eaves, ctx.Eave, 5);
+        FillRole(_ridges, ctx.Ridge, 6);
+        FillRole(_pillars, ctx.Pillar, 7);
+        FillRole(_banners, ctx.Banner, 8);
+        FillRole(_lanterns, ctx.Lantern, 9);
+        FillRole(_windows, ctx.Window, 10);
+        FillRole(_walls, ctx.Wall, 11);
+        FillRole(_doors, doorXf, doorColor, (int)BuildingModelConfig.Slot.Door);
 
         // 释放已拆除或不再走资产路径的实例
         CleanupStaleAssetInstances(modelIds);
+    }
+
+    /// <summary>按槽位分流：有 GLB 零件进套件层（原始体层填空），否则进原始体层（套件层填空）。
+    /// 两侧都填空即可清空该层，无需额外分支处理「资产被移除」的情况。</summary>
+    private void FillRole(MultiMeshInstance3D primitive,
+        BuildingModelFactory.BuildRoleLists.Role role, int roleIndex)
+    {
+        var slot = BuildingKit.SlotOfRole(roleIndex);
+        int si = (int)slot;
+        if (_kit != null && si < _kit.Length && _kit[si] != null)
+        {
+            LayerKit.FillMultiMesh(_kit[si].Multimesh, role.X, role.C);
+            LayerKit.FillMultiMesh(primitive.Multimesh, EmptyXf, EmptyCol);
+        }
+        else
+        {
+            LayerKit.FillMultiMesh(primitive.Multimesh, role.X, role.C);
+            if (_kit != null && si < _kit.Length && _kit[si] != null)
+                LayerKit.FillMultiMesh(_kit[si].Multimesh, EmptyXf, EmptyCol);
+        }
+    }
+
+    /// <summary>门槽位专用分流（门由 BuildingLayer 自己按占地边界算，不在 BuildRoleLists 里）。</summary>
+    private void FillRole(MultiMeshInstance3D primitive,
+        List<Transform3D> xf, List<Color> cols, int slotIndex)
+    {
+        if (_kit != null && slotIndex < _kit.Length && _kit[slotIndex] != null)
+        {
+            LayerKit.FillMultiMesh(_kit[slotIndex].Multimesh, xf, cols);
+            LayerKit.FillMultiMesh(primitive.Multimesh, EmptyXf, EmptyCol);
+        }
+        else
+        {
+            LayerKit.FillMultiMesh(primitive.Multimesh, xf, cols);
+        }
     }
 
     /// <summary>阶段 C：为走资产路径的建筑实例化/复用 glb 节点，贴合占地与层高；记录其 Id 供清理。</summary>

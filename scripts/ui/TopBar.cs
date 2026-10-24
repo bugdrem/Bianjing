@@ -12,6 +12,7 @@ public partial class TopBar : FrostedPanel
     private readonly Action _onPolicy;
     private readonly Action _onFinance;
     private readonly Action _onTech;
+    private readonly Action _onSupply;
 
     private Button _money;
     private Label _cityWealth; // 城市总金额（批次七十二）：官库 + 全城家庭公产之和，后期作为政策/事件依据
@@ -21,7 +22,8 @@ public partial class TopBar : FrostedPanel
     private OptionButton _speedBox; // 速率下拉（批次七十六）：暂停/0.5x/1x/2x/4x，默认 1x
     private float[] _speeds;
 
-    public TopBar(GameClock clock, Action onSave, Action onLoad, Action onPolicy, Action onFinance, Action onTech)
+    public TopBar(GameClock clock, Action onSave, Action onLoad, Action onPolicy, Action onFinance,
+        Action onTech, Action onSupply)
     {
         _clock = clock;
         _onSave = onSave;
@@ -29,6 +31,7 @@ public partial class TopBar : FrostedPanel
         _onPolicy = onPolicy;
         _onFinance = onFinance;
         _onTech = onTech;
+        _onSupply = onSupply;
     }
 
     public override void _Ready()
@@ -68,6 +71,7 @@ public partial class TopBar : FrostedPanel
         UiTheme.StyleOptionPopup(_speedBox);
 
         box.AddChild(new VSeparator());
+        AddActionButton(box, "供需", _onSupply);
         AddActionButton(box, "政策", _onPolicy);
         AddActionButton(box, "研习", _onTech);
         AddActionButton(box, "保存", _onSave);

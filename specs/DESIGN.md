@@ -861,4 +861,6 @@ configs/*（只读参数） + data/*.json + mods/*（静态定义）
 | [ECONOMY.md](ECONOMY.md) | 经济系统专项规格（货币/注入/就业/税收/交易链/物价，合并自 `.qoder` 需求文档） |
 | [GAME_DESIGN.md](GAME_DESIGN.md) | 玩法设计与第一阶段开发计划原案（汴京盛卷框架） |
 | [RULES.md](RULES.md) | 项目开发规范（技术栈/阶段兼容/注释率/全英文/停问规则/常量归口） |
+| [REVIEW_2026-10.md](REVIEW_2026-10.md) | 全代码 Review：可玩性评估 + 经济循环核算 + 优先级建议清单 |
+| [VISUAL_ARCH.md](VISUAL_ARCH.md) | 视觉与模型架构：开源资产选型 / 关节骨骼人物 / 模块化建筑套件 / UI 设计令牌 |
 | `README.md` | 项目入口说明 |

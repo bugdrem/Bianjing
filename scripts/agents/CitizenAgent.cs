@@ -45,11 +45,9 @@ public partial class CitizenAgent : Node3D
     private MeshInstance3D _lower, _upper, _belt, _sleeveL, _sleeveR, _head, _hair, _hat;
     private StandardMaterial3D _lowerMat, _upperMat, _beltMat, _sleeveMat, _headMat, _hatMat;
 
-    // 部件直接挂在 _body 下：Position = 视觉绝对位置（相对身体根）。
-    // 阶段 C 取消 Skeleton3D + BoneAttachment3D 方案——Godot 4.7 代码构造 BA3D 反复不跟骨
-    // （试过 BoneIdx 显式绑定、ForceUpdateAllBoneTransforms、ResetBonePoses 都失败），
-    // 先保证村民在画面上看到完整的人形分层（头/身/腿/袖），姿态动画留待骨架方案重做时再加。
-    // _body 整体跟 CitizenAgent 移动与转身（_body.Rotation 由 FaceMoveDirection 控制）。
+    /// <summary>关节骨骼：把上面 8 个原始体部件绑到 7 个关节上，每帧由 FK 驱动。
+    /// 取代旧方案（部件绝对定位 + 整体上下 bob）——现在摆臂/俯身/扭转都真的在动。</summary>
+    private CitizenRig _rig;
 
     // 宋人占位模型：头/发盖/上身/袍摆 + 腰带 + 双垂袖 + 冠发，共享网格资源省内存，材质各自持有（袖同上衣、发盖同冠发共用）
     private static readonly BoxMesh SharedBox = new() { Size = Vector3.One };
@@ -79,13 +77,9 @@ public partial class CitizenAgent : Node3D
     private bool _sellFailed; // 上次售卖有卖不掉的尾货：下轮改背回家囤，防反复跑铺子死循环
     private Vector3 _laneJitter; // 个人固定车道偏移，避免全员踩路心叠成一条线
     private int _lookAgeYears = -1;
-    private float _bobPhase;     // 走路上下抖动相位（仅移动时推进，停下平滑回零）
 
-    // 走路上下颠簸（bob）：人随步频整体上下浮动，强化"在走"的观感；
-    // 幅度相对 ~0.7m 小人取 6cm 占比约 9%——远相机下仍可见，又不至于像跳；
-    // 频率约 1.6Hz（×2 让左右脚各一次，周期减半更自然）。
-    private const float BobAmp = 0.06f;
-    private const float BobFreq = 10f;
+    // ---- 动作状态：由当前活动 + 是否负重 + 是否在走 三要素推导，交给 CitizenRig ----
+    private CitizenRig.AnimState _anim = CitizenRig.AnimState.Idle;
 
     public CitizenAgent(Citizen citizen, GameClock clock, AgentManager manager)
     {
@@ -99,9 +93,10 @@ public partial class CitizenAgent : Node3D
         _body = new Node3D();
         AddChild(_body);
 
-        // 部件按身体局部空间直接挂在 _body 下：Position = 视觉绝对位置（ApplyLook 里算）
-        // 视觉位置 vs 骨锚点的换算：原版用 boneRoot=(0,0,0)/boneSpine=(0,waist,0) 等骨 rest 锚点，
-        // 部件局部位置 = 旧身位 − 锚点；现在没有骨锚点，部件位置就是视觉绝对位置。
+        // 关节骨骼先建：ApplyLook 里按算出的体型把 8 个部件绑到对应关节上。
+        // 部件仍挂在 _body 下（与旧方案相同的节点结构），但变换完全由 CitizenRig 的 FK 写入。
+        _rig = new CitizenRig(_body);
+
         _lower = AddPart(_body, SharedBox, _lowerMat = new StandardMaterial3D());     // 袍摆
         _upper = AddPart(_body, SharedBox, _upperMat = new StandardMaterial3D());     // 上身
         _belt = AddPart(_body, SharedBox, _beltMat = new StandardMaterial3D());       // 腰带
@@ -182,32 +177,45 @@ public partial class CitizenAgent : Node3D
         if (Mathf.Abs(Position.Y - surfaceY) > 0.001f)
             Position = Position with { Y = Mathf.MoveToward(Position.Y, surfaceY, 1.5f * dt) };
 
-        // 走路上下抖动（bob）：整体随步频上下浮。只动 _body 局部 Y（部件都挂在它下），
-        // 不碰 Position.Y（地形贴合基准），避免与落点高度/桥面逻辑冲突。
-        // 停下时平滑回零，免得站定后还悬在半空。
-        bool moving = _path != null;
-        if (moving)
-        {
-            _bobPhase += dt * BobFreq;
-            float bob = Mathf.Sin(_bobPhase * 2f) * BobAmp;
-            _body.Position = new Vector3(_body.Position.X, bob, _body.Position.Z);
-        }
-        else if (Mathf.Abs(_body.Position.Y) > 0.001f)
-        {
-            _body.Position = new Vector3(_body.Position.X, Mathf.MoveToward(_body.Position.Y, 0f, 4f * dt), _body.Position.Z);
-        }
+        // 关节骨骼驱动：按当前活动推导动作状态，由 FK 写各部件的 Position/Rotation/Scale
+        // （旧方案只有整体上下 bob，摆臂/俯身/扭转一概没有——见 CitizenRig 类注释）
+        UpdateAnimState();
+        _rig.Tick(_anim, dt, _path != null ? 1f : 0f, Mathf.Max(0.1f, _clock.Speed));
 
         // 位置回写数据层，随存档保存
         C.PosX = Position.X;
         C.PosZ = Position.Z;
         C.PosValid = true;
 
-        // 骨骼姿态动画暂未恢复（阶段 C 取消 BA3D 方案后留空）——转身靠 _body.Rotation，
-        // 部件相对 _body 位置固定，自然整体跟着转——够用就好
-
         // 背包货物可视化：份数/种类变化才重建，平时零开销
         UpdateCarryDisplay();
     }
+
+    /// <summary>
+    /// 动作状态推导（三要素，按优先级）：
+    ///   ① 原地劳作（伐木/采集/打猎/修房/在岗工作）→ Working（俯身挥臂）；
+    ///   ② 背上有货且在移动 → Carry（双臂前抱，比空手走得稳）；
+    ///   ③ 在移动 → Walk（标准步态）；
+    ///   ④ 其余（闲逛/歇息/排队等）→ Idle（呼吸 + 偶发张望）。
+    /// </summary>
+    private void UpdateAnimState()
+    {
+        bool moving = _path != null;
+        bool loaded = !C.Pack.IsEmpty;
+        bool toiling = !moving && IsToilActivity(C.Activity);
+
+        _anim = toiling ? CitizenRig.AnimState.Working
+            : moving && loaded ? CitizenRig.AnimState.Carry
+            : moving ? CitizenRig.AnimState.Walk
+            : CitizenRig.AnimState.Idle;
+    }
+
+    /// <summary>是否「原地劳作」类活动：这类活动站着不动但手上有活，播俯身挥臂。</summary>
+    private static bool IsToilActivity(ActivityType a) => a is ActivityType.Working
+        or ActivityType.Logging
+        or ActivityType.Gathering
+        or ActivityType.Hunting
+        or ActivityType.Repairing;
 
     /// <summary>搬运挂点：目前只有胸前抱持；后期肩挑（扁担两端）/畜驮（鞍侧）在此枚举与偏移表扩展。</summary>
     private enum CarryMount
@@ -1735,18 +1743,12 @@ public partial class CitizenAgent : Node3D
     /// <summary>外观：宋人市井装束（参考宋画风人物）——男女皆着及踝长袍（A 字下摆），
     /// 束深色腰带配宽垂袖；男戴幞头、女盘圆发髻；体型随年龄，配色按人稳定取自色板，老人白发灰袍。
     ///
-    /// **阶段 C：部件直接挂在 _body 下**，Position = 视觉绝对位置（相对身体根）。
-    /// 取消原 BoneAttachment3D 方案（部件局部位置 = 旧身位 − 骨锚点），现在没有骨锚点，
-    /// 直接用部件中心点应该落在的 y 高度。每个部件 Scale.Y/2 + 累加 = 实际分层位置：
-    ///   下摆 y ∈ [0, 0.85]           center 0.425
-    ///   腰带 y ∈ [0.85, 0.93]        center 0.89
-    ///   上身 y ∈ [0.85, 1.35]        center 1.10
-    ///   双袖 y ∈ [0.82, 1.20]        center 1.01（与上身重叠）
-    ///   头   y ∈ [1.32, 1.66]        center 1.49（与上身略叠出颈部）
-    ///   发盖 y ∈ [1.55, 1.75]        center 1.65
-    ///   冠   y ∈ [1.66, 1.75]        center 1.71
-    /// 各部件 Position 直接写视觉中心，Scale 决定厚度——零骨骼、零锚点换算，
-    /// 渲染必对（之前 BA3D + ForceUpdateAllBoneTransforms 仍堆在一起）。</summary>
+    /// **关节绑定（取代旧绝对定位）**：各部件改绑到 CitizenRig 的关节上，Position 由 FK 每帧写入：
+    ///   袍摆/腰带 → 骨盆（随躯干前倾微倾，长袍下摆本就跟人走）
+    ///   上身      → 脊柱（随躯干扭转，是与袍摆产生错位的「拧腰」效果来源）
+    ///   双袖      → 肘（袖顶锚在肩、袖身随肘屈，故一个部件同时吃到摆臂+屈肘）
+    ///   头/发/冠  → 颈（转头点头）
+    /// 偏移量都是「部件中心相对关节锚点」的关节局部量；体型变化时整体重绑一次。</summary>
     private void ApplyLook()
     {
         _lookAgeYears = C.AgeYears;
@@ -1761,58 +1763,61 @@ public partial class CitizenAgent : Node3D
 
         // 袍摆：及踝长袍下半，比上身宽出一圈成 A 字轮廓（女裙袍更宽）
         float lowerH = female ? 0.85f : 0.82f;
-        _lower.Scale = female ? new Vector3(0.54f, lowerH, 0.4f) : new Vector3(0.5f, lowerH, 0.36f);
-        _lower.Position = Vector3.Up * (lowerH / 2f); // 下摆从 y=0 升到 y=lowerH
-
-        // 腰带：束在袍身交界处上沿（贴近下摆顶 + 一半带宽）
-        _belt.Scale = new Vector3(_lower.Scale.X + 0.06f * (_lower.Scale.X / 0.5f), 0.08f, _lower.Scale.Z + 0.06f);
-        _belt.Position = new Vector3(0f, lowerH + 0.04f, 0f); // y ≈ lowerH+0.04
+        var lowerScale = female ? new Vector3(0.54f, lowerH, 0.4f) : new Vector3(0.5f, lowerH, 0.36f);
 
         // 袍身上段：从腰带接续上长，比袍摆稍窄
         float upperH = 0.5f;
-        _upper.Scale = new Vector3(female ? 0.34f : 0.36f, upperH, female ? 0.26f : 0.28f);
-        _upper.Position = new Vector3(0f, lowerH + upperH / 2f, 0f); // y ∈ [lowerH, lowerH+upperH]
+        var upperScale = new Vector3(female ? 0.34f : 0.36f, upperH, female ? 0.26f : 0.28f);
 
-        // 双垂袖：自肩部垂下，独立材质略调亮，外推 + 前移少许，让袖子从身体两侧/前方探出
+        // 双垂袖：自肩部垂下，独立材质略调亮。袖长按上臂长折算，使其同时覆盖上臂与前臂，
+        // 绑到肘关节时袖顶正好落在肩上（见 CitizenRig.BuildArm 的锚点算法）。
         var sleeve = new Vector3(0.12f, 0.40f, 0.18f);
-        _sleeveL.Scale = sleeve;
-        _sleeveR.Scale = sleeve;
-        float armX = _upper.Scale.X / 2f + sleeve.X / 2f + 0.04f; // 外推 4cm，越过上身边缘
-        float sleeveCenterY = lowerH + 0.05f + sleeve.Y / 2f; // 袖顶嵌进肩部 0.05
-        _sleeveL.Position = new Vector3(-armX, sleeveCenterY, 0.06f); // z=0.06 让袖子略前于上身
-        _sleeveR.Position = new Vector3(armX, sleeveCenterY, 0.06f);
 
         // 头：身高 lowerH + upperH = 1.32~1.35；头顶再加 0.24 球（接近真人头部尺寸，头身比 16%）
         float neckY = lowerH + upperH; // 颈底/上身顶
         float headSize = 0.24f;
-        _head.Scale = Vector3.One * headSize;
-        _head.Position = new Vector3(0f, neckY + headSize / 2f, 0f); // 头底嵌进颈
 
         // 发冠：薄的扁环（4cm 高 × 头宽），紧贴头顶外侧，不再覆盖脸——让脸完全可见
         float hairH = 0.04f;
-        _hair.Scale = new Vector3(headSize * 1.08f, hairH, headSize * 1.08f);
-        _hair.Position = new Vector3(0f, neckY + headSize + hairH / 2f + 0.005f, 0f);
+        var hairScale = new Vector3(headSize * 1.08f, hairH, headSize * 1.08f);
 
         // 冠：男幞头（扁盒）或女/孩小圆髻（在头顶外侧叠加，不再叠在脸上）
-        float hatH;
-        if (female || C.IsChild)
-        {
-            _hat.Mesh = SharedSphere;
-            float bunR = female ? 0.10f : 0.08f;
-            _hat.Scale = Vector3.One * bunR;
-            hatH = bunR * 2f;
-            _hat.Position = new Vector3(0f, neckY + headSize + hairH + bunR + 0.01f, 0f);
-        }
-        else
-        {
-            _hat.Mesh = SharedBox;
-            _hat.Scale = new Vector3(0.22f, 0.08f, 0.22f);
-            hatH = _hat.Scale.Y;
-            _hat.Position = new Vector3(0f, neckY + headSize + hairH + hatH / 2f + 0.01f, 0f);
-        }
+        bool useBun = female || C.IsChild;
+        _hat.Mesh = useBun ? SharedSphere : SharedBox;
+        float bunR = female ? 0.10f : 0.08f;
+        var hatScale = useBun ? Vector3.One * bunR : new Vector3(0.22f, 0.08f, 0.22f);
+        float hatH = useBun ? bunR * 2f : 0.08f;
 
-        // 搬运挂点：胸前（胸前偏上，与上身重叠）
-        _carryRig.Position = new Vector3(0f, lowerH + upperH * 0.5f, 0.28f);
+        // 腰带：束在袍身交界处上沿（贴近下摆顶 + 一半带宽）
+        var beltScale = new Vector3(lowerScale.X + 0.06f * (lowerScale.X / 0.5f), 0.08f, lowerScale.Z + 0.06f);
+
+        // ---- 写骨架尺寸并重绑部件 ----
+        _rig.LowerH = lowerH;
+        _rig.UpperH = upperH;
+        _rig.HeadSize = headSize;
+        _rig.ClearBinds();
+
+        // 袍摆：中心在骨盆下方半个袍长处（袍摆从地面升到骨盆）
+        _rig.Attach(CitizenRig.JPelvis, _lower, Vector3.Down * (lowerH / 2f), lowerScale);
+        // 腰带：正落在骨盆锚点上
+        _rig.Attach(CitizenRig.JPelvis, _belt, Vector3.Zero, beltScale);
+        // 上身：中心在骨盆上方半个上身长（下缘接腰带）
+        _rig.Attach(CitizenRig.JPelvis, _upper, Vector3.Up * (upperH / 2f), upperScale);
+        // 双袖：绑肘关节，偏移 = 沿臂向上 (上臂长 − 半个袖长) 使袖顶落在肩上、袖尾过肘；
+        // 另加 +Z 0.06 让袖子略前于上身（与旧方案一致，避免袖子陷进躯干侧面）。
+        float sleeveUp = _rig.UpperArm - sleeve.Y / 2f;
+        var sleeveOff = Vector3.Up * sleeveUp + new Vector3(0f, 0f, 0.06f);
+        _rig.Attach(CitizenRig.JElbowL, _sleeveL, sleeveOff, sleeve);
+        _rig.Attach(CitizenRig.JElbowR, _sleeveR, sleeveOff, sleeve);
+        // 头：颈关节上方半个头高处（头底嵌进颈）
+        _rig.Attach(CitizenRig.JNeck, _head, Vector3.Up * (headSize / 2f), Vector3.One * headSize);
+        // 发冠：头顶外侧
+        _rig.Attach(CitizenRig.JNeck, _hair, Vector3.Up * (headSize + hairH / 2f + 0.005f), hairScale);
+        // 冠：发冠之上
+        _rig.Attach(CitizenRig.JNeck, _hat, Vector3.Up * (headSize + hairH + hatH / 2f + 0.01f), hatScale);
+
+        // 搬运挂点：绑到脊柱关节（胸前偏上，与上身重叠），随躯干一起动
+        _rig.Attach(CitizenRig.JSpine, _carryRig, new Vector3(0f, -upperH * 0.5f, 0.28f), Vector3.One);
 
         _headMat.AlbedoColor = new Color(0.91f, 0.76f, 0.62f); // 肤色
         _hatMat.AlbedoColor = C.IsElder ? new Color(0.92f, 0.92f, 0.9f) : new Color(0.09f, 0.08f, 0.08f);

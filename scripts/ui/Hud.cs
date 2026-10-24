@@ -19,6 +19,7 @@ public partial class Hud : CanvasLayer
     private PolicyPanel _policy;
     private FinancePanel _finance;
     private TechPanel _tech;
+    private SupplyPanel _supply;
 
     public Hud(BuildController build, GameClock clock, Action onSave, Action onLoad)
     {
@@ -46,17 +47,20 @@ public partial class Hud : CanvasLayer
         _policy = new PolicyPanel();
         _finance = new FinancePanel();
         _tech = new TechPanel();
+        _supply = new SupplyPanel();
         _inspect = new InspectPanel();
         _inspect.Build = _build; // 批次七十：注入建造控制器（面板定位镜头用）
         var news = new NewsPanel(); // 公告栏：列表右下角弹出，开关按钮交给底部操作栏摆在最右
         AddChild(new TopBar(_clock, _onSave, _onLoad,
             () => OpenExclusive(_policy, _policy.Toggle),
             () => OpenExclusive(_finance, _finance.Toggle),
-            () => OpenExclusive(_tech, _tech.Toggle)));
+            () => OpenExclusive(_tech, _tech.Toggle),
+            () => OpenExclusive(_supply, _supply.Toggle)));
         AddChild(new BuildMenu(_build, news.ToggleButton));
         AddChild(_policy);
         AddChild(_finance);
         AddChild(_tech);
+        AddChild(_supply);
         AddChild(_inspect);
         AddChild(news);
 
@@ -128,7 +132,7 @@ public partial class Hud : CanvasLayer
 
     public void CloseInspect() => _inspect.Close();
 
-    /// <summary>侧面板互斥：目标未开则先关掉政策/财政/研习其余两个再开它（各自 Toggle 保留 Refresh）；目标已开则关闭。</summary>
+    /// <summary>侧面板互斥：目标未开则先关掉供需/政策/财政/研习其余几个再开它（各自 Toggle 保留 Refresh）；目标已开则关闭。</summary>
     private void OpenExclusive(Control panel, Action toggle)
     {
         if (panel.Visible)
@@ -139,16 +143,18 @@ public partial class Hud : CanvasLayer
         _policy.Visible = false;
         _finance.Visible = false;
         _tech.Visible = false;
+        _supply.Visible = false;
         toggle();
     }
 
-    /// <summary>收起政策/财政/科技侧面板（点击游戏世界时由 BuildController 调用）；
+    /// <summary>收起供需/政策/财政/科技侧面板（点击游戏世界时由 BuildController 调用）；
     /// 公告栏常驻不收，ESC 菜单另有遮罩拦截仅手动返回。</summary>
     public void CloseSidePanels()
     {
         _policy.Visible = false;
         _finance.Visible = false;
         _tech.Visible = false;
+        _supply.Visible = false;
     }
 
     public override void _Process(double delta)
