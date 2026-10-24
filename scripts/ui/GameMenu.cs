@@ -423,6 +423,8 @@ public partial class GameMenu : CanvasLayer
         autoRow.AddChild(autoOpt);
         _settingsBox.AddChild(autoRow);
 
+        BuildAudioSection(_settingsBox);
+
         var hint = new Label { Text = "快捷键：F5 快速保存 / F9 快速读档 / Ctrl+F 帧率 / 空格 暂停" };
         hint.AddThemeFontSizeOverride("font_size", 12);
         hint.AddThemeColorOverride("font_color", new Color(0.7f, 0.7f, 0.7f));
@@ -430,6 +432,127 @@ public partial class GameMenu : CanvasLayer
 
         AddButton(_settingsBox, "返回", () => ShowBox(_backTarget ?? _titleBox));
         return _settingsBox;
+    }
+
+    /// <summary>
+    /// 音频设置区（批次一百零二）：主音量 / 音乐 / 音效三条滑杆 + 一键静音 + 程序化兜底开关，
+    /// 并显示当前音频来源（素材文件 / 程序化合成 / 无）——「没有声音」时这里能直接看出原因。
+    /// </summary>
+    private void BuildAudioSection(VBoxContainer box)
+    {
+        box.AddChild(SectionLabel("音频"));
+
+        _audioSliderLabels = new Dictionary<HSlider, Label>();
+        box.AddChild(MakeVolumeRow("主音量", GameSettings.MasterVolume, v =>
+        {
+            GameSettings.MasterVolume = v;
+            GameSettings.Save();
+            GameSettings.ApplyAudio();
+        }));
+        box.AddChild(MakeVolumeRow("音乐", GameSettings.MusicVolume, v =>
+        {
+            GameSettings.MusicVolume = v;
+            GameSettings.Save();
+            GameSettings.ApplyAudio();
+        }));
+        box.AddChild(MakeVolumeRow("音效", GameSettings.SfxVolume, v =>
+        {
+            GameSettings.SfxVolume = v;
+            GameSettings.Save();
+            GameSettings.ApplyAudio();
+        }));
+
+        var mute = new CheckButton { Text = "静音", ButtonPressed = GameSettings.Muted };
+        mute.Toggled += on =>
+        {
+            GameSettings.Muted = on;
+            GameSettings.Save();
+            GameSettings.ApplyAudio();
+        };
+        box.AddChild(mute);
+
+        var proc = new CheckButton
+        {
+            Text = "程序化音频兜底（未放素材文件时用算法生成古风音乐）",
+            ButtonPressed = GameSettings.ProceduralAudio,
+        };
+        proc.Toggled += on =>
+        {
+            GameSettings.ProceduralAudio = on;
+            GameSettings.Save();
+            AudioBank.Invalidate();      // 清缓存让新开关立刻生效
+            GameSettings.ApplyAudio();
+            RefreshAudioSourceLabel();
+        };
+        box.AddChild(proc);
+
+        _audioSourceLabel = new Label { Text = "", HorizontalAlignment = HorizontalAlignment.Left };
+        _audioSourceLabel.AddThemeFontSizeOverride("font_size", 12);
+        _audioSourceLabel.AddThemeColorOverride("font_color", new Color(0.65f, 0.65f, 0.65f));
+        box.AddChild(_audioSourceLabel);
+        RefreshAudioSourceLabel();
+    }
+
+    private Label _audioSourceLabel;
+    private Dictionary<HSlider, Label> _audioSliderLabels;
+
+    /// <summary>刷新「当前音频来源」提示：让玩家一眼看到听到的是文件还是算法兜底。</summary>
+    private void RefreshAudioSourceLabel()
+    {
+        if (_audioSourceLabel == null)
+            return;
+        string src = AudioBank.SourceLabel;
+        _audioSourceLabel.Text = src switch
+        {
+            "无" => "当前无声：未放入素材文件，且已关闭程序化兜底",
+            "程序化合成（未放素材文件）" => "当前为程序化合成的古风兜底音（放入 assets/audio/ 的素材后自动改用素材）",
+            _ => $"当前音频来源：{src}",
+        };
+    }
+
+    /// <summary>一行「标签 + 滑杆 + 百分比」。</summary>
+    private HBoxContainer MakeVolumeRow(string name, float value, Action<float> onChanged)
+    {
+        var row = new HBoxContainer();
+        row.AddThemeConstantOverride("separation", 12);
+        row.CustomMinimumSize = new Vector2(0, DesignTokens.RowHeight);
+
+        var lbl = new Label { Text = name, CustomMinimumSize = new Vector2(56, 0) };
+        row.AddChild(lbl);
+
+        var slider = new HSlider
+        {
+            MinValue = 0,
+            MaxValue = 1,
+            Step = 0.05,
+            Value = value,
+            CustomMinimumSize = new Vector2(180, 0),
+            SizeFlagsHorizontal = Control.SizeFlags.ExpandFill,
+        };
+        row.AddChild(slider);
+
+        var pct = DesignTokens.Text($"{value * 100:0}%", DesignTokens.FontCaption, DesignTokens.StatusMuted);
+        pct.CustomMinimumSize = new Vector2(44, 0);
+        pct.HorizontalAlignment = HorizontalAlignment.Right;
+        row.AddChild(pct);
+
+        _audioSliderLabels[slider] = pct;
+        // 拖动中即时改音量 + 更新百分比；松手才落盘（避免每帧写 settings.cfg）
+        slider.ValueChanged += v =>
+        {
+            pct.Text = $"{v * 100:0}%";
+            onChanged((float)v);
+        };
+
+        return row;
+    }
+
+    private static Label SectionLabel(string text)
+    {
+        var lbl = new Label { Text = text };
+        lbl.AddThemeFontSizeOverride("font_size", DesignTokens.FontSection);
+        lbl.AddThemeColorOverride("font_color", UiTheme.CeladonD);
+        return lbl;
     }
 
     private VBoxContainer BuildQuitBox()

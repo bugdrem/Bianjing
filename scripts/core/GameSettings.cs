@@ -26,6 +26,25 @@ public static class GameSettings
     public static int WindowWidth = 1280;
     public static int WindowHeight = 720;
 
+    // ---- 音频（批次一百零二：音量设置 + 程序化兜底）----
+
+    /// <summary>主音量（0~1 线性）。作用于全部总线。</summary>
+    public static float MasterVolume = 0.8f;
+
+    /// <summary>音乐音量（0~1 线性）。BGM 要轻，不能盖过操作反馈。</summary>
+    public static float MusicVolume = 0.35f;
+
+    /// <summary>音效音量（0~1 线性）。</summary>
+    public static float SfxVolume = 0.7f;
+
+    /// <summary>静音（一键全静音，优先级高于各分路音量；设置成独立开关而非把主音量归零，
+    /// 是为了记住用户原来的主音量，取消静音时回去）。</summary>
+    public static bool Muted;
+
+    /// <summary>是否启用程序化合成音频兜底（未放置 CC0 文件时用算法现场生成古风拨弦与音效）。
+    /// 关掉则完全静默——供想「只用自己的音频文件」的开发者使用。</summary>
+    public static bool ProceduralAudio = true;
+
     public static void Load()
     {
         var cfg = new ConfigFile();
@@ -38,6 +57,11 @@ public static class GameSettings
         EdgePanEnabled = (bool)cfg.GetValue("general", "edge_pan_enabled", true);
         WindowWidth = (int)cfg.GetValue("display", "window_width", 1280);
         WindowHeight = (int)cfg.GetValue("display", "window_height", 720);
+        MasterVolume = (float)(double)cfg.GetValue("audio", "master_volume", 0.8);
+        MusicVolume = (float)(double)cfg.GetValue("audio", "music_volume", 0.35);
+        SfxVolume = (float)(double)cfg.GetValue("audio", "sfx_volume", 0.7);
+        Muted = (bool)cfg.GetValue("audio", "muted", false);
+        ProceduralAudio = (bool)cfg.GetValue("audio", "procedural_audio", true);
     }
 
     public static void Save()
@@ -50,10 +74,15 @@ public static class GameSettings
         cfg.SetValue("general", "edge_pan_enabled", EdgePanEnabled);
         cfg.SetValue("display", "window_width", WindowWidth);
         cfg.SetValue("display", "window_height", WindowHeight);
+        cfg.SetValue("audio", "master_volume", MasterVolume);
+        cfg.SetValue("audio", "music_volume", MusicVolume);
+        cfg.SetValue("audio", "sfx_volume", SfxVolume);
+        cfg.SetValue("audio", "muted", Muted);
+        cfg.SetValue("audio", "procedural_audio", ProceduralAudio);
         cfg.Save(CfgPath);
     }
 
-    /// <summary>把窗口相关设置应用到显示服务：全屏直接切全屏，否则切窗口并按选定分辨率调尺寸居中。</summary>
+    /// <summary>把窗口与音频设置应用到显示服务 / 音频服务。</summary>
     public static void Apply()
     {
         if (Fullscreen)
@@ -68,6 +97,16 @@ public static class GameSettings
         }
         DisplayServer.WindowSetVsyncMode(
             VSync ? DisplayServer.VSyncMode.Enabled : DisplayServer.VSyncMode.Disabled);
+        ApplyAudio();
+    }
+
+    /// <summary>把音量设置推到音频总线。静音时主音量归零（各分路音量保留记忆）。</summary>
+    public static void ApplyAudio()
+    {
+        float master = Muted ? 0f : MasterVolume;
+        GameAudio.SetBusVolume("Master", master);
+        GameAudio.SetBusVolume("Music", MusicVolume);
+        GameAudio.SetBusVolume("Sfx", SfxVolume);
     }
 
     /// <summary>把窗口移到当前显示器中央（换分辨率后避免窗口跑到屏幕外）。</summary>

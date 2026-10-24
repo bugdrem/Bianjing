@@ -548,6 +548,7 @@ public partial class BuildController : Node
         if (PlacementValidator.CanPlaceBuilding(gs, _def, origin))
         {
             gs.PlaceBuilding(_def, origin);
+            GameAudio.I?.Sfx("ui_build"); // 批次一百零一：营造落成
             // 王爷府首建（批次八十一）：一次性落成，放置成功即退出建造模式（预览收起，落成后解锁一切营造）
             if (_def.Id == PrinceMansionConfig.DefId)
                 SetModeNone();

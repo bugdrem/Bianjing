@@ -81,7 +81,12 @@ public partial class TopBar : FrostedPanel
     private void AddActionButton(HBoxContainer box, string text, Action action)
     {
         var btn = new Button { Text = text };
-        btn.Pressed += () => action?.Invoke();
+        // 批次一百零一：按钮按下先响一声再执行（反馈即时，不被后续逻辑延迟）
+        btn.Pressed += () =>
+        {
+            GameAudio.I?.Sfx("ui_click");
+            action?.Invoke();
+        };
         box.AddChild(btn);
     }
 

@@ -15,6 +15,12 @@ run/main_scene="res://scenes/Main.tscn"
 config/features=PackedStringArray("4.7", "C#", "Forward Plus")
 config/icon="res://icon.svg"
 
+; 批次一百零一：音频导演（古风 BGM + 交互音效）。
+; 音效触发点分散在 UI/世界/模拟层三处，且加载画面就要起 BGM，故用 Autoload 单例。
+; 音频文件不进仓库（体积大 + 授权需逐件核对），放入 res://assets/audio/ 即生效，未配则静默空转。
+[autoload]
+GameAudio="*res://scripts/audio/GameAudio.cs"
+
 [display]
 
 window/stretch/mode="canvas_items"
@@ -32,3 +38,15 @@ project/assembly_name="Bianjing"
 [rendering]
 
 rendering_device/driver.windows="d3d12"
+
+; 批次一百零一：音频总线分组——玩家可分别调 BGM 与音效音量。
+; GameAudio 运行时也会确保这两条总线存在（未声明则补建），此处显式声明以便编辑器里直接看到。
+[audio]
+
+bus/master/volume_db=0.0
+
+bus/music/send="Master"
+bus/music/volume_db=-6.0
+
+bus/sfx/send="Master"
+bus/sfx/volume_db=0.0

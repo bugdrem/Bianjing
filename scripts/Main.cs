@@ -54,6 +54,7 @@ public partial class Main : Node3D
         EventBus.Reset();
         GameSettings.Load();
         GameSettings.Apply();
+        GameSettings.ApplyAudio(); // 批次一百零二：音频总线音量随设置推下去（GameAudio 就绪前也生效）
 
         // 全局挂载新中式 UI 主题（宣纸白毛玻璃 + 书法黑字 + 青辅 + 红印章）：
         // 根 Window 的 Theme 向下传播到所有 Control 子节点（含 Hud/GameMenu/LoadingScreen），

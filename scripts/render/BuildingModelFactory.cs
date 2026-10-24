@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using Godot;
 
@@ -73,8 +74,6 @@ public static class BuildingModelFactory
         }
     }
 
-    // ---- 公开入口 ----
-
     /// <summary>把已放置建筑 b 的各角色追加进 ctx（不持有网格，网格在 GridRenderer）。</summary>
     public static void AppendAssembly(GameState gs, BuildingInstance b, BuildRoleLists ctx)
     {
@@ -82,11 +81,12 @@ public static class BuildingModelFactory
         var center = MapGrid.CellToWorld(b.Origin);
         float groundY = gs.Map.GroundY(b.Origin);
         float baseY = groundY + WorldConfig.BuildingBaseLift;
-        float w = b.FootX * cs * 0.9f;
-        float d = b.FootY * cs * 0.9f;
-        float height = b.Def.Height * (1f + 0.35f * (b.Level - 1));
-        center += new Vector3((b.FootX - 1) * cs / 2f, baseY + height / 2f, (b.FootY - 1) * cs / 2f);
-        Compose(b.Def, b.FootX, b.FootY, b.Level, b.Condition, w, d, height, baseY, center, ctx, gs, b);
+        int footX = b.FootX, footY = b.FootY;
+        float w = footX * cs * 0.9f;
+        float d = footY * cs * 0.9f;
+        // 墙高按占地推导（SongHouseConfig），不再用各建筑手调的魔法 Height
+        center += new Vector3((footX - 1) * cs / 2f, baseY, (footY - 1) * cs / 2f);
+        Compose(b.Def, footX, footY, b.Level, b.Condition, w, d, baseY, center, ctx, gs, b);
     }
 
     /// <summary>放置预览：用同源造型逻辑产出单栋预览装配（局部坐标，原点贴地）。保证与正式渲染不漂移。</summary>
@@ -95,196 +95,474 @@ public static class BuildingModelFactory
         float cs = MapGrid.CellSize;
         float w = def.SizeX * cs * 0.9f;
         float d = def.SizeY * cs * 0.9f;
-        float height = def.Height * (1f + 0.35f * (level - 1));
         float baseY = groundY + WorldConfig.BuildingBaseLift;
-        var center = new Vector3((def.SizeX - 1) * cs / 2f, baseY + height / 2f, (def.SizeY - 1) * cs / 2f);
+        var center = new Vector3((def.SizeX - 1) * cs / 2f, baseY, (def.SizeY - 1) * cs / 2f);
         var ctx = new BuildRoleLists();
-        Compose(def, def.SizeX, def.SizeY, level, 100f, w, d, height, baseY, center, ctx, gs: null, b: null);
+        Compose(def, def.SizeX, def.SizeY, level, 100f, w, d, baseY, center, ctx, gs: null, b: null);
         return ctx;
     }
 
-    // 是否为「民居类」（grown 宅舍）：带围墙院子规则仅对这类生效
-    private static bool IsHouseLike(BuildingDef def) => def.Id is "house" or "mansion";
-
+    /// <summary>是否走宋式住宅布局引擎（grown 住宅/商铺/工坊）。官营/朝廷/农田另有专门造型。</summary>
+    private static bool UsesSongLayout(BuildingDef def) => def.Category == "grown";
     // ---- 核心造型 ----
-
     private static void Compose(BuildingDef def, int footX, int footY, int level, float condition,
-        float w, float d, float height, float baseY, Vector3 center, BuildRoleLists ctx,
+        float w, float d, float baseY, Vector3 center, BuildRoleLists ctx,
         GameState gs, BuildingInstance b)
     {
         var col = def.GodotColor;
         if (condition < 50f)
             col = col.Darkened(0.35f * (1f - condition / 50f));
-        float roofH = Mathf.Clamp(height * 0.35f, 0.5f, 2.2f);
-
-        // 地基：不透明基座从房体底面向下延伸
-        ctx.Found.X.Add(new Transform3D(Basis.FromScale(new Vector3(w, WorldConfig.FoundationDepth, d)),
-            new Vector3(center.X, baseY - WorldConfig.FoundationDepth / 2f, center.Z)));
-        ctx.Found.C.Add(FoundationColor);
 
         // 农田（NoRoof + field）：只画地块板 + 按等级加谷廪
         if (def.NoRoof && def.Category == "field")
         {
-            ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(w, Mathf.Max(0.05f, height), d)), center));
-            ctx.Body.C.Add(WithAlpha(FieldColor, 0.92f));
-            int silos = Mathf.Clamp(level, 0, 4);
-            float sx = w * 0.22f, sz = d * 0.22f;
-            float off = 0.28f;
-            for (int i = 0; i < silos; i++)
-            {
-                float ox = (i % 2 == 0 ? -1f : 1f) * off;
-                float oz = (i < 2 ? -1f : 1f) * off;
-                float sh = 0.5f;
-                ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(sx, sh, sz)),
-                    new Vector3(center.X + ox, baseY + sh / 2f, center.Z + oz)));
-                ctx.Body.C.Add(WithAlpha(new Color(0.62f, 0.50f, 0.28f), 1f));
-            }
+            ComposeField(footX, footY, level, w, d, baseY, center, ctx);
             return;
         }
 
-        // 主体：威严类（王阳府/宫殿/官署/宅邸）完全不透——避免半透颜色叠 sky 偏成糖果色；
-        // 民居小房保持 BodyAlpha 半透，可透视看到屋内居民。
-        bool solid = def.Id is "prince_mansion" or "palace" or "mansion"
-            || def.Category is "official" or "court";
+        // 公共设施（官营/朝廷）：各有专门形制，不走住宅三布局
+        if (!UsesSongLayout(def))
+        {
+            ComposePublic(def, footX, footY, level, w, d, baseY, center, ctx, col, gs, b);
+            return;
+        }
+
+        // —— 住宅/商铺/工坊：走宋式布局引擎 ——
+        ctx.Found.X.Add(new Transform3D(Basis.FromScale(new Vector3(w, WorldConfig.FoundationDepth, d)),
+            new Vector3(center.X, baseY - WorldConfig.FoundationDepth / 2f, center.Z)));
+        ctx.Found.C.Add(FoundationColor);
+
+        FindAdjacentRoadInfo(gs, b, out Vector2 roadDirV, out RoadKind roadKind, out bool hasRoad);
+        var roadDir = new Vector2I((int)roadDirV.X, (int)roadDirV.Y);
+        var roadClass = hasRoad ? SongHouseLayout.ClassOf(roadKind) : SongHouseLayout.RoadClass.None;
+        var plan = SongHouseLayout.Build(def, footX, footY, level, roadClass, roadDir);
+
+        bool solid = def.Category is "official" or "court" || def.Id is "mansion" or "prince_mansion";
         float bodyA = solid ? SolidBodyAlpha : BodyAlpha;
+        var form = SongHouseConfig.RoofFormOf(def, level);
+        var face = new Vector2(-roadDir.X, -roadDir.Y); // 朝路方向（doorFace 约定）
 
-        // 民居类（house/mansion）若占地大于基准 2×2，则房体居中、外围加围墙成院落；
-        // 其余（含 2×2 民居、所有官营）房体即占地本体。
-        bool courtyard = IsHouseLike(def) && (footX > 2 || footY > 2);
+        foreach (var u in plan.Houses)
+            EmitHouseUnit(ctx, def, footX, footY, level, u, baseY, center, col, bodyA, form, plan.OnArtery, face);
 
-        // 路向感知：找最近路格 → 朝路方向 → 据路种类决定「房靠路」还是「院靠路」。
-        //   主/辅路（Main/Side）→ 房体紧贴路侧（房-门-路），院落在房反方向（用户：主/辅路规则）；
-        //   小路（Lane）       → 院墙紧贴路侧（门-院-路），房体缩在院子深处（用户：小路规则）。
-        //   无邻路（空地）      → 默认院落在 +Z（背向默认正面 -Z），房体靠 -Z。
-        // 落点结果存在 `roadDir ∈ 方向 unit vec + 路种类 + 是否有邻路`。
-        FindAdjacentRoadInfo(gs, b, out Vector2 roadDir, out RoadKind roadKind, out bool hasRoad);
-        bool faceRoadSide = hasRoad && roadKind is RoadKind.Main or RoadKind.Side;
-        // faceRoadSide = true  → 房体靠路侧（前门开向路）：
-        //   房体起点 = 占地路方向 1/3；院落在反方向 2/3；围墙只有「背侧 + 两侧」三面，前（路侧）围墙不建。
-        // faceRoadSide = false → 院子靠路侧（前门开向路，进入院子→再到房）：
-        //   房体占反方向 60% 居中；院墙四面完整，前墙留门朝路。
+        // 院落围墙 + 院门：平面计划给出院落矩形，围墙沿其外缘（临路侧留门）
+        if (plan.Yard.HasValue)
+            EmitCourtyard(ctx, plan.Yard.Value, footX, footY, baseY, center, roadDir);
 
-        float bodyW = w, bodyD = d, bodyH = height;
-        float wallFrontGap = 0f; // 房体在占地路方向留前院深度（房侧 vs 路侧偏移）
-        if (courtyard)
+        // 铺面招幌：临街敞开的那座挂竖条
+        if (plan.OnArtery)
+            foreach (var u in plan.Houses)
+                if (u.FacesStreet)
+                    EmitBanner(ctx, u, footX, footY, baseY, center, roadDir);
+
+        // 灯笼：殿宇 4 / 官署商铺宅邸 2 / 民居 1，悬于主体屋檐下
+        int lanterns = def.Id is "palace" or "prince_mansion" ? 4
+            : (def.Category == "official" || def.Id is "shop" or "mansion") ? 2
+            : def.Id == "house" ? 1 : 0;
+        foreach (var u in plan.Houses)
         {
-            if (faceRoadSide)
+            if (u.Role is SongHouseLayout.HouseRole.MainHouse or SongHouseLayout.HouseRole.ShopFront)
             {
-                // 房子靠路：房体占沿路方向 60% 紧贴路（前墙贴路=院开门在路），剩余 40% 在背侧院子。
-                // 借用 bodyW/bodyD 的较长边为「沿路方向」，算前院深度 frontYard。
-                float longSide = Mathf.Max(w, d);
-                bodyW = longSide * 0.6f;
-                bodyD = longSide * 0.6f;
-                wallFrontGap = longSide - bodyW; // 房体让出 ~40% 给前（背）院子
-            }
-            else
-            {
-                // 院子靠路（默认）：房体居中缩到 60%，四面院墙完整
-                bodyW = Mathf.Max(w * 0.6f, MapGrid.CellSize * 1.8f);
-                bodyD = Mathf.Max(d * 0.6f, MapGrid.CellSize * 1.8f);
+                EmitLanterns(ctx, u, footX, footY, baseY, center, lanterns);
+                break;
             }
         }
+    }
 
-        float bodyCY = center.Y; // 房体中心 y 不变（高度 top 改以房体算）
-        float bodyTop = baseY + bodyH;
+    /// <summary>把平面计划里的一个房屋单元铺成视觉角色：台基/房体/屋顶/檐口/屋脊/立柱/门窗。</summary>
+    private static void EmitHouseUnit(BuildRoleLists ctx, BuildingDef def, int footX, int footY, int level,
+        SongHouseLayout.HouseUnit u, float baseY, Vector3 center, Color col, float bodyA,
+        SongHouseConfig.RoofForm form, bool onArtery, Vector2 face)
+    {
+        float cs = MapGrid.CellSize;
+        float uw = u.W * cs * 0.9f;
+        float ud = u.D * cs * 0.9f;
+        float ux = center.X + (u.Cell.X + u.W / 2f) * cs - footX * cs / 2f;
+        float uz = center.Z + (u.Cell.Y + u.D / 2f) * cs - footY * cs / 2f;
 
-        // 房体在占地内的中心位置：faceRoadSide 时把房体贴着路侧偏移，反之居中。
-        // 路方位用 (roadDir.X, roadDir.Y) 朝向「路位于...」：我们让房体相对占地中心向「路那侧」偏移。
-        float bodyCx = center.X, bodyCz = center.Z;
-        if (courtyard && faceRoadSide)
+        // 墙高：整宅基准墙高 × 单元角色比例（正房最高、厢房/倒座/挟屋递减）
+        float wallH = SongHouseConfig.WallHeightOf(footX, footY, level) * u.WallRatio;
+        float roofH = SongHouseConfig.RoofHeightOf(wallH);
+        float top = baseY + wallH;
+
+        // 影壁：不是房屋，是一道立壁，单独 emit 后返回
+        if (u.Role == SongHouseLayout.HouseRole.ScreenWall)
         {
-            float offX = (w - bodyW) / 2f * roadDir.X; // 路在 ±X 方向时贴 X
-            float offY = (d - bodyD) / 2f * roadDir.Y; // 路在 ±Y（Z）时贴 Z
-            bodyCx = center.X + offX;
-            bodyCz = center.Z + offY;
+            float sw = MathF.Min(uw, SongHouseConfig.CourtyardWallThick);
+            float sd = MathF.Max(ud, SongHouseConfig.CourtyardWallThick);
+            AddBox(ctx.Wall, new Vector3(ux, baseY + SongHouseConfig.ScreenWallH / 2f, uz),
+                new Vector3(sw, SongHouseConfig.ScreenWallH, sd), WallTopColor);
+            return;
         }
 
-        ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(bodyW, bodyH, bodyD)),
-            new Vector3(bodyCx, bodyCY, bodyCz)));
-        ctx.Body.C.Add(WithAlpha(col, bodyA));
+        // 台基：单元正下方石阶基座
+        AddBox(ctx.Step, new Vector3(ux, baseY - WorldConfig.FoundationDepth / 2f + SongHouseConfig.PlinthReveal, uz),
+            new Vector3(uw + SongHouseConfig.PlinthRing * 2f, WorldConfig.FoundationDepth + SongHouseConfig.PlinthReveal,
+                ud + SongHouseConfig.PlinthRing * 2f), StepColor);
 
-        // 台基：房体正下方的石阶基座（比房体略大一圈，从 baseY 向下延伸 FoundationDepth，
-        // 顶露 0.12m 压阑石感），让建筑脱离「贴地薄板」读起来有台基。
-        float stepRing = 0.22f;
-        AddBox(ctx.Step, new Vector3(bodyCx, baseY - WorldConfig.FoundationDepth / 2f + 0.12f, bodyCz),
-            new Vector3(bodyW + stepRing * 2f, WorldConfig.FoundationDepth + 0.12f, bodyD + stepRing * 2f), StepColor);
-
-        // 门窗：前门朝路方向（前 = -roadDir 单位向量反方向 = 路侧），窗两侧对称。
-        // 规则：faceRoadSide 房子靠路 → 房体已贴路，房门朝路；
-        //       faceRoadSide=false 院子靠路 → 房体居中，房门仍朝路（因为路在房前）。
-        // doorFace = -roadDir（统一约定朝向） → ComputeFrontFaceAt 把方向量化到具体局部轴。
-        Vector2 doorFace = -roadDir; // 朝路方向
-        AddDoorAndWindows(ctx, solid, bodyW, bodyD, baseY, bodyH, new Vector3(bodyCx, center.Y, bodyCz), doorFace);
-
-        if (courtyard)
+        // 房体：铺面/门楼临街面不砌墙（只立柱），其余砌半透墙
+        bool openFront = u.FacesStreet && onArtery
+            && u.Role is SongHouseLayout.HouseRole.ShopFront or SongHouseLayout.HouseRole.GateTower;
+        if (!openFront)
         {
-            // 院墙：路侧前墙根据规则不同处理（详见 AddCourtyardWalls 内部分支）
-            AddCourtyardWalls(ctx, w, d, bodyW, bodyD, bodyCx, bodyCz,
-                baseY, new Vector3(center.X, center.Y, center.Z), roadDir, faceRoadSide);
+            ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(uw, wallH, ud)),
+                new Vector3(ux, baseY + wallH / 2f, uz)));
+            ctx.Body.C.Add(WithAlpha(col, bodyA));
         }
 
-        if (!def.NoRoof)
+        // 屋顶：按《营造法式》制式取悬山（三棱柱）/ 庑殿·歇山（加端坡）/ 攒尖（亭榭）
+        float over = SongHouseConfig.EaveOverhangOf(form);
+        if (form == SongHouseConfig.RoofForm.Pyramid)
         {
-            // 主坡屋顶：三棱柱，脊沿长边；外扩 1.18 作出檐（基于房体尺寸，院落模式房体已缩小）
-            var roofBasis = bodyW >= bodyD
-                ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(bodyD * 1.18f, roofH, bodyW * 1.18f))
-                : Basis.FromScale(new Vector3(bodyW * 1.18f, roofH, bodyD * 1.18f));
-            ctx.Roof.X.Add(new Transform3D(roofBasis, new Vector3(bodyCx, bodyTop + roofH / 2f, bodyCz)));
+            var pyBasis = Basis.FromEuler(new Vector3(0f, Mathf.Pi / 4f, 0f))
+                * Basis.FromScale(new Vector3(ud * over, roofH, uw * over));
+            ctx.Roof.X.Add(new Transform3D(pyBasis, new Vector3(ux, top + roofH / 2f, uz)));
+            ctx.Roof.C.Add(col.Darkened(0.45f));
+        }
+        else
+        {
+            var roofBasis = uw >= ud
+                ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(ud * over, roofH, uw * over))
+                : Basis.FromScale(new Vector3(uw * over, roofH, ud * over));
+            ctx.Roof.X.Add(new Transform3D(roofBasis, new Vector3(ux, top + roofH / 2f, uz)));
             ctx.Roof.C.Add(col.Darkened(0.45f));
 
-            // 檐口：薄 Box 环四面，置于房体顶
-            float eaveD = bodyD * 1.18f, eaveW = bodyW * 1.18f, eaveT = 0.12f;
-            AddBox(ctx.Eave, new Vector3(bodyCx, bodyTop + 0.02f, bodyCz - eaveD / 2f), new Vector3(eaveW, eaveT, 0.2f), EaveColor);
-            AddBox(ctx.Eave, new Vector3(bodyCx, bodyTop + 0.02f, bodyCz + eaveD / 2f), new Vector3(eaveW, eaveT, 0.2f), EaveColor);
-            AddBox(ctx.Eave, new Vector3(bodyCx - eaveW / 2f, bodyTop + 0.02f, bodyCz), new Vector3(0.2f, eaveT, eaveD), EaveColor);
-            AddBox(ctx.Eave, new Vector3(bodyCx + eaveW / 2f, bodyTop + 0.02f, bodyCz), new Vector3(0.2f, eaveT, eaveD), EaveColor);
-
-            // 屋脊：细 Box 沿脊轴（长边）置于顶
-            float ridgLen = (bodyW >= bodyD ? bodyD : bodyW) * 1.16f;
-            var ridgScale = bodyW >= bodyD ? new Vector3(0.14f, 0.14f, ridgLen) : new Vector3(ridgLen, 0.14f, 0.14f);
-            AddBox(ctx.Ridge, new Vector3(bodyCx, bodyTop + roofH - 0.02f, bodyCz), ridgScale, RidgeColor);
-
-            // 威仪/大占地：加垂直端坡作庑殿/歇山感（与主坡叠加，取暗一档）
-            bool grand = def.Id is "palace" or "prince_mansion"
-                || (def.Category == "official" && (footX >= 4 || footY >= 4));
-            if (grand)
+            // 庑殿/歇山：加垂直端坡作四坡顶感（与主坡叠加，取暗一档）
+            if (form is SongHouseConfig.RoofForm.Hip or SongHouseConfig.RoofForm.GableHip)
             {
-                var endBasis = bodyW >= bodyD
-                    ? Basis.FromScale(new Vector3(bodyW * 1.16f, roofH * 0.96f, bodyD * 1.16f))
-                    : Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(bodyD * 1.16f, roofH * 0.96f, bodyW * 1.16f));
-                ctx.RoofEnd.X.Add(new Transform3D(endBasis, new Vector3(bodyCx, bodyTop + roofH * 0.96f / 2f, bodyCz)));
+                var endBasis = uw >= ud
+                    ? Basis.FromScale(new Vector3(uw * over * 0.96f, roofH * 0.96f, ud * over * 0.96f))
+                    : Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f))
+                        * Basis.FromScale(new Vector3(ud * over * 0.96f, roofH * 0.96f, uw * over * 0.96f));
+                ctx.RoofEnd.X.Add(new Transform3D(endBasis, new Vector3(ux, top + roofH * 0.96f / 2f, uz)));
                 ctx.RoofEnd.C.Add(col.Darkened(0.5f));
             }
         }
 
-        // 立柱：四角 + 大占地边中 + 殿宇前廊（基于房体中心 bodyCx/bodyCz）
-        AddPillars(ctx, def, footX, footY, bodyW, bodyD, baseY, bodyTop, bodyCx, bodyCz);
+        // 檐口：薄 Box 环四面，置于房体顶
+        float eaveD = ud * over, eaveW = uw * over, eaveT = SongHouseConfig.EaveThickness;
+        AddBox(ctx.Eave, new Vector3(ux, top + 0.02f, uz - eaveD / 2f), new Vector3(eaveW, eaveT, 0.2f), EaveColor);
+        AddBox(ctx.Eave, new Vector3(ux, top + 0.02f, uz + eaveD / 2f), new Vector3(eaveW, eaveT, 0.2f), EaveColor);
+        AddBox(ctx.Eave, new Vector3(ux - eaveW / 2f, top + 0.02f, uz), new Vector3(0.2f, eaveT, eaveD), EaveColor);
+        AddBox(ctx.Eave, new Vector3(ux + eaveW / 2f, top + 0.02f, uz), new Vector3(0.2f, eaveT, eaveD), EaveColor);
 
-        // 招幌：仅商铺，前脸挂竖条，朝向路的反方向（即房体朝着路的那个墙面前挂）
-        if (def.Id == "shop")
+        // 屋脊：细 Box 沿脊轴（长边）置于顶
+        float ridgLen = (uw >= ud ? ud : uw) * 1.16f;
+        var ridgScale = uw >= ud ? new Vector3(SongHouseConfig.RidgeThickness, SongHouseConfig.RidgeThickness, ridgLen)
+            : new Vector3(ridgLen, SongHouseConfig.RidgeThickness, SongHouseConfig.RidgeThickness);
+        AddBox(ctx.Ridge, new Vector3(ux, top + roofH - 0.02f, uz), ridgScale, RidgeColor);
+
+        // 立柱：四角 + 大单元边中（临街敞开时只留柱不砌墙）
+        AddPillars(ctx, def, uw, ud, baseY, top, ux, uz);
+
+        // 门窗：临街敞开的面只显门框，其余按朝路方向开门窗
+        AddDoorAndWindows(ctx, openFront, uw, ud, baseY, wallH, new Vector3(ux, baseY, uz), face);
+    }
+
+    /// <summary>院落：沿院落矩形外缘夯土墙 + 压顶瓦条，临路侧留大门。</summary>
+    private static void EmitCourtyard(BuildRoleLists ctx, Rect2I yard, int footX, int footY,
+        float baseY, Vector3 center, Vector2I roadDir)
+    {
+        float cs = MapGrid.CellSize;
+        float t = SongHouseConfig.CourtyardWallThick;
+        float wallH = SongHouseConfig.WallHeightCourtyard;
+        float capH = SongHouseConfig.CourtyardCapH, capW = SongHouseConfig.CourtyardCapW;
+        float hx = yard.Size.X * cs, hz = yard.Size.Y * cs;
+        float cx = center.X + (yard.Position.X + yard.Size.X / 2f) * cs - footX * cs / 2f;
+        float cz = center.Z + (yard.Position.Y + yard.Size.Y / 2f) * cs - footY * cs / 2f;
+        float halfW = hx / 2f, halfD = hz / 2f;
+        float yc = baseY + wallH / 2f;
+        float capY = baseY + wallH + capH / 2f;
+
+        // 两侧山墙（沿 X 厚 t，长度贯通）+ 压顶瓦条
+        AddBox(ctx.Wall, new Vector3(cx - halfW, yc, cz), new Vector3(t, wallH, hz + capW), WallColor);
+        AddBox(ctx.Wall, new Vector3(cx + halfW, yc, cz), new Vector3(t, wallH, hz + capW), WallColor);
+        AddBox(ctx.Wall, new Vector3(cx - halfW, capY, cz), new Vector3(capW, capH, hz + capW), WallTopColor);
+        AddBox(ctx.Wall, new Vector3(cx + halfW, capY, cz), new Vector3(capW, capH, hz + capW), WallTopColor);
+
+        // 临路侧那面墙留大门（门扇 + 门楣压顶）
+        bool roadOnZ = Math.Abs(roadDir.Y) > 0;
+        int roadSign = roadOnZ ? Math.Sign(roadDir.Y) : Math.Sign(roadDir.X);
+        float gap = Mathf.Min(Mathf.Min(hx, hz) * 0.28f, SongHouseConfig.MainDoorH * 1.6f);
+        if (roadOnZ)
+            AddWallSegmentWithDoor(ctx, cx, yc, capY, cz + roadSign * halfD, roadSign, true, hx, gap,
+                MainDoorColor, SongHouseConfig.MainDoorH, baseY, capW, capH, t);
+        else
+            AddWallSegmentWithDoor(ctx, cx + roadSign * halfW, yc, capY, cz, roadSign, false, hz, gap,
+                MainDoorColor, SongHouseConfig.MainDoorH, baseY, capW, capH, t);
+    }
+
+    /// <summary>铺面招幌：竖条挂在临街那一立面外缘。</summary>
+    private static void EmitBanner(BuildRoleLists ctx, SongHouseLayout.HouseUnit u,
+        int footX, int footY, float baseY, Vector3 center, Vector2I roadDir)
+    {
+        float cs = MapGrid.CellSize;
+        float wallH = SongHouseConfig.WallHeightOf(footX, footY) * u.WallRatio;
+        float ux = center.X + (u.Cell.X + u.W / 2f) * cs - footX * cs / 2f;
+        float uz = center.Z + (u.Cell.Y + u.D / 2f) * cs - footY * cs / 2f;
+        float uw = u.W * cs * 0.9f, ud = u.D * cs * 0.9f;
+        float top = baseY + wallH;
+        bool roadOnZ = Math.Abs(roadDir.Y) > 0;
+        int roadSign = roadOnZ ? Math.Sign(roadDir.Y) : Math.Sign(roadDir.X);
+        var pos = roadOnZ
+            ? new Vector3(ux, top - 0.35f, uz + roadSign * (ud / 2f + 0.04f))
+            : new Vector3(ux + roadSign * (uw / 2f + 0.04f), top - 0.35f, uz);
+        AddBox(ctx.Banner, pos, new Vector3(0.16f, 0.7f, 0.04f), BannerColor);
+    }
+
+    /// <summary>灯笼：悬于单元檐下四角（按盏数取位）。</summary>
+    private static void EmitLanterns(BuildRoleLists ctx, SongHouseLayout.HouseUnit u, int footX, int footY,
+        float baseY, Vector3 center, int n)
+    {
+        if (n <= 0)
+            return;
+        float cs = MapGrid.CellSize;
+        float wallH = SongHouseConfig.WallHeightOf(footX, footY) * u.WallRatio;
+        float ux = center.X + (u.Cell.X + u.W / 2f) * cs - footX * cs / 2f;
+        float uz = center.Z + (u.Cell.Y + u.D / 2f) * cs - footY * cs / 2f;
+        float uw = u.W * cs * 0.9f, ud = u.D * cs * 0.9f;
+        float ly = baseY + wallH - 0.18f;
+        float lx = uw / 2f * 0.7f, lz = ud / 2f * 0.7f;
+        void Add(float ox, float oz) => AddBox(ctx.Lantern, new Vector3(ux + ox, ly, uz + oz),
+            new Vector3(0.14f, 0.18f, 0.14f), LanternColor);
+        if (n >= 4) { Add(-lx, -lz); Add(lx, -lz); Add(lx, lz); Add(-lx, lz); }
+        else if (n == 2) { Add(-lx, -lz); Add(lx, lz); }
+        else Add(0f, -lz);
+    }
+
+    /// <summary>农田：地块板 + 按等级加谷廪（无屋顶）。</summary>
+    private static void ComposeField(int footX, int footY, int level, float w, float d,
+        float baseY, Vector3 center, BuildRoleLists ctx)
+    {
+        float height = SongHouseConfig.WallHeightOf(footX, footY, level);
+        ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(w, Mathf.Max(0.05f, height), d)), center));
+        ctx.Body.C.Add(WithAlpha(FieldColor, 0.92f));
+        int silos = Mathf.Clamp(level, 0, 4);
+        float sx = w * 0.22f, sz = d * 0.22f;
+        float off = 0.28f;
+        for (int i = 0; i < silos; i++)
         {
-            BannerPosition(ctx, bodyW, bodyD, bodyTop, bodyCx, bodyCz, doorFace);
+            float ox = (i % 2 == 0 ? -1f : 1f) * off;
+            float oz = (i < 2 ? -1f : 1f) * off;
+            float sh = 0.5f;
+            ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(sx, sh, sz)),
+                new Vector3(center.X + ox, baseY + sh / 2f, center.Z + oz)));
+            ctx.Body.C.Add(WithAlpha(new Color(0.62f, 0.50f, 0.28f), 1f));
+        }
+    }
+
+    /// <summary>
+    /// 公共设施（官营/朝廷）：按宋代城市公共建筑形制专门造型，不走住宅三布局。
+    /// 统一骨架（地基/台基/房体/屋顶/檐口/屋脊/立柱/门窗）+ 按 Id 追加宋式细部。
+    /// </summary>
+    private static void ComposePublic(BuildingDef def, int footX, int footY, int level,
+        float w, float d, float baseY, Vector3 center, BuildRoleLists ctx, Color col,
+        GameState gs, BuildingInstance b)
+    {
+        ctx.Found.X.Add(new Transform3D(Basis.FromScale(new Vector3(w, WorldConfig.FoundationDepth, d)),
+            new Vector3(center.X, baseY - WorldConfig.FoundationDepth / 2f, center.Z)));
+        ctx.Found.C.Add(FoundationColor);
+
+        float wallH = SongHouseConfig.WallHeightOf(footX, footY, level);
+        float roofH = SongHouseConfig.RoofHeightOf(wallH);
+        float top = baseY + wallH;
+        var form = SongHouseConfig.RoofFormOf(def, level);
+
+        // 水井/流民营不是「一座屋」：跳过通用房体骨架，只出各自细部
+        bool bareGround = def.Id is "well" or "refugee_camp";
+
+        if (!bareGround)
+        {
+            ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(w, wallH, d)),
+                new Vector3(center.X, baseY + wallH / 2f, center.Z)));
+            ctx.Body.C.Add(WithAlpha(col, SolidBodyAlpha));
         }
 
-        // 灯笼：殿宇 4 / 官署商铺宅邸 2 / 民居 1 / 其余 0，悬于檐下四角
-        int lanterns = def.Id is "palace" or "prince_mansion" ? 4
-            : (def.Category == "official" || def.Id is "shop" or "mansion") ? 2
-            : def.Id == "house" ? 1 : 0;
-        AddLanterns(ctx, bodyW, bodyD, bodyTop, lanterns, bodyCx, bodyCz);
+        AddBox(ctx.Step, new Vector3(center.X, baseY - WorldConfig.FoundationDepth / 2f + SongHouseConfig.PlinthReveal, center.Z),
+            new Vector3(w + SongHouseConfig.PlinthRing * 2f, WorldConfig.FoundationDepth + SongHouseConfig.PlinthReveal,
+                d + SongHouseConfig.PlinthRing * 2f), StepColor);
+
+        if (!bareGround)
+        {
+            float over = SongHouseConfig.EaveOverhangOf(form);
+            var roofBasis = w >= d
+                ? Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f)) * Basis.FromScale(new Vector3(d * over, roofH, w * over))
+                : Basis.FromScale(new Vector3(w * over, roofH, d * over));
+            ctx.Roof.X.Add(new Transform3D(roofBasis, new Vector3(center.X, top + roofH / 2f, center.Z)));
+            ctx.Roof.C.Add(col.Darkened(0.45f));
+            if (form is SongHouseConfig.RoofForm.Hip or SongHouseConfig.RoofForm.GableHip)
+            {
+                var endBasis = w >= d
+                    ? Basis.FromScale(new Vector3(w * over * 0.96f, roofH * 0.96f, d * over * 0.96f))
+                    : Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f))
+                        * Basis.FromScale(new Vector3(d * over * 0.96f, roofH * 0.96f, w * over * 0.96f));
+                ctx.RoofEnd.X.Add(new Transform3D(endBasis, new Vector3(center.X, top + roofH * 0.96f / 2f, center.Z)));
+                ctx.RoofEnd.C.Add(col.Darkened(0.5f));
+            }
+
+            float eaveD = d * over, eaveW = w * over, eaveT = SongHouseConfig.EaveThickness;
+            AddBox(ctx.Eave, new Vector3(center.X, top + 0.02f, center.Z - eaveD / 2f), new Vector3(eaveW, eaveT, 0.2f), EaveColor);
+            AddBox(ctx.Eave, new Vector3(center.X, top + 0.02f, center.Z + eaveD / 2f), new Vector3(eaveW, eaveT, 0.2f), EaveColor);
+            AddBox(ctx.Eave, new Vector3(center.X - eaveW / 2f, top + 0.02f, center.Z), new Vector3(0.2f, eaveT, eaveD), EaveColor);
+            AddBox(ctx.Eave, new Vector3(center.X + eaveW / 2f, top + 0.02f, center.Z), new Vector3(0.2f, eaveT, eaveD), EaveColor);
+
+            float ridgLen = (w >= d ? d : w) * 1.16f;
+            var ridgScale = w >= d ? new Vector3(SongHouseConfig.RidgeThickness, SongHouseConfig.RidgeThickness, ridgLen)
+                : new Vector3(ridgLen, SongHouseConfig.RidgeThickness, SongHouseConfig.RidgeThickness);
+            AddBox(ctx.Ridge, new Vector3(center.X, top + roofH - 0.02f, center.Z), ridgScale, RidgeColor);
+
+            AddPillars(ctx, def, w, d, baseY, top, center.X, center.Z);
+            AddDoorAndWindows(ctx, false, w, d, baseY, wallH, new Vector3(center.X, baseY, center.Z), new Vector2(0f, -1f));
+        }
+
+        EmitPublicDetail(ctx, def, footX, footY, w, d, wallH, baseY, center);
     }
 
-    /// <summary>招幌位置：商铺的招牌垂于房体朝路一侧墙面外缘（上 0.7m 高，0.16m 宽窄条）。</summary>
-    private static void BannerPosition(BuildRoleLists ctx, float bodyW, float bodyD, float bodyTop,
-        float bodyCx, float bodyCz, Vector2 doorFace)
+    /// <summary>
+    /// 公共设施的宋式细部（依据宋代城市公共建筑图文文献）：
+    ///   · 水井   → 圆形石砌井栏（外圈立石环 + 中空井口 + 井台），非房屋；
+    ///   · 客栈   → 二层楼阁（"两层楼阁式建筑，仅出现于城市的繁华街道，主要用于酒楼、食店"）；
+    ///   · 衙门/税所/修缮房 → 乌头门（"六品以上官员的宅第外部，可以建有乌头门或门屋"）；
+    ///   · 林场/采石/采矿/制盐/铸币 → 院中料堆 + 窑罩；
+    ///   · 流民营 → 低矮席棚茅顶。
+    /// </summary>
+    private static void EmitPublicDetail(BuildRoleLists ctx, BuildingDef def, int footX, int footY,
+        float w, float d, float wallH, float baseY, Vector3 center)
     {
-        // doorFace 单位向量（指向路）。招幌的 z 偏移 = doorFace 方向，-doorFace.Y × bodyD/2
-        // 假定 doorFace ∈ {(±1,0),(0,±1)} —— FindAdjacentRoadInfo 给出离散四向。
-        float hangZ = bodyCz - doorFace.Y * bodyD / 2f;
-        float hangX = bodyCx + doorFace.X * bodyW / 2f;
-        AddBox(ctx.Banner, new Vector3(hangX, bodyTop - 0.35f, hangZ),
-            new Vector3(0.16f, 0.7f, 0.04f), BannerColor);
+        switch (def.Id)
+        {
+            case "well":
+                EmitWell(ctx, baseY, center);
+                break;
+            case "inn":
+                EmitUpperFloor(ctx, def, w, d, wallH, baseY, center);
+                break;
+            case "yamen":
+            case "taxoffice":
+            case "repairhouse":
+                EmitWutouGate(ctx, w, d, wallH, baseY, center);
+                break;
+            case "lumber_camp":
+            case "quarry":
+            case "mine":
+            case "saltworks":
+            case "mint":
+                EmitWorkYard(ctx, w, d, baseY, center);
+                break;
+            case "refugee_camp":
+                EmitSheds(ctx, footX, footY, baseY, center);
+                break;
+        }
     }
 
+    /// <summary>水井：圆形石砌井栏——外圈立石垒成一环、中间空出井口；下砌井台。</summary>
+    private static void EmitWell(BuildRoleLists ctx, float baseY, Vector3 center)
+    {
+        const float outerR = 0.42f, innerR = 0.26f, ringH = 0.42f, plinthH = 0.1f;
+        const int n = 10;
+        float r = (outerR + innerR) / 2f;
+        float thick = outerR - innerR;
+        for (int i = 0; i < n; i++)
+        {
+            float a = i * Mathf.Tau / n;
+            var pos = new Vector3(center.X + Mathf.Cos(a) * r, baseY + plinthH + ringH / 2f,
+                center.Z + Mathf.Sin(a) * r);
+            var basis = Basis.FromEuler(new Vector3(0f, -a, 0f))
+                * Basis.FromScale(new Vector3(thick, ringH, thick * 0.9f));
+            ctx.Pillar.X.Add(new Transform3D(basis, pos));
+            ctx.Pillar.C.Add(StepColor);
+        }
+        // 井台：方形薄板托住井栏
+        AddBox(ctx.Step, new Vector3(center.X, baseY + plinthH / 2f, center.Z),
+            new Vector3(outerR * 2.4f, plinthH, outerR * 2.4f), StepColor);
+    }
+
+    /// <summary>二层楼阁：主屋之上再加一层退半步的楼身 + 腰檐 + 攒尖小顶（宋代酒楼形制）。</summary>
+    private static void EmitUpperFloor(BuildRoleLists ctx, BuildingDef def, float w, float d,
+        float wallH, float baseY, Vector3 center)
+    {
+        float upperH = wallH * 0.72f;
+        float uw = w * 0.82f, ud = d * 0.82f;
+        ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(uw, upperH, ud)),
+            new Vector3(center.X, baseY + wallH + upperH / 2f, center.Z)));
+        ctx.Body.C.Add(WithAlpha(def.GodotColor, SolidBodyAlpha));
+        // 楼层间腰檐
+        float eaveT = SongHouseConfig.EaveThickness;
+        float ey = baseY + wallH + 0.02f;
+        AddBox(ctx.Eave, new Vector3(center.X, ey, center.Z - ud / 2f), new Vector3(uw * 1.1f, eaveT, 0.2f), EaveColor);
+        AddBox(ctx.Eave, new Vector3(center.X, ey, center.Z + ud / 2f), new Vector3(uw * 1.1f, eaveT, 0.2f), EaveColor);
+        AddBox(ctx.Eave, new Vector3(center.X - uw * 1.1f / 2f, ey, center.Z), new Vector3(0.2f, eaveT, ud), EaveColor);
+        AddBox(ctx.Eave, new Vector3(center.X + uw * 1.1f / 2f, ey, center.Z), new Vector3(0.2f, eaveT, ud), EaveColor);
+        // 楼顶：攒尖
+        float roofH = upperH * SongHouseConfig.RoofToWall;
+        var roofBasis = Basis.FromEuler(new Vector3(0f, Mathf.Pi / 4f, 0f))
+            * Basis.FromScale(new Vector3(ud * SongHouseConfig.EaveOverhangGrand, roofH,
+                uw * SongHouseConfig.EaveOverhangGrand));
+        ctx.Roof.X.Add(new Transform3D(roofBasis,
+            new Vector3(center.X, baseY + wallH + upperH + roofH / 2f, center.Z)));
+        ctx.Roof.C.Add(def.GodotColor.Darkened(0.45f));
+    }
+
+    /// <summary>乌头门：官署正门——双柱承一短檐、上有小瓦顶，柱间无墙（《宋史·舆服志》形制）。</summary>
+    private static void EmitWutouGate(BuildRoleLists ctx, float w, float d, float wallH,
+        float baseY, Vector3 center)
+    {
+        float gateH = Mathf.Min(wallH * 0.8f, 2.2f);
+        float gateW = Mathf.Min(w * 0.5f, 3.2f);
+        float zFront = center.Z - d / 2f - 0.15f;
+        foreach (float sx in new[] { -gateW / 2f, gateW / 2f })
+        {
+            ctx.Pillar.X.Add(new Transform3D(Basis.FromScale(new Vector3(0.18f, gateH, 0.18f)),
+                new Vector3(center.X + sx, baseY + gateH / 2f, zFront)));
+            ctx.Pillar.C.Add(new Color(0.35f, 0.27f, 0.20f));
+        }
+        AddBox(ctx.Eave, new Vector3(center.X, baseY + gateH, zFront),
+            new Vector3(gateW + 0.5f, 0.16f, 0.3f), EaveColor);
+        var roofBasis = Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f))
+            * Basis.FromScale(new Vector3(0.5f, 0.42f, gateW + 0.7f));
+        ctx.Roof.X.Add(new Transform3D(roofBasis,
+            new Vector3(center.X, baseY + gateH + 0.16f + 0.21f, zFront)));
+        ctx.Roof.C.Add(new Color(0.24f, 0.19f, 0.14f));
+    }
+
+    /// <summary>工坊料场：院中堆料（柴捆/矿石/盐垛）+ 窑罩（半圆顶小间）。</summary>
+    private static void EmitWorkYard(BuildRoleLists ctx, float w, float d, float baseY, Vector3 center)
+    {
+        var rng = new System.Random(7);
+        for (int i = 0; i < 3; i++)
+        {
+            float ox = ((float)rng.NextDouble() * 2f - 1f) * w * 0.28f;
+            float oz = ((float)rng.NextDouble() * 2f - 1f) * d * 0.28f;
+            float ph = 0.35f + (float)rng.NextDouble() * 0.3f;
+            ctx.Wall.X.Add(new Transform3D(Basis.FromScale(new Vector3(0.7f, ph, 0.5f)),
+                new Vector3(center.X + ox, baseY + ph / 2f, center.Z + oz)));
+            ctx.Wall.C.Add(new Color(0.45f, 0.38f, 0.30f));
+        }
+        float kh = 0.9f;
+        ctx.Roof.X.Add(new Transform3D(Basis.FromScale(new Vector3(1.1f, kh, 1.1f)),
+            new Vector3(center.X, baseY + kh / 2f, center.Z)));
+        ctx.Roof.C.Add(new Color(0.35f, 0.30f, 0.25f));
+    }
+
+    /// <summary>流民营：低矮席棚茅顶——一排敞棚 + 陡坡茅草顶。</summary>
+    private static void EmitSheds(BuildRoleLists ctx, int footX, int footY, float baseY, Vector3 center)
+    {
+        float cs = MapGrid.CellSize;
+        int n = Mathf.Clamp(footX / 3, 2, 4);
+        float shedW = (footX * cs * 0.8f) / n;
+        for (int i = 0; i < n; i++)
+        {
+            float x = center.X - footX * cs * 0.4f + shedW * (i + 0.5f);
+            float h = 0.55f;
+            ctx.Body.X.Add(new Transform3D(Basis.FromScale(new Vector3(shedW * 0.9f, h, footY * cs * 0.45f)),
+                new Vector3(x, baseY + h / 2f, center.Z)));
+            ctx.Body.C.Add(WithAlpha(new Color(0.72f, 0.64f, 0.48f), 0.9f));
+            var basis = Basis.FromEuler(new Vector3(0f, Mathf.Pi / 2f, 0f))
+                * Basis.FromScale(new Vector3(footY * cs * 0.5f, 0.45f, shedW));
+            ctx.Roof.X.Add(new Transform3D(basis, new Vector3(x, baseY + h + 0.225f, center.Z)));
+            ctx.Roof.C.Add(new Color(0.55f, 0.47f, 0.32f));
+        }
+    }
     /// <summary>路向感知：找相邻最近路格，返回路在房体外的方向单位向量 + 路种类。
     /// 路方向约定为「路格相对房体中心的方位」：如路在房体 +X 侧 → (1,0)；在 -Z 侧 → (0,-1)。</summary>
     private static void FindAdjacentRoadInfo(GameState gs, BuildingInstance b,
@@ -305,7 +583,7 @@ public static class BuildingModelFactory
         kind = gs.Map.CellAt(r).RoadKind;
     }
 
-    private static void AddPillars(BuildRoleLists ctx, BuildingDef def, int footX, int footY,
+    private static void AddPillars(BuildRoleLists ctx, BuildingDef def,
         float w, float d, float baseY, float top, float bodyCx, float bodyCz)
     {
         float ph = top - baseY;
@@ -315,8 +593,9 @@ public static class BuildingModelFactory
         {
             (-px, -pz), (px, -pz), (px, pz), (-px, pz),
         };
-        if (footX >= 4) { pts.Add((0f, -pz)); pts.Add((0f, pz)); }
-        if (footY >= 4) { pts.Add((-px, 0f)); pts.Add((px, 0f)); }
+        // 宽面（≥4m）补边中立柱，大殿宇前廊再外凸两根
+        if (w >= 4f) { pts.Add((0f, -pz)); pts.Add((0f, pz)); }
+        if (d >= 4f) { pts.Add((-px, 0f)); pts.Add((px, 0f)); }
         if (def.Id is "palace" or "prince_mansion")
         {
             // 前廊两根外凸
@@ -353,7 +632,7 @@ public static class BuildingModelFactory
     /// <summary>门+窗：按 doorFace 单位向量定位门面。doorFace 四向 (±X,0) 或 (0,±Y)，
     /// 房门贴朝路墙面外缘，朝外 0.02m 防 z-fight；窗户对称贴两侧。
     /// doorFace.X → world X；doorFace.Y → world Z。</summary>
-    private static void AddDoorAndWindows(BuildRoleLists ctx, bool solid, float bodyW, float bodyD,
+    private static void AddDoorAndWindows(BuildRoleLists ctx, bool openFront, float bodyW, float bodyD,
         float baseY, float bodyH, Vector3 center, Vector2 doorFace)
     {
         float fx = doorFace.X, fz = doorFace.Y;
@@ -392,76 +671,6 @@ public static class BuildingModelFactory
                 : new Vector3(center.X, wy, center.Z + fz * (bodyD / 2f + 0.02f));
             AddBox(ctx.Window, winPos, new Vector3(Mathf.Min(shortSide * 0.6f, 0.9f), wh, 0.05f),
                 WithAlpha(WindowGlass, WindowAlpha));
-        }
-    }
-
-    /// <summary>院落围墙：占地 footprint 外缘一圈夯土墙。
-    /// faceRoadSide=true（房子靠路）→ 朝路前墙不建，只余 3 面 + 后墙后门（暗木 1.0m）。
-    /// faceRoadSide=false（院子靠路）→ 四面完整，前墙朝路开门（金 1.2m）；后墙后门（暗木 1.0m）。
-    /// roadDir 是路在房体外的方向单位向量（房体相对路侧 = -roadDir）。
-    /// 后墙基 Y 用 baseY（由 ctx 透传，简化：调用者负责传入）。</summary>
-    private static void AddCourtyardWalls(BuildRoleLists ctx, float w, float d,
-        float bodyW, float bodyD, float bodyCx, float bodyCz,
-        float baseY, Vector3 center, Vector2 roadDir, bool faceRoadSide)
-    {
-        // 院墙：参考宋院图比例（标注 totalH/wallH ≈ 2.2）。本场景房体 ~2m，墙高取 1.1m 占 55%；
-        // 墙厚 0.12m（参考图视觉是「细线」，之前 0.3m 太粗像砖墩）。墙顶加一条 0.06m 高 * 0.18m 宽的
-        // 深色压顶瓦条——参考图最显眼的轮廓就是这条深色边线，没有它墙就不像宋院。
-        float wallH = 1.1f;
-        float t = 0.12f;       // 墙厚（参考图 ~0.12m）
-        float capH = 0.06f;    // 压顶瓦条高
-        float capW = 0.18f;    // 压顶瓦条宽
-        float halfW = w / 2f, halfD = d / 2f;
-        float yc = baseY + wallH / 2f;
-        float capY = baseY + wallH + capH / 2f;
-
-        // 两侧山墙（沿 X 厚度 t，长度 d+capW 让压顶贯穿不漏色）
-        AddBox(ctx.Wall, new Vector3(center.X - halfW, yc, center.Z), new Vector3(t, wallH, d + capW), WallColor);
-        AddBox(ctx.Wall, new Vector3(center.X + halfW, yc, center.Z), new Vector3(t, wallH, d + capW), WallColor);
-        // 山墙压顶
-        AddBox(ctx.Wall, new Vector3(center.X - halfW, capY, center.Z), new Vector3(capW, capH, d + capW), WallTopColor);
-        AddBox(ctx.Wall, new Vector3(center.X + halfW, capY, center.Z), new Vector3(capW, capH, d + capW), WallTopColor);
-
-        bool roadSideIsZ = Mathf.Abs(roadDir.Y) > 0.5f;
-        float sideSign = roadSideIsZ ? Mathf.Sign(roadDir.Y) : Mathf.Sign(roadDir.X);
-
-        if (faceRoadSide)
-        {
-            // 房子靠路：前墙不建；后墙 = 反符号侧，留后门
-            if (roadSideIsZ)
-            {
-                float zBack = center.Z - sideSign * halfD;
-                AddWallSegmentWithDoor(ctx, center.X, yc, capY, zBack, sideSign, true, w, 1.0f,
-                    BackDoorColor, 0.85f, baseY, capW, capH, t);
-            }
-            else
-            {
-                float xBack = center.X - sideSign * halfW;
-                AddWallSegmentWithDoor(ctx, xBack, yc, capY, center.Z, sideSign, false, d, 1.0f,
-                    BackDoorColor, 0.85f, baseY, capW, capH, t);
-            }
-        }
-        else
-        {
-            // 院子靠路：四面，前朝路开门（金），后朝院子开门（暗木）
-            if (roadSideIsZ)
-            {
-                float zFront = center.Z + sideSign * halfD;
-                AddWallSegmentWithDoor(ctx, center.X, yc, capY, zFront, sideSign, true, w, 1.2f,
-                    MainDoorColor, 0.9f, baseY, capW, capH, t);
-                float zBack = center.Z - sideSign * halfD;
-                AddWallSegmentWithDoor(ctx, center.X, yc, capY, zBack, sideSign, true, w, 1.0f,
-                    BackDoorColor, 0.85f, baseY, capW, capH, t);
-            }
-            else
-            {
-                float xFront = center.X + sideSign * halfW;
-                AddWallSegmentWithDoor(ctx, xFront, yc, capY, center.Z, sideSign, false, d, 1.2f,
-                    MainDoorColor, 0.9f, baseY, capW, capH, t);
-                float xBack = center.X - sideSign * halfW;
-                AddWallSegmentWithDoor(ctx, xBack, yc, capY, center.Z, sideSign, false, d, 1.0f,
-                    BackDoorColor, 0.85f, baseY, capW, capH, t);
-            }
         }
     }
 

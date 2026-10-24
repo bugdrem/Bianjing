@@ -70,6 +70,10 @@ public partial class Hud : CanvasLayer
         EventBus.MilestoneReached += OnMilestone;
         EventBus.TechUnlocked += OnTechUnlocked;
 
+        // 批次一百零一：古风 BGM 起播（未放音频文件时静默空转）。
+        // 曲目随昼夜切换：白天市井丝竹、夜间低缓慢板——由 _Process 低频检查触发。
+        GameAudio.I?.PlayMusic("market_day");
+
         _cellInfo = new Label
         {
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -103,6 +107,7 @@ public partial class Hud : CanvasLayer
     {
         var def = Milestones.Of(level);
         ShowCellInfo($"城市晋级为【{def.Name}】！官库拨款 {def.Reward} 文，新建筑已解锁");
+        GameAudio.I?.Sfx("milestone");
     }
 
     private void OnTechUnlocked(string techId)
@@ -110,6 +115,7 @@ public partial class Hud : CanvasLayer
         var def = TechDefs.Find(techId);
         if (def != null)
             ShowCellInfo($"【{def.Name}】研成：{def.Description}");
+            GameAudio.I?.Sfx("tech");
     }
 
     public void ShowCellInfo(string text)
@@ -118,19 +124,58 @@ public partial class Hud : CanvasLayer
         _infoTimer = 6f;
     }
 
-    public void ShowCitizen(Citizen c) => _inspect.ShowCitizen(c);
+    // ---- 点选反馈：选中什么响什么（批次一百零一）----
+    // 音色按「人 / 材质」分：村民按年龄分三档，建筑与物品按材质（木/石/瓦/货/水/活物/树）分。
+    // 未配对应音效时静默，不影响点选本身。
 
-    public void ShowVisitor(ForeignVisitor v) => _inspect.ShowVisitor(v);
+    public void ShowCitizen(Citizen c)
+    {
+        _inspect.ShowCitizen(c);
+        GameAudio.I?.Sfx(c.IsChild ? "pick_child" : c.IsElder ? "pick_elder" : "pick_citizen");
+    }
 
-    public void ShowBuilding(BuildingInstance b) => _inspect.ShowBuilding(b);
+    public void ShowVisitor(ForeignVisitor v)
+    {
+        _inspect.ShowVisitor(v);
+        GameAudio.I?.Sfx("pick_citizen"); // 客商同人声档
+    }
 
-    public void ShowTree(PlantObj p) => _inspect.ShowTree(p);
+    public void ShowBuilding(BuildingInstance b)
+    {
+        _inspect.ShowBuilding(b);
+        GameAudio.I?.Sfx(MaterialCueOf(b));
+    }
 
-    public void ShowAnimal(AnimalObj a) => _inspect.ShowAnimal(a);
+    public void ShowTree(PlantObj p)
+    {
+        _inspect.ShowTree(p);
+        GameAudio.I?.Sfx("pick_tree");
+    }
 
-    public void ShowPile(ItemPileObj p) => _inspect.ShowPile(p);
+    public void ShowAnimal(AnimalObj a)
+    {
+        _inspect.ShowAnimal(a);
+        GameAudio.I?.Sfx("pick_animal");
+    }
+
+    public void ShowPile(ItemPileObj p)
+    {
+        _inspect.ShowPile(p);
+        GameAudio.I?.Sfx("pick_goods");
+    }
 
     public void CloseInspect() => _inspect.Close();
+
+    /// <summary>按建筑类别推断点选音效的材质档。</summary>
+    private static string MaterialCueOf(BuildingInstance b) => b.Def.Category switch
+    {
+        "field"  => "pick_goods",              // 农田：土/粮
+        "court"  => "pick_wood",
+        _ when b.Def.Id is "well" => "pick_water",
+        _ when b.Def.Id is "mine" or "quarry" or "saltworks" => "pick_stone",
+        _ when b.Def.Id is "mint" or "workshop" => "pick_stone",
+        _ => "pick_wood",                      // 木构为主
+    };
 
     /// <summary>侧面板互斥：目标未开则先关掉供需/政策/财政/研习其余几个再开它（各自 Toggle 保留 Refresh）；目标已开则关闭。</summary>
     private void OpenExclusive(Control panel, Action toggle)
@@ -157,10 +202,20 @@ public partial class Hud : CanvasLayer
         _supply.Visible = false;
     }
 
+    private float _bgmCheck;
+
     public override void _Process(double delta)
     {
         if (_fps.Visible)
             _fps.Text = $"FPS {Engine.GetFramesPerSecond():F0}";
+
+        // BGM 昼夜选曲：2s 一检（曲目切换本身有交叉淡变，低频检查足够）
+        _bgmCheck -= (float)delta;
+        if (_bgmCheck <= 0f)
+        {
+            _bgmCheck = 2f;
+            GameAudio.I?.PlayMusic(IsNight() ? "night_calm" : "market_day");
+        }
 
         if (_infoTimer <= 0f)
             return;
@@ -168,6 +223,10 @@ public partial class Hud : CanvasLayer
         if (_infoTimer <= 0f)
             _cellInfo.Text = "";
     }
+
+    /// <summary>是否夜间（供 BGM 选曲用）：直接用 GameClock.IsNight（光照昼夜联动同一判据，
+    /// 不另抄一套时段名匹配——时段名是「平旦/隅中/日中/晡时/黄昏/夜半」六时制，硬匹配必漏）。</summary>
+    private bool IsNight() => _clock != null && _clock.IsNight;
 
     public override void _UnhandledKeyInput(InputEvent e)
     {
