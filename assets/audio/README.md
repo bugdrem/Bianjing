@@ -1,51 +1,54 @@
-# 音频资产目录（批次一百零一）
+# 音频资产目录（批次一百零三）
 
-把 **CC0**（或已确认可商用的）音频按下面的文件名放进对应子目录即生效，**无需改任何代码**。
-未放置的文件静默不发声（不报错、不卡启动），可以只放 BGM 或只放音效。
+**当前状态：音频文件已全部入库**（18 个，约 19MB），放在本目录即生效，无需改任何代码。
+文件由 Godot 编辑器导入（`.godot/imported/` 缓存 + 源文件旁的 `.import`）。
+换素材时直接覆盖同名文件即可；`.import` 会随文件变化自动重新生成。
 
 ## 目录约定
 
 ```
 assets/audio/
-  music/     ← BGM（.ogg / .wav / .mp3）
-  sfx/       ← 交互音效
+  music/     ← BGM（.mp3）
+  sfx/       ← 交互音效（.wav）
 ```
 
-## BGM 文件名（`music/`）
+## BGM（music/）
 
-| cue | 白天/场景 | 文件 |
+| cue | 场景 | 文件 | 曲目 | 作者 |
+|---|---|---|---|---|
+| `market_day` | 白天·市井（默认起播） | `beijing_decade.mp3` | A Decade in Beijing (1:57, World) | Michael Ramir C. |
+| `night_calm` | 夜间（黄昏/夜半自动切） | `night_meditation.mp3` | Meditation (1:58, Ambient) | Arulo |
+| `morning_village` | 晨间 | `serene_morning.mp3` | Serene Moments (1:59, Chillout) | Ahjay Stelino |
+| `celebration` | 晋级/庆典 | `new_year.mp3` | Happy Chinese New Year! (2:33, World) | Michael Ramir C. |
+
+同一 cue 配多首时轮流播放，曲间 2 秒交叉淡变。
+
+## 音效（sfx/）
+
+全部取自 Mixkit **Interface / Chimes** 分类——选型标准是**柔和**（实机反馈早期的
+程序化拨弦"太刺耳"）。文件名 = cue id，改 `scripts/configs/AudioConfig.cs` 的
+`Sfx` 表即可换文件或加新 cue。
+
+| 类别 | cue → 文件 | 原曲名 |
 |---|---|---|
-| `market_day` | 白天·市井（默认起播） | `guzheng_morning.ogg` / `pipa_market.ogg` / `guzheng_street.ogg` |
-| `night_calm` | 夜间（黄昏/夜半自动切） | `guqin_night.ogg` / `erhu_dusk.ogg` |
-| `celebration` | 晋级/庆典 | `drum_celebrate.ogg` |
+| UI | `ui_click` `ui_open` `ui_close` `ui_error` `ui_build` `ui_demolish` | Select click / Opening software interface / Software interface back / Click error / Software interface start / Software interface remove |
+| 点人 | `pick_citizen` `pick_elder` `pick_child` | Page forward single chime / Page back chime / Page turn chime |
+| 点物（按材质） | `pick_wood` `pick_stone` `pick_tile` `pick_goods` `pick_water` | Interface device click / Negative tone interface tap / Cool interface click tone / Interface option select / Water |
+| 事件（无文件，走程序化兜底） | `news` `milestone` `tech` | — |
 
-同一 cue 有多首时**轮流播放**，曲间 2 秒交叉淡变。
+## 授权（Mixkit Free License）
 
-## 音效文件名（`sfx/`）
+以上全部来自 [Mixkit](https://mixkit.co/)（Envato 旗下免费素材站）：
 
-| 类别 | cue → 文件 |
-|---|---|
-| UI | `ui_click.ogg` `ui_open.ogg` `ui_close.ogg` `ui_error.ogg` `ui_build.ogg` `ui_demolish.ogg` |
-| 点人 | `pick_citizen.ogg` `pick_elder.ogg`（低一档） `pick_child.ogg`（高一档） |
-| 点物（按材质） | `pick_wood.ogg` `pick_stone.ogg` `pick_tile.ogg` `pick_goods.ogg` `pick_water.ogg` `pick_animal.ogg` `pick_tree.ogg` |
-| 事件 | `news.ogg` `milestone.ogg` `tech.ogg` |
+- **Mixkit Free License**：可自由用于商业与非商业项目，**无需署名、无需注册**；
+- 明确禁止的只有：转售素材本身、用于非法用途。用作游戏内音效/音乐完全在许可内。
+- 条款全文：https://mixkit.co/license/
 
-> 文件名可以改——改 `scripts/configs/AudioConfig.cs` 里的 `Tracks` / `Sfx` 两张表即可，
-> 也可以加新 cue（表里加一行 + 调 `GameAudio.I?.Sfx("你的cue")`）。
+> 换用其他来源时注意：**CC-BY / OGA-BY 必须署名**（写进本表），
+> **CC-BY-SA / GPL 有传染性不能用**，许可不明的站不碰。
 
-## 推荐 CC0 来源
+## 没有文件时的兜底
 
-| 来源 | 许可 | 适合 | 搜索关键词（英文更准） |
-|---|---|---|---|
-| **Pixabay Music** | 全站 CC0，免署名 | **BGM 首选**，有 "China / Chinese Music" 分类 | `chinese music` `guzheng` `gong` `oriental` |
-| **Freesound** | 逐件许可，**筛 CC0** | **音效首选** | `wood knock` `stone tap` `temple bell` `wood block` `water pour` |
-| **OpenGameArt** | CC0 / CC-BY 套装 | 成套 UI 音 | `ui click` `rpg sfx pack` |
-
-**明确不用**：CC-BY-SA / GPL（传染性许可会污染本项目）、许可不明的资源站。
-CC-BY 可以用，但必须在游戏内或说明文件中署名——用前把作者与许可写进 `THIRD_PARTY.md`。
-
-## 授权登记（用到的请补这里）
-
-```
-- <文件名> — <作者/来源> — <许可> — <URL>
-```
+`scripts/audio/ProceduralAudio.cs` 会现场合成古风音（五声音阶 + Karplus-Strong 拨弦）。
+取流顺序：**文件 → 程序化合成 → 静默**，所以删掉这些文件游戏照样能跑（只是回到兜底音）。
+设置页（ESC → 设置 → 音频）可看当前音频来源、可关兜底、可分别调三条总线的音量。

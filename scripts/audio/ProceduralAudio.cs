@@ -24,6 +24,10 @@ public static class ProceduralAudio
     /// <summary>合成采样率。32kHz 对拨弦/音效足够，且比 44.1k 省 30% 内存。</summary>
     private const int Rate = 32000;
 
+    /// <summary>激励噪声的低通截止（Hz）：拨子瞬态的带限。2.5kHz 保留"一击"的质感，
+    /// 削掉造成数字 Click 的高频边带（见 <see cref="Pluck"/> 内注释）。</summary>
+    private const float ExciteCutoff = 2500f;
+
     /// <summary>五声音阶（C 大调五声：宫 商 角 徵 羽）的频率倍率，相对主音。</summary>
     private static readonly double[] Pentatonic = { 1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0, 5.0 / 3.0 };
 
@@ -52,9 +56,19 @@ public static class ProceduralAudio
         int period = Math.Max(2, (int)(Rate / Math.Max(20f, freq)));
         var delay = new float[period];
 
-        // 激励：一段加权噪声（前段最响，模拟拨子的瞬态）
+        // 激励：一段加权噪声（前段最响，模拟拨子的瞬态）。
+        // **先过低通再入线**（一阶 2.5kHz）：全频带白噪声是"刺耳"的真正来源——
+        // 10ms 起音 ramp 只摊薄了它的幅度，摊不掉每样本的跳变（实测起音陡度 0.41，
+        // 相当于一个 5kHz 满幅成分）。带限后激励只剩 2.5kHz 以下，
+        // 既保留"拨子那一击"的木质感，又不会留下数字 Click。
+        float exciteLp = 1f - Mathf.Exp(-Mathf.Tau * ExciteCutoff / Rate);
+        float excitePrev = 0f;
         for (int i = 0; i < period; i++)
-            delay[i] = (float)(Rng.NextDouble() * 2.0 - 1.0) * (1f - (float)i / period * 0.35f);
+        {
+            float white = (float)(Rng.NextDouble() * 2.0 - 1.0) * (1f - (float)i / period * 0.35f);
+            excitePrev += (white - excitePrev) * exciteLp;
+            delay[i] = excitePrev;
+        }
 
         // 回路增益：让振幅在 decay 秒内衰减到 1/e
         float loopGain = (float)Math.Exp(-1.0 / (Math.Max(20f, freq) * Math.Max(0.05f, decay)));
@@ -190,60 +204,136 @@ public static class ProceduralAudio
         return st;
     }
 
+    // ---- 柔化（音效专用，批次一百零三）----
+
+    /// <summary>柔化低通截止频率（Hz）：3kHz、两级一阶 ≈ 12dB/oct。
+    /// 点击反馈的「身子」在 150~900Hz，这条曲线完整保留；只削 3kHz 以上的
+    /// 「刺」——正是实机反馈"太尖"的那部分能量。</summary>
+    private const float SoftenCutoff = 3000f;
+
+    /// <summary>柔化起音时长（秒）：10ms 升余弦。Karplus-Strong 的激励是 0 样本直冲的
+    /// 噪声串，不处理就是一个数字 Click 瞬态（极高频、极响）。</summary>
+    private const float SoftenAttack = 0.010f;
+
+    /// <summary>柔化后的峰值上限：0.42（原 0.68）。点击音是「提示」不是「敲击」，
+    /// 留足 headroom 给同帧可能触发的其他音效叠加。</summary>
+    private const float SoftenPeak = 0.42f;
+
+    /// <summary>
+    /// 把一段音效波形柔化：两级一阶低通 + 升余弦起音 + 峰值归一。
+    /// 顺序有讲究——**先滤波再起音再归一**：滤波要把高频削掉（起音斜坡只影响时域包络，
+    /// 不改变频谱，所以必须在归一前）；起音斜坡会略微降峰值，故放最后归一。
+    /// </summary>
+    private static void Soften(float[] buf)
+    {
+        if (buf.Length < 4)
+            return;
+
+        // ① 两级一阶低通（12dB/oct @ SoftenCutoff）
+        float k = 1f - Mathf.Exp(-Mathf.Tau * SoftenCutoff / Rate);
+        for (int pass = 0; pass < 2; pass++)
+        {
+            float prev = 0f;
+            for (int i = 0; i < buf.Length; i++)
+            {
+                prev += (buf[i] - prev) * k;
+                buf[i] = prev;
+            }
+        }
+
+        // ② 升余弦起音（smoothstep，两端导数为 0，无二次Click）
+        int n = Mathf.Clamp((int)(Rate * SoftenAttack), 1, buf.Length / 2);
+        for (int i = 0; i < n; i++)
+        {
+            float t = (float)i / n;
+            float ramp = t * t * (3f - 2f * t); // smoothstep
+            buf[i] *= ramp;
+        }
+
+        // ③ 峰值归一
+        Normalize(buf, SoftenPeak);
+    }
+
+    /// <summary>音效出口：先柔化再打包（BGM 不走这条路，见 <see cref="Music"/>）。</summary>
+    private static AudioStreamWav WrapSfx(float[] mono)
+    {
+        Soften(mono);
+        return Wrap(mono);
+    }
+
     // ---- 对外入口：按 cue 生成 ----
 
-    /// <summary>生成某个 cue 的程序化音频；未识别的 cue 返回一个通用短音。</summary>
-    public static AudioStreamWav Make(string cue) => cue switch
+    /// <summary>生成某个 cue 的程序化音频；未识别的 cue 返回一个通用短音。
+    /// music:* 走循环 Wrap（BGM 需要亮度，不柔化）；其余走 WrapSfx（柔化）。</summary>
+    public static AudioStreamWav Make(string cue)
     {
-        // —— BGM：古筝风格慢板乐句，循环 ——
+        var wave = Build(cue);
+        return cue.StartsWith("music:", StringComparison.Ordinal)
+            ? Wrap(wave, loop: true)
+            : WrapSfx(wave);
+    }
+
+    /// <summary>
+    /// 生成某个 cue 的波形（音效类）。
+    ///
+    /// **柔和化取向**（批次一百零三）：实机反馈「鼠标点击对象时的生成式声音太刺耳」。
+    /// 刺耳的来源是三件事——① 激励噪声里 4kHz 以上的高频边带；② 起音是 0 样本直冲
+    /// （数字.Click 瞬态）；③ 峰值归一化到 0.68 偏响。对应三道柔化处理（见
+    /// <see cref="Soften"/>）：两级一阶低通（3.5kHz，12dB/oct）+ 10ms 升余弦起音 +
+    /// 峰值压到 0.42。各 cue 的 brightness 也普遍从 0.85+ 降到 0.5 以下——
+    /// 拨弦的「亮」来自余音里的高频，而点击反馈要的是「温」。
+    /// </summary>
+    private static float[] Build(string cue) => cue switch
+    {
+        // —— BGM：古筝风格慢板乐句，循环（BGM 不走柔化：已验证指标良好，且音乐需要亮度）——
         "music:morning_village:0" or "music:market_day:0" or "music:market_day:1"
             or "music:market_day:2" or "music:morning_village:1" or "music:morning_village:2"
             => Music("guzheng"),
         "music:night_calm:0" or "music:night_calm:1" => Music("guqin"),
         "music:celebration:0" => Music("celebration"),
 
-        // —— UI ——
-        "sfx:ui_click" => Wrap(Pluck(660f, 0.14f, 0.9f, 9f)),
-        "sfx:ui_open" => Wrap(Mix((Pluck(523f, 0.18f, 0.9f, 9f), 0f, 1f), (Pluck(784f, 0.16f, 0.9f, 9f), 0.07f, 0.7f))),
-        "sfx:ui_close" => Wrap(Mix((Pluck(784f, 0.16f, 0.9f, 9f), 0f, 1f), (Pluck(523f, 0.18f, 0.9f, 9f), 0.07f, 0.7f))),
-        "sfx:ui_error" => Wrap(Mix((Tone(196f, 0.16f, 0.01f, 0.5f), 0f, 1f), (Tone(165f, 0.22f, 0.01f, 0.6f), 0.12f, 0.9f))),
-        "sfx:ui_build" => Wrap(Mix(
-            (Noise(0.1f, 0.35f, 0.01f, 0.3f), 0f, 1f),
-            (Pluck(392f, 0.4f, 0.6f, 5f), 0.05f, 0.8f),
-            (Pluck(587f, 0.5f, 0.7f, 5f), 0.12f, 0.7f))),
-        "sfx:ui_demolish" => Wrap(Mix(
-            (Noise(0.22f, 0.22f, 0.005f, 0.35f), 0f, 1f),
-            (Pluck(220f, 0.3f, 0.3f, 6f), 0.02f, 0.7f))),
+        // —— UI（亮度全部压到 0.5 以下：温而不尖）——
+        "sfx:ui_click" => Pluck(587f, 0.14f, 0.45f, 9f),
+        "sfx:ui_open" => Mix((Pluck(494f, 0.18f, 0.45f, 9f), 0f, 1f), (Pluck(698f, 0.16f, 0.45f, 9f), 0.07f, 0.6f)),
+        "sfx:ui_close" => Mix((Pluck(698f, 0.16f, 0.45f, 9f), 0f, 1f), (Pluck(494f, 0.18f, 0.45f, 9f), 0.07f, 0.6f)),
+        "sfx:ui_error" => Mix((Tone(196f, 0.16f, 0.015f, 0.5f), 0f, 1f), (Tone(165f, 0.22f, 0.015f, 0.6f), 0.12f, 0.85f)),
+        "sfx:ui_build" => Mix(
+            (Noise(0.1f, 0.28f, 0.02f, 0.3f), 0f, 1f),
+            (Pluck(392f, 0.4f, 0.4f, 5f), 0.05f, 0.7f),
+            (Pluck(523f, 0.5f, 0.45f, 5f), 0.12f, 0.6f)),
+        "sfx:ui_demolish" => Mix(
+            (Noise(0.22f, 0.18f, 0.01f, 0.35f), 0f, 1f),
+            (Pluck(220f, 0.3f, 0.25f, 6f), 0.02f, 0.6f)),
 
-        // —— 点人（三档音色：孩童高、老人低）——
-        "sfx:pick_child" => Wrap(Pluck(880f, 0.2f, 0.95f, 8f)),
-        "sfx:pick_citizen" => Wrap(Pluck(587f, 0.22f, 0.85f, 8f)),
-        "sfx:pick_elder" => Wrap(Pluck(392f, 0.26f, 0.6f, 7f)),
+        // —— 点人（三档音色：孩童高、老人低；全部降亮度 + 降频）——
+        "sfx:pick_child" => Pluck(660f, 0.2f, 0.5f, 8f),
+        "sfx:pick_citizen" => Pluck(523f, 0.22f, 0.42f, 8f),
+        "sfx:pick_elder" => Pluck(349f, 0.26f, 0.32f, 7f),
 
-        // —— 点物（按材质）——
-        "sfx:pick_wood" => Wrap(Mix((Noise(0.09f, 0.5f, 0.002f, 0.25f), 0f, 1f), (Pluck(330f, 0.22f, 0.7f, 7f), 0f, 0.6f))),
-        "sfx:pick_stone" => Wrap(Mix((Noise(0.07f, 0.18f, 0.001f, 0.2f), 0f, 1f), (Tone(150f, 0.12f, 0.001f, 0.4f), 0f, 0.5f))),
-        "sfx:pick_tile" => Wrap(Mix((Noise(0.06f, 0.62f, 0.001f, 0.22f), 0f, 1f), (Tone(1200f, 0.08f, 0.001f, 0.5f), 0f, 0.35f))),
-        "sfx:pick_goods" => Wrap(Noise(0.13f, 0.42f, 0.01f, 0.3f)),
-        "sfx:pick_water" => Wrap(Noise(0.34f, 0.85f, 0.02f, 0.7f)),
-        "sfx:pick_animal" => Wrap(Mix((Tone(330f, 0.1f, 0.02f, 0.5f), 0f, 1f), (Tone(247f, 0.14f, 0.02f, 0.6f), 0.09f, 0.8f))),
-        "sfx:pick_tree" => Wrap(Noise(0.2f, 0.3f, 0.01f, 0.5f)),
+        // —— 点物（按材质；噪声类压低 center + 放慢起音）——
+        "sfx:pick_wood" => Mix((Noise(0.09f, 0.35f, 0.006f, 0.25f), 0f, 1f), (Pluck(294f, 0.22f, 0.4f, 7f), 0f, 0.55f)),
+        "sfx:pick_stone" => Mix((Noise(0.07f, 0.14f, 0.004f, 0.2f), 0f, 1f), (Tone(147f, 0.12f, 0.004f, 0.4f), 0f, 0.5f)),
+        "sfx:pick_tile" => Mix((Noise(0.06f, 0.45f, 0.004f, 0.22f), 0f, 1f), (Tone(740f, 0.08f, 0.004f, 0.5f), 0f, 0.35f)),
+        "sfx:pick_goods" => Noise(0.13f, 0.3f, 0.015f, 0.3f),
+        "sfx:pick_water" => Noise(0.34f, 0.45f, 0.05f, 0.7f),
+        "sfx:pick_animal" => Mix((Tone(330f, 0.1f, 0.03f, 0.5f), 0f, 1f), (Tone(247f, 0.14f, 0.03f, 0.6f), 0.09f, 0.8f)),
+        "sfx:pick_tree" => Noise(0.2f, 0.25f, 0.015f, 0.5f),
 
         // —— 事件 ——
-        "sfx:news" => Wrap(Pluck(523f, 0.3f, 0.9f, 8f)),
-        "sfx:milestone" => Wrap(Celebration(0.9f)),
-        "sfx:tech" => Wrap(Mix(
-            (Pluck(440f, 0.3f, 0.9f, 8f), 0f, 1f),
-            (Pluck(554f, 0.3f, 0.9f, 8f), 0.1f, 0.9f),
-            (Pluck(659f, 0.45f, 0.9f, 8f), 0.2f, 0.8f))),
+        "sfx:news" => Pluck(494f, 0.3f, 0.5f, 8f),
+        "sfx:milestone" => Celebration(0.9f),
+        "sfx:tech" => Mix(
+            (Pluck(440f, 0.3f, 0.5f, 8f), 0f, 1f),
+            (Pluck(523f, 0.3f, 0.5f, 8f), 0.1f, 0.85f),
+            (Pluck(587f, 0.45f, 0.5f, 8f), 0.2f, 0.75f)),
 
-        _ => Wrap(Pluck(523f, 0.2f, 0.85f, 8f)),
+        _ => Pluck(494f, 0.2f, 0.45f, 8f),
     };
 
     // ---- BGM 乐句生成 ----
 
     /// <summary>古筝风格乐句：五声音阶随机漫步 + 长余音，循环。</summary>
-    private static AudioStreamWav Music(string style)
+    private static float[] Music(string style)
     {
         bool slow = style == "guqin";
         float length = slow ? 32f : 28f;
@@ -284,7 +374,7 @@ public static class ProceduralAudio
         FadeEdges(wave, 0.3f);
         // 稀疏拨波峰均比极高，按 RMS 归一到"听得见"的响度（目标约 −18dBFS）
         NormalizeRms(wave, 0.12f);
-        return Wrap(wave, loop: true);
+        return wave;
     }
 
     /// <summary>庆典乐句：五声音阶上行琶音 + 低音鼓点，短促不循环。</summary>

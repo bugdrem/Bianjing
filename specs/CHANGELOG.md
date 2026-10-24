@@ -2,10 +2,69 @@
 
 按批次记录每次调整的要点，为项目的**单一权威迭代记录**（合并自原 `ADJUSTMENT_LOG.md`，现后者已并入本文）。
 
-- 覆盖区间：批次二十五 → 批次一百零二（倒序，最新在前）。
+- 覆盖区间：批次二十五 → 批次一百零三（倒序，最新在前）。
 - 更早批次（<25）的详情见计划文档归档。
 - 当前代码状态以 `DESIGN.md` 为准；业务↔代码寻址见 `CODEMAP.md`；视觉/模型/UI 架构见 `VISUAL_ARCH.md`。
 - 早期开发阶段：**功能实现或重构无需考虑旧版本兼容**（枚举新值尾部追加、存档 `FormatVersion` 不符直接拒读）。
+
+---
+
+## 批次一百零三（2026-10-24）真实音频素材入库 + 点击音柔化
+
+需求：「将所使用的音频下载到项目本地，目前没有背景音乐」+「鼠标点击对象时的
+生成式声音太刺耳了，调整缓和的」。设计说明见 `specs/VISUAL_ARCH.md` §11.6~§11.7。
+
+### 一、真实音频素材入库（18 个文件，约 19MB）
+
+素材站选型：**Mixkit**（Envato 旗下）——免登录直链、Mixkit Free License 可商用免署名。
+Pixabay Music 要登录、Freesound 要 API key，均不如它直接。下载直链规律（抓包得出，
+页面没有明写）：音乐 `assets.mixkit.co/music/<id>/<id>.mp3`、
+音效 `assets.mixkit.co/active_storage/sfx/<id>/<id>.wav`；
+曲目元数据从页面 JSON-LD（`"@type":"MusicRecording"`）解析。
+
+| cue | 文件 | 曲目 |
+|---|---|---|
+| `market_day`（白天市井，默认起播） | `assets/audio/music/beijing_decade.mp3` | A Decade in Beijing（World） |
+| `night_calm`（夜间自动切） | `night_meditation.mp3` | Meditation（Ambient 慢板） |
+| `morning_village`（晨间） | `serene_morning.mp3` | Serene Moments（Chillout） |
+| `celebration`（晋级） | `new_year.mp3` | Happy Chinese New Year!（鼓乐） |
+| 14 个交互音效 | `assets/audio/sfx/*.wav` | 全部取自 Interface / Chimes 分类（选型标准：柔和） |
+
+- `AudioConfig` 两张表改为指向真实文件；未配文件的 cue（animal/tree/news/tech/milestone）
+  继续走程序化兜底（已同步调柔）。
+- 本机跑 `godot --headless --import` 生成 `.import` 与导入缓存，**开箱即响**。
+- ⚠️ **踩坑**：headless 导入会把 `Bianjing.csproj` 的 `Godot.NET.Sdk` 版本改成
+  运行编辑器的版本（4.7.1 编辑器把项目的 4.7.2 降级），并留 `.old.1` 备份——
+  跑完必须检查恢复。
+- `assets/audio/README.md` 重写：实际文件明细 + Mixkit Free License 授权说明。
+
+### 二、「太刺耳」的根因与柔化（`ProceduralAudio.cs`）
+
+两层原因，对应两组治法：
+
+| 症状 | 根因 | 治法 |
+|---|---|---|
+| 尖 | 拨弦亮度 0.85~0.95 + 1200Hz 瓦顶音 | 亮度压到 0.5 以下、高频音降档 |
+| 冲 | ① 激励噪声全频带（0 样本直冲的数字 Click）② 起音无 ramp ③ 峰值 0.68 偏响 | ① 激励先过 2.5kHz 一阶低通再入延迟线 ② 10ms 升余弦起音 ③ 峰值压到 0.42 |
+
+**核心认识：起音 ramp 只摊薄瞬态幅度，摊不掉每样本跳变——真正干掉「刺」的是给
+激励噪声本身带限。** 新增 `Soften()`（两级 3kHz 低通 + 10ms 升余弦起音 + 峰值 0.42）
+固定作用于所有音效出口；BGM 不走（音乐需要亮度，且指标已验证良好）。
+
+### 三、音频数学校验新增用例 G（柔化有效性）
+
+`tools/AudioMathCheck.cs` 7 组用例全通过。G 判据：柔化后高频能量占比 ≤0.10、
+首样本近零、包络起音 ≥5ms、峰值 ≤0.42、仍然听得见。实测高频占比
+0.26→0.03（wood）、0.59→0.08（water）、0.037→0.024（ui_click）。
+
+> 本轮校验自身判错两次：① 用「单样本最大跳变」量瞬态——把拨弦 2~2.5kHz 自然谐波的
+> 跳动误判成瞬态（改为包络起音时间）；② 用「相对降幅」阈值——信号已干净时无码可降
+> （改为绝对上限）。**阈值要分清绝对与相对；量瞬态要量包络，不要量样本。**
+
+### 四、工程杂项
+
+- `tools/README.md`（新）：三个一次性校验工程的跑法（csproj 模板已重建多次，值得写下来）；
+- 34 个脚本 `.uid` 文件随编辑器导入生成，按项目既有约定一并入库。
 
 ---
 

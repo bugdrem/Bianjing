@@ -1,4 +1,5 @@
-// 一次性音频合成校验：核对程序化兜底音「不静音 / 不削顶 / 无 NaN / 循环无缝 / 各 cue 有区分度」。
+// 一次性音频合成校验（批次一百零三）：核对程序化兜底音「不静音 / 不削顶 / 无 NaN / 循环无缝 /
+// 各 cue 有区分度 / **柔化有效（高频降、起音缓、峰值压）**」。
 // 用法同 tools/RigMathCheck.cs（独立 Exe 工程引用工程产出的 GodotSharp.dll）。验完即删。
 using System;
 using System.Collections.Generic;
@@ -30,6 +31,7 @@ static class Synth
     public static readonly double[] Pent = { 1.0, 9.0 / 8.0, 5.0 / 4.0, 3.0 / 2.0, 5.0 / 3.0 };
     public const double BaseFreq = 174.61;
     static readonly Random Rng = new(20261024);
+    public const float ExciteCutoff = 2500f;
 
     public static float[] Pluck(float freq, float seconds, float brightness, float decay = 3.2f)
     {
@@ -37,8 +39,14 @@ static class Synth
         var buf = new float[n];
         int period = Math.Max(2, (int)(Rate / Math.Max(20f, freq)));
         var delay = new float[period];
+        float exciteLp = 1f - Mathf.Exp(-Mathf.Tau * ExciteCutoff / Rate);
+        float excitePrev = 0f;
         for (int i = 0; i < period; i++)
-            delay[i] = (float)(Rng.NextDouble() * 2.0 - 1.0) * (1f - (float)i / period * 0.35f);
+        {
+            float white = (float)(Rng.NextDouble() * 2.0 - 1.0) * (1f - (float)i / period * 0.35f);
+            excitePrev += (white - excitePrev) * exciteLp;
+            delay[i] = excitePrev;
+        }
         float loopGain = (float)Math.Exp(-1.0 / (Math.Max(20f, freq) * Math.Max(0.05f, decay)));
         float lp = Mathf.Lerp(0.04f, 1.0f, Mathf.Clamp(brightness, 0f, 1f));
         for (int i = 0; i < n; i++)
@@ -148,6 +156,72 @@ static class Synth
         return data;
     }
 
+    // ---- 柔化（与生产代码 Soften 同构）----
+    public const float SoftenCutoff = 3000f;
+    public const float SoftenAttack = 0.010f;
+    public const float SoftenPeak = 0.42f;
+
+    public static void Soften(float[] buf)
+    {
+        if (buf.Length < 4) return;
+        float k = 1f - Mathf.Exp(-Mathf.Tau * SoftenCutoff / Rate);
+        for (int pass = 0; pass < 2; pass++)
+        {
+            float prev = 0f;
+            for (int i = 0; i < buf.Length; i++)
+            {
+                prev += (buf[i] - prev) * k;
+                buf[i] = prev;
+            }
+        }
+        int n = Mathf.Clamp((int)(Rate * SoftenAttack), 1, buf.Length / 2);
+        for (int i = 0; i < n; i++)
+        {
+            float t = (float)i / n;
+            float ramp = t * t * (3f - 2f * t);
+            buf[i] *= ramp;
+        }
+        Normalize(buf, SoftenPeak);
+    }
+
+    public static float[] WrapSfx(float[] mono)
+    {
+        Soften(mono);
+        return mono;
+    }
+
+    // ---- 音效生成（与生产代码 Build 同构：已柔化的参数）----
+    public static float[] Build(string cue) => cue switch
+    {
+        "sfx:ui_click" => Pluck(587f, 0.14f, 0.45f, 9f),
+        "sfx:ui_open" => Mix((Pluck(494f, 0.18f, 0.45f, 9f), 0f, 1f), (Pluck(698f, 0.16f, 0.45f, 9f), 0.07f, 0.6f)),
+        "sfx:ui_close" => Mix((Pluck(698f, 0.16f, 0.45f, 9f), 0f, 1f), (Pluck(494f, 0.18f, 0.45f, 9f), 0.07f, 0.6f)),
+        "sfx:ui_error" => Mix((Tone(196f, 0.16f, 0.015f, 0.5f), 0f, 1f), (Tone(165f, 0.22f, 0.015f, 0.6f), 0.12f, 0.85f)),
+        "sfx:ui_build" => Mix(
+            (Noise(0.1f, 0.28f, 0.02f, 0.3f), 0f, 1f),
+            (Pluck(392f, 0.4f, 0.4f, 5f), 0.05f, 0.7f),
+            (Pluck(523f, 0.5f, 0.45f, 5f), 0.12f, 0.6f)),
+        "sfx:ui_demolish" => Mix(
+            (Noise(0.22f, 0.18f, 0.01f, 0.35f), 0f, 1f),
+            (Pluck(220f, 0.3f, 0.25f, 6f), 0.02f, 0.6f)),
+        "sfx:pick_child" => Pluck(660f, 0.2f, 0.5f, 8f),
+        "sfx:pick_citizen" => Pluck(523f, 0.22f, 0.42f, 8f),
+        "sfx:pick_elder" => Pluck(349f, 0.26f, 0.32f, 7f),
+        "sfx:pick_wood" => Mix((Noise(0.09f, 0.35f, 0.006f, 0.25f), 0f, 1f), (Pluck(294f, 0.22f, 0.4f, 7f), 0f, 0.55f)),
+        "sfx:pick_stone" => Mix((Noise(0.07f, 0.14f, 0.004f, 0.2f), 0f, 1f), (Tone(147f, 0.12f, 0.004f, 0.4f), 0f, 0.5f)),
+        "sfx:pick_tile" => Mix((Noise(0.06f, 0.45f, 0.004f, 0.22f), 0f, 1f), (Tone(740f, 0.08f, 0.004f, 0.5f), 0f, 0.35f)),
+        "sfx:pick_goods" => Noise(0.13f, 0.3f, 0.015f, 0.3f),
+        "sfx:pick_water" => Noise(0.34f, 0.45f, 0.05f, 0.7f),
+        "sfx:pick_animal" => Mix((Tone(330f, 0.1f, 0.03f, 0.5f), 0f, 1f), (Tone(247f, 0.14f, 0.03f, 0.6f), 0.09f, 0.8f)),
+        "sfx:pick_tree" => Noise(0.2f, 0.25f, 0.015f, 0.5f),
+        "sfx:news" => Pluck(494f, 0.3f, 0.5f, 8f),
+        "sfx:tech" => Mix(
+            (Pluck(440f, 0.3f, 0.5f, 8f), 0f, 1f),
+            (Pluck(523f, 0.3f, 0.5f, 8f), 0.1f, 0.85f),
+            (Pluck(587f, 0.45f, 0.5f, 8f), 0.2f, 0.75f)),
+        _ => Pluck(494f, 0.2f, 0.45f, 8f),
+    };
+
     public static float[] Music(string style)
     {
         bool slow = style == "guqin";
@@ -232,6 +306,44 @@ class Program
         return ((float)Math.Sqrt(sum / w.Length), peak, nan, (float)zc / w.Length * Synth.Rate);
     }
 
+    /// <summary>高频能量占比：一阶差分能量 / 总能量。差分算子对频率 f 的增益是
+    /// 2·sin(πf/fs)，故该比值随频谱上移而增大——「刺耳」正是这个值偏高。</summary>
+    static float HfRatio(float[] w)
+    {
+        double tot = 0, dif = 0;
+        for (int i = 0; i < w.Length; i++)
+        {
+            tot += (double)w[i] * w[i];
+            if (i > 0) { float d = w[i] - w[i - 1]; dif += (double)d * d; }
+        }
+        return tot < 1e-12 ? 0f : (float)(dif / 2.0 / tot);
+    }
+
+
+    /// <summary>包络起音时间：短时 RMS 包络从 10% 爬到 90% 峰值所需秒数。
+    /// 这是「缓起」的感知量——直接量样本跳变会把拨弦的自然谐波误判成瞬态
+    /// （2~2.5kHz 谐波的单样本跳变天生就大，但人耳听到的是柔和的起音）。</summary>
+    static float AttackTime(float[] w)
+    {
+        int win = 128; // ≈4ms @32kHz
+        int frames = w.Length / win;
+        if (frames < 4) return 0f;
+        var env = new float[frames];
+        for (int f = 0; f < frames; f++)
+            env[f] = Rms(w, f * win, win);
+        float peak = 0f;
+        foreach (var e in env) peak = MathF.Max(peak, e);
+        if (peak < 1e-6f) return 0f;
+        int i10 = -1, i90 = -1;
+        for (int f = 0; f < frames; f++)
+        {
+            if (i10 < 0 && env[f] >= 0.1f * peak) i10 = f;
+            if (i90 < 0 && env[f] >= 0.9f * peak) { i90 = f; break; }
+        }
+        if (i10 < 0 || i90 < 0) return 0f;
+        return (i90 - i10) * win / (float)Synth.Rate;
+    }
+
     static void Main()
     {
         Console.WriteLine("== A：BGM 两条（古筝/古琴）不静音、不削顶、无 NaN ==");
@@ -247,61 +359,49 @@ class Program
             if (zcr < 60f || zcr > 2600f) Bad($"{style} 零穿率 {zcr:F0}Hz 不在乐音合理区间");
         }
 
-        Console.WriteLine("\n== B：循环接缝无爆音（首样本近零 + 淡变单调 + 接缝步进小）==");
+        Console.WriteLine("\n== B：循环接缝无爆音（首样本近零 + 淡变包络爬升 + 接缝步进小）==");
         foreach (var style in new[] { "guzheng", "guqin" })
         {
             var w = Synth.Music(style);
             int n = (int)(Synth.Rate * 0.3f);
-
-            // ① 首样本必须近零：否则循环每次回到开头都是一个台阶
             float head0 = MathF.Abs(w[0]);
-            // ② 包络真的在爬升：比较淡变窗首 20% 与末 20% 的 RMS。
-            //    （不能要求样本单调——拨弦信号本身在振荡，乘斜坡必然振荡；要验的是"音量包络"在涨。）
             int seg = Math.Max(1, n / 5);
             float rmsA = Rms(w, 0, seg), rmsB = Rms(w, n - seg, seg);
             bool ramping = rmsB > rmsA * 3f;
-            // ③ 接缝步进：播放从最后一个样本跳回第一个样本时的差值
             float seam = MathF.Abs(w[w.Length - 1] - w[0]);
-            // ④ 尾样本也应近零
             float tailEnd = MathF.Abs(w[w.Length - 1]);
-
             bool ok = head0 < 0.01f && tailEnd < 0.01f && seam < 0.02f && ramping;
             Console.WriteLine($"  {(ok ? "OK " : "FAIL")} {style,-7} 首样本 {head0:E2}  尾样本 {tailEnd:E2}  接缝步进 {seam:E2}  包络 {rmsA:F4}→{rmsB:F4}（爬升 {(ramping ? "是" : "否")}）");
             if (!ok) { fails++; if (head0 >= 0.01f) Bad($"{style} 首样本 {head0:E2} 非零"); if (tailEnd >= 0.01f) Bad($"{style} 尾样本 {tailEnd:E2} 非零"); if (seam >= 0.02f) Bad($"{style} 接缝步进 {seam:E2}"); if (!ramping) Bad($"{style} 淡变包络未爬升 {rmsA:F4}→{rmsB:F4}"); }
         }
 
-        Console.WriteLine("\n== C：音效各 cue 不静音、不削顶、时长合理 ==");
-        var sfx = new (string, Func<float[]>)[]
+        Console.WriteLine("\n== C：音效各 cue（柔化后）不静音、不削顶、时长合理 ==");
+        var cues = new[]
         {
-            ("ui_click",    () => Synth.Pluck(660f, 0.14f, 0.9f, 9f)),
-            ("ui_build",    () => Synth.Mix((Synth.Noise(0.1f, 0.35f, 0.01f, 0.3f), 0f, 1f), (Synth.Pluck(392f, 0.4f, 0.6f, 5f), 0.05f, 0.8f), (Synth.Pluck(587f, 0.5f, 0.7f, 5f), 0.12f, 0.7f))),
-            ("ui_error",    () => Synth.Mix((Synth.Tone(196f, 0.16f, 0.01f, 0.5f), 0f, 1f), (Synth.Tone(165f, 0.22f, 0.01f, 0.6f), 0.12f, 0.9f))),
-            ("pick_child",  () => Synth.Pluck(880f, 0.2f, 0.95f, 8f)),
-            ("pick_elder",  () => Synth.Pluck(392f, 0.26f, 0.6f, 7f)),
-            ("pick_wood",   () => Synth.Mix((Synth.Noise(0.09f, 0.5f, 0.002f, 0.25f), 0f, 1f), (Synth.Pluck(330f, 0.22f, 0.7f, 7f), 0f, 0.6f))),
-            ("pick_stone",  () => Synth.Mix((Synth.Noise(0.07f, 0.18f, 0.001f, 0.2f), 0f, 1f), (Synth.Tone(150f, 0.12f, 0.001f, 0.4f), 0f, 0.5f))),
-            ("pick_water",  () => Synth.Noise(0.34f, 0.85f, 0.02f, 0.7f)),
-            ("pick_animal", () => Synth.Mix((Synth.Tone(330f, 0.1f, 0.02f, 0.5f), 0f, 1f), (Synth.Tone(247f, 0.14f, 0.02f, 0.6f), 0.09f, 0.8f))),
-            ("milestone",   () => Synth.Celebration(0.9f)),
+            "sfx:ui_click", "sfx:ui_open", "sfx:ui_close", "sfx:ui_error", "sfx:ui_build", "sfx:ui_demolish",
+            "sfx:pick_child", "sfx:pick_citizen", "sfx:pick_elder",
+            "sfx:pick_wood", "sfx:pick_stone", "sfx:pick_tile", "sfx:pick_goods", "sfx:pick_water",
+            "sfx:pick_animal", "sfx:pick_tree", "sfx:news", "sfx:tech",
         };
         var waves = new Dictionary<string, float[]>();
-        foreach (var (name, gen) in sfx)
+        foreach (var cue in cues)
         {
-            var w = gen();
-            waves[name] = w;
+            var w = Synth.Build(cue);
+            Synth.Soften(w);   // 与生产 WrapSfx 同：柔化后再验
+            waves[cue] = w;
             var (rms, peak, nan, _) = Stats(w);
             float secs = w.Length / (float)Synth.Rate;
-            bool ok = rms >= 0.01f && peak <= 1.02f && !nan && secs > 0.05f && secs < 2.5f;
-            Console.WriteLine($"  {(ok ? "OK " : "FAIL")} {name,-12} {secs:F2}s  RMS {rms:F4}  峰值 {peak:F3}");
-            if (!ok) { fails++; if (nan) Bad($"{name} 含 NaN"); if (rms < 0.01f) Bad($"{name} 静音"); if (peak > 1.02f) Bad($"{name} 削顶"); if (secs is <= 0.05f or >= 2.5f) Bad($"{name} 时长 {secs:F2}s 不合理"); }
+            bool ok = rms >= 0.005f && peak <= 0.43f && !nan && secs > 0.05f && secs < 2.5f;
+            Console.WriteLine($"  {(ok ? "OK " : "FAIL")} {cue,-18} {secs:F2}s  RMS {rms:F4}  峰值 {peak:F3}");
+            if (!ok) { fails++; if (nan) Bad($"{cue} 含 NaN"); if (rms < 0.005f) Bad($"{cue} 柔化后过轻（RMS {rms:F4}）"); if (peak > 0.43f) Bad($"{cue} 峰值 {peak:F3} 超过柔化上限 0.42"); if (secs is <= 0.05f or >= 2.5f) Bad($"{cue} 时长 {secs:F2}s 不合理"); }
         }
 
         Console.WriteLine("\n== D：材质音效彼此有区分度（相关系数不应全接近 1）==");
         var pairs = new (string, string)[]
         {
-            ("pick_wood", "pick_stone"), ("pick_wood", "pick_water"),
-            ("pick_stone", "pick_water"), ("pick_child", "pick_elder"),
-            ("ui_click", "ui_build"),
+            ("sfx:pick_wood", "sfx:pick_stone"), ("sfx:pick_wood", "sfx:pick_water"),
+            ("sfx:pick_stone", "sfx:pick_water"), ("sfx:pick_child", "sfx:pick_elder"),
+            ("sfx:ui_click", "sfx:ui_build"),
         };
         foreach (var (a, b) in pairs)
         {
@@ -312,13 +412,12 @@ class Program
         }
 
         Console.WriteLine("\n== E：古风五声音阶自检（乐句音高应落在五声之内）==");
-        // 抽查 Music 生成的音：主音与五声各音的倍率都在预期集合里即通过（生成逻辑本身用 Pent 表）
         var allowed = new HashSet<double>(Synth.Pent.Select(p => Math.Round(p, 4)));
         for (int deg = 0; deg <= 12; deg++)
         {
             double f = Synth.BaseFreq * Synth.Pent[deg % 5] * Math.Pow(2.0, deg / 5);
             bool inScale = allowed.Contains(Math.Round(Synth.Pent[deg % 5], 4));
-            if (!inScale) { Bad($"音级 {deg} 不在五声内"); }
+            if (!inScale) Bad($"音级 {deg} 不在五声内");
             if (f < 60 || f > 2400) Bad($"音级 {deg} 频率 {f:F1}Hz 越出筝域");
         }
         Console.WriteLine($"  五声音阶 13 个音级全部落在宫商角徵羽内，频率 60~2400Hz ✓");
@@ -333,6 +432,37 @@ class Program
             bool ok = maxErr < 1f / 32767f * 1.5f && Synth.Pack16(w).Length == w.Length * 2;
             Console.WriteLine($"  {(ok ? "OK " : "FAIL")} {style,-7} 往返最大误差 {maxErr:E2}（≤ 1 LSB）");
             if (!ok) fails++;
+        }
+
+        Console.WriteLine("\n== G：柔化有效性（批次一百零三：实机反馈\"太刺耳\"）==");
+        Console.WriteLine("  判据：柔化后高频能量占比 ≤0.10 + 首样本近零 + 包络起音 ≥5ms + 峰值 ≤0.42 + 仍然听得见");
+        foreach (var cue in new[] { "sfx:ui_click", "sfx:pick_child", "sfx:pick_wood", "sfx:pick_stone", "sfx:pick_water", "sfx:pick_animal" })
+        {
+            var raw = Synth.Build(cue);
+            float hfBefore = HfRatio(raw);
+            var soft = Synth.Build(cue);
+            Synth.Soften(soft);
+            float hfAfter = HfRatio(soft);
+            float head0 = MathF.Abs(soft[0]);
+            float attack = AttackTime(soft);
+            var (rms, peak, _, _) = Stats(soft);
+
+            bool hfOk = hfAfter <= 0.10f;                     // 柔化后高频占比封顶 10%
+            bool headOk = head0 < 0.02f;                      // 起音从 0 开始（无直冲瞬态）
+            bool attackOk = attack >= 0.005f;                 // 包络起音至少 5ms（缓起）
+            bool peakOk = peak <= 0.43f;
+            bool audible = rms >= 0.005f;
+            bool ok = hfOk && headOk && attackOk && peakOk && audible;
+            Console.WriteLine($"  {(ok ? "OK " : "FAIL")} {cue,-18} 高频 {hfBefore:F3}→{hfAfter:F3}  首样本 {head0:E2}  起音 {attack * 1000f:F0}ms  峰值 {peak:F3}  RMS {rms:F4}");
+            if (!ok)
+            {
+                fails++;
+                if (!hfOk) Bad($"{cue} 柔化后高频占比 {hfAfter:F3} > 0.10");
+                if (!headOk) Bad($"{cue} 首样本 {head0:E2} 非零（起音直冲）");
+                if (!attackOk) Bad($"{cue} 包络起音 {attack * 1000f:F0}ms < 5ms（太冲）");
+                if (!peakOk) Bad($"{cue} 峰值 {peak:F3} 超限");
+                if (!audible) Bad($"{cue} 柔化后过轻");
+            }
         }
 
         Console.WriteLine(fails == 0 ? "\n全部通过 ✅" : $"\n失败 {fails} 项 ❌");

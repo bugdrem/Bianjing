@@ -49,51 +49,62 @@ public static class AudioConfig
     /// <summary>
     /// 古风 BGM 播放表：按城市氛围选曲。key = cue id，value = 文件名（相对 <see cref="MusicDir"/>）。
     /// 同一 cue 可配多首轮流放（见 <see cref="Tracks"/>）。
+    ///
+    /// **当前文件已全部入库**（批次一百零三，来自 Mixkit，Mixkit Free License 可商用免署名，
+    /// 授权登记见 assets/audio/README.md）：
+    ///   · 白天市井 = "A Decade in Beijing"（World 曲风，古风城市场景）；
+    ///   · 夜间 = "Meditation"（Ambient 慢板，低而不抢）；
+    ///   · 晨间 = "Serene Moments"（Chillout，轻快过渡）；
+    ///   · 庆典 = "Happy Chinese New Year!"（鼓乐，只在晋级时响）。
     /// </summary>
     public static readonly Dictionary<string, string[]> Tracks = new()
     {
-        // 晨间/村落：清疏笛箫
-        { "morning_village", new[] { "guzheng_morning.ogg", "xiao_dawn.ogg" } },
-        // 市井/白日：稍热闹的丝竹
-        { "market_day", new[] { "pipa_market.ogg", "guzheng_street.ogg" } },
+        // 晨间/村落：轻缓过渡
+        { "morning_village", new[] { "serene_morning.mp3" } },
+        // 市井/白日：古风城市场景
+        { "market_day", new[] { "beijing_decade.mp3" } },
         // 夜间/宵禁：低缓慢板
-        { "night_calm", new[] { "guqin_night.ogg", "erhu_dusk.ogg" } },
+        { "night_calm", new[] { "night_meditation.mp3" } },
         // 晋级/庆典：鼓钹齐鸣
-        { "celebration", new[] { "drum_celebrate.ogg" } },
+        { "celebration", new[] { "new_year.mp3" } },
     };
 
     /// <summary>
     /// 交互音效表：key = cue id，value = (文件名, 音量倍率)。
     /// 音效命名遵循「材质 × 动作」，便于按点选对象替换。
+    ///
+    /// **当前文件已全部入库**（批次一百零三，来自 Mixkit 界面音效分类，Mixkit Free License
+    /// 可商用免署名）。选型标准是**柔和**：全部取自 interface/chimes 类的轻音，
+    /// 无高频尖刺（旧的程序化拨弦亮度 0.85+ 被反馈"刺耳"，见 VISUAL_ARCH §11.6）。
+    /// 未配文件的 cue（animal/tree/news/tech/milestone）走程序化合成兜底——
+    /// 那部分已同步调柔（低通 + 慢起音 + 降峰值）。
     /// </summary>
     public static readonly Dictionary<string, (string File, float Gain)> Sfx = new()
     {
         // —— UI 交互 ——
-        { "ui_click",    ("ui_click.ogg",     1.0f) },  // 通用按钮/面板
-        { "ui_open",     ("ui_open.ogg",      1.0f) },  // 开面板
-        { "ui_close",    ("ui_close.ogg",     0.9f) },  // 关面板
-        { "ui_error",    ("ui_error.ogg",     1.0f) },  // 操作被拒（钱不够/位置非法）
-        { "ui_build",    ("ui_build.ogg",     1.0f) },  // 建筑落成
-        { "ui_demolish", ("ui_demolish.ogg",  1.0f) },  // 拆除
+        { "ui_click",    ("ui_click.wav",     0.9f) },  // 通用按钮/面板（Select click）
+        { "ui_open",     ("ui_open.wav",      0.9f) },  // 开面板（Opening software interface）
+        { "ui_close",    ("ui_close.wav",     0.8f) },  // 关面板（Software interface back）
+        { "ui_error",    ("ui_error.wav",     0.9f) },  // 操作被拒（Click error）
+        { "ui_build",    ("ui_build.wav",     0.9f) },  // 建筑落成（Software interface start）
+        { "ui_demolish", ("ui_demolish.wav",  0.9f) },  // 拆除（Software interface remove）
 
-        // —— 点选人物 ——
-        { "pick_citizen",  ("pick_citizen.ogg",  1.0f) }, // 选中村民
-        { "pick_elder",    ("pick_elder.ogg",    0.9f) }, // 选中老人（音色低一档）
-        { "pick_child",    ("pick_child.ogg",    1.1f) }, // 选中孩童（音色高一档）
+        // —— 点选人物（三档音色：孩童高、老人低）——
+        { "pick_citizen",  ("pick_citizen.wav",  0.9f) }, // 选中村民（Page forward single chime）
+        { "pick_elder",    ("pick_elder.wav",    0.9f) }, // 选中老人（Page back chime，低一档）
+        { "pick_child",    ("pick_child.wav",    0.9f) }, // 选中孩童（Page turn chime，高一档）
 
         // —— 点选建筑/物品（按材质）——
-        { "pick_wood",     ("pick_wood.ogg",     1.0f) }, // 木构建筑/木器
-        { "pick_stone",    ("pick_stone.ogg",    1.0f) }, // 石作（台基/井栏/采石场）
-        { "pick_tile",     ("pick_tile.ogg",     0.9f) }, // 瓦顶
-        { "pick_goods",    ("pick_goods.ogg",    1.0f) }, // 货堆
-        { "pick_water",    ("pick_water.ogg",    0.9f) }, // 水井/河岸
-        { "pick_animal",   ("pick_animal.ogg",   1.0f) }, // 动物
-        { "pick_tree",     ("pick_tree.ogg",     0.9f) }, // 树木
+        { "pick_wood",     ("pick_wood.wav",     0.9f) }, // 木构建筑/木器（Interface device click）
+        { "pick_stone",    ("pick_stone.wav",    0.9f) }, // 石作（Negative tone interface tap）
+        { "pick_tile",     ("pick_tile.wav",     0.9f) }, // 瓦顶（Cool interface click tone）
+        { "pick_goods",    ("pick_goods.wav",    0.9f) }, // 货堆（Interface option select）
+        { "pick_water",    ("pick_water.wav",    0.9f) }, // 水井/河岸（Water）
 
-        // —— 世界事件 ——
-        { "news",          ("news.ogg",          1.0f) }, // 公告栏播报
-        { "milestone",     ("milestone.ogg",     1.2f) }, // 城市晋级
-        { "tech",          ("tech.ogg",          1.1f) }, // 科技研成
+        // —— 世界事件（无文件，走程序化合成兜底，已调柔）——
+        { "news",          ("",                  1.0f) }, // 公告栏播报
+        { "milestone",     ("",                  1.1f) }, // 城市晋级
+        { "tech",          ("",                  1.0f) }, // 科技研成
     };
 
     /// <summary>取 BGM 某一 cue 的文件名列表；未配置返回空数组。</summary>
